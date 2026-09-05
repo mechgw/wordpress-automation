@@ -67,7 +67,11 @@ npm test
 
 - date parsing and shifting, hostname/domain matching, GA4 row extraction, WordPress response helpers;
 - `getWpConfig_` / `wpBridgePath_` validation (missing or malformed Script Properties), `wpFetch_` request shape and response parsing;
-- `getGa4Config_` defaults, `Version.gs` presence/absence.
+- `getGa4Config_` defaults, `Version.gs` presence/absence;
+- `testGA4` end to end against stubbed Admin/Data API responses (property auto-pick by stream domain, ambiguous and empty cases, what lands in the config sheet);
+- the WordPress bridge flows: `testRankMathBridge`, `getPageRawById_`, `writeRankMathField_`, `getPageLayout_`, `copyPageLayout_`, including the result rows appended to *WP RESULTS* and every named failure path.
+
+The sheet stub is a real cell grid: fixtures start at row 1, `gas.$cell('Konfiguracja GA4', 'B9')` reads a cell, `gas.$sheet(name)` the whole grid, `gas.$alerts` the UI alerts, and `fetchRouter([[urlSubstring, response], ...])` routes stubbed HTTP calls.
 
 Everything that talks to Sheets, GA4 or WordPress for real stays covered by the sheet's *Sprawdź połączenie* / *Test …* menu items and the drift check. Two VM gotchas when writing tests: create `Date` objects with `gas.$Date`, and compare objects returned from the sources through `plain()` (different realm, different prototypes).
 

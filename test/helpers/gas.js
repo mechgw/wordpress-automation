@@ -10,6 +10,12 @@
  * Version.gs see each other. Top-level `function` declarations become
  * properties of the returned context; top-level `const`s are reachable via
  * `ctx.$get('NAME')`.
+ *
+ * Observability for assertions:
+ *   ctx.$fetchCalls        every UrlFetchApp.fetch(url, params)
+ *   ctx.$alerts            every SpreadsheetApp.getUi().alert(...) (args array)
+ *   ctx.$sheet(name)       the live cell grid of a stubbed sheet (row 1 first)
+ *   ctx.$cell(name, 'B9')  a single cell value
  */
 
 const fs = require('fs');
@@ -36,47 +42,118 @@ function formatDate(date, _tz, pattern) {
   return pattern.replace(/yyyy|MM|dd|HH|mm|ss/g, m => parts[m]);
 }
 
-/** Builds a SpreadsheetApp stub from { sheetName: rows } (rows = 2D array). */
-function makeSpreadsheet(sheets = {}) {
+function colIndex(letters) {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n; // 1-based
+}
+
+/** Parses "B9", "A2:B11", "E1:H120" into { row, col, rows, cols } (1-based). */
+function parseA1(a1) {
+  const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i.exec(String(a1).trim());
+  if (!m) throw new Error(`Sheet stub: unsupported A1 range "${a1}"`);
+  const row = Number(m[2]);
+  const col = colIndex(m[1]);
+  const row2 = m[4] ? Number(m[4]) : row;
+  const col2 = m[3] ? colIndex(m[3]) : col;
+  return { row, col, rows: row2 - row + 1, cols: col2 - col + 1 };
+}
+
+/**
+ * A sheet is a 2D grid with 1-based semantics (grid[r-1][c-1]); the fixture
+ * rows start at row 1. Cells outside the grid read as ''.
+ */
+function makeSheet(name, initialRows) {
+  const grid = initialRows.map(r => r.slice());
+  const ensure = (row, col) => {
+    while (grid.length < row) grid.push([]);
+    const line = grid[row - 1];
+    while (line.length < col) line.push('');
+  };
+  const rangeOf = (row, col, rows, cols) => ({
+    getValues: () => {
+      const out = [];
+      for (let r = row; r < row + rows; r++) {
+        const line = [];
+        for (let c = col; c < col + cols; c++) line.push((grid[r - 1] || [])[c - 1] ?? '');
+        out.push(line);
+      }
+      return out;
+    },
+    getValue: () => (grid[row - 1] || [])[col - 1] ?? '',
+    setValue(value) {
+      ensure(row, col);
+      grid[row - 1][col - 1] = value;
+      return this;
+    },
+    setValues(values) {
+      values.forEach((line, i) => line.forEach((v, j) => {
+        ensure(row + i, col + j);
+        grid[row + i - 1][col + j - 1] = v;
+      }));
+      return this;
+    },
+    clearContent() {
+      for (let r = row; r < row + rows; r++) {
+        for (let c = col; c < col + cols; c++) {
+          if (grid[r - 1] && grid[r - 1].length >= c) grid[r - 1][c - 1] = '';
+        }
+      }
+      return this;
+    },
+    setNumberFormat() { return this; },
+    setFontWeight() { return this; },
+    setBackground() { return this; },
+    setFontColor() { return this; }
+  });
+  return {
+    getName: () => name,
+    getRange: (...args) => {
+      if (typeof args[0] === 'string') {
+        const { row, col, rows, cols } = parseA1(args[0]);
+        return rangeOf(row, col, rows, cols);
+      }
+      return rangeOf(args[0], args[1], args[2] ?? 1, args[3] ?? 1);
+    },
+    getLastRow: () => grid.length,
+    getMaxRows: () => Math.max(grid.length, 1000),
+    insertRowsAfter() { return this; },
+    appendRow(row) { grid.push(row.slice()); return this; },
+    $grid: grid
+  };
+}
+
+/** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
+function makeSpreadsheet(sheets = {}, alerts = []) {
+  const instances = new Map();
   const sheetFor = name => {
     if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
-    const rows = sheets[name];
-    return {
-      getName: () => name,
-      getRange: () => ({
-        getValues: () => rows,
-        getValue: () => (rows[0] || [])[0],
-        setValue() { return this; },
-        setValues() { return this; },
-        clearContent() { return this; }
-      }),
-      getLastRow: () => rows.length
-    };
+    if (!instances.has(name)) instances.set(name, makeSheet(name, sheets[name]));
+    return instances.get(name);
+  };
+  const ui = {
+    alert: (...args) => { alerts.push(args); },
+    createMenu: () => {
+      const menu = { addItem: () => menu, addSeparator: () => menu, addSubMenu: () => menu, addToUi() {} };
+      return menu;
+    }
   };
   return {
     getActive: () => ({ getSheetByName: sheetFor }),
-    getUi: () => ({
-      alert() {},
-      createMenu: () => {
-        const menu = {
-          addItem: () => menu,
-          addSeparator: () => menu,
-          addSubMenu: () => menu,
-          addToUi() {}
-        };
-        return menu;
-      }
-    })
+    getUi: () => ui,
+    $sheet: name => (sheetFor(name) || {}).$grid
   };
 }
 
 function createStubs(opts) {
   const properties = Object.assign({}, opts.properties || {});
   const fetchCalls = [];
+  const alerts = [];
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
+  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts);
 
   return {
-    SpreadsheetApp: opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}),
+    SpreadsheetApp: spreadsheet,
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: key => (Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null),
@@ -87,9 +164,10 @@ function createStubs(opts) {
       fetch: (url, params) => {
         fetchCalls.push({ url, params });
         const r = fetchImpl(url, params);
+        if (!r) throw new Error(`fetch stub returned nothing for ${url}`);
         return {
           getResponseCode: () => r.code,
-          getContentText: () => r.text,
+          getContentText: () => (typeof r.text === 'string' ? r.text : JSON.stringify(r.json ?? {})),
           getAllHeaders: () => r.headers || {}
         };
       }
@@ -110,15 +188,22 @@ function createStubs(opts) {
     Logger: { log() {} },
     console,
     $fetchCalls: fetchCalls,
-    $properties: properties
+    $alerts: alerts,
+    $properties: properties,
+    $sheet: name => spreadsheet.$sheet(name),
+    $cell: (name, a1) => {
+      const { row, col } = parseA1(a1);
+      const grid = spreadsheet.$sheet(name) || [];
+      return (grid[row - 1] || [])[col - 1] ?? '';
+    }
   };
 }
 
 /**
  * @param {object} [opts]
  * @param {Record<string,string>} [opts.properties]  Script Properties
- * @param {Record<string,any[][]>} [opts.sheets]      sheet name → rows
- * @param {(url, params) => {code, text, headers?}} [opts.fetch]
+ * @param {Record<string,any[][]>} [opts.sheets]      sheet name → rows (row 1 first)
+ * @param {(url, params) => {code, text?, json?, headers?}} [opts.fetch]
  * @param {string[]} [opts.skip]                      source files to omit
  * @param {Record<string,string>} [opts.override]     source file → replacement code
  */
@@ -147,4 +232,14 @@ function plain(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-module.exports = { loadProject, makeSpreadsheet, plain };
+/** Routes fetch calls by URL substring: [[needle, response | fn(url, params)], ...]. */
+function fetchRouter(routes) {
+  return (url, params) => {
+    for (const [needle, response] of routes) {
+      if (url.includes(needle)) return typeof response === 'function' ? response(url, params) : response;
+    }
+    throw new Error(`fetch stub: no route for ${url}`);
+  };
+}
+
+module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter };
