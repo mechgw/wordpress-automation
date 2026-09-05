@@ -286,9 +286,9 @@ function importGA4OstatniZakres() {
   }));
 }
 
-/** Import jednego dnia; przeznaczony do triggera. */
-function importGA4Dzienny() {
-  return recordImportRun_('GA4', true, () => withScriptLock_('import GA4', () => {
+/** Import jednego dnia: handler codziennego triggera i pozycja menu (wtedy liczony jako ręczny). */
+function importGA4Dzienny(e) {
+  return recordImportRun_('GA4', isTriggerRun_(e), () => withScriptLock_('import GA4', () => {
     const cfg = requireGa4Config_();
     const day = addDays_(todayGa4_(), -cfg.dailyLagDays);
     return importGa4Range_(day, day, cfg);

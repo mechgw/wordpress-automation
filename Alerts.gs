@@ -22,12 +22,38 @@
 const ALERT_GUARD_HANDLER = 'sprawdzAktualnoscImportow';
 const ALERT_GUARD_HOUR = 8;
 
+/** Ostatni powód niewysłania e-maila w tym uruchomieniu (dla okna strażnika). */
+const ALERT_STATE_ = { lastError: '' };
+
+/** Adres lub lista adresów rozdzielona przecinkami, każdy w postaci nazwa@domena.tld. */
+function isValidEmailList_(value) {
+  const parts = String(value || '').split(',').map(p => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every(p => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(p));
+}
+
+/**
+ * Konfiguracja alertów. `raw` to surowa wartość ALERT_EMAIL, `valid` mówi, czy
+ * wygląda jak adres; `email` jest puste, gdy adresu brak lub jest nieprawidłowy,
+ * więc wysyłka nigdy nie jest próbowana na wartość typu "TRUE".
+ */
 function alertConfig_() {
   const props = PropertiesService.getScriptProperties();
+  const raw = String(props.getProperty('ALERT_EMAIL') || '').trim();
+  const valid = raw !== '' && isValidEmailList_(raw);
   return {
-    email: String(props.getProperty('ALERT_EMAIL') || '').trim(),
+    raw,
+    valid,
+    email: valid ? raw : '',
     recovery: String(props.getProperty('ALERT_RECOVERY') || 'TRUE').toUpperCase() !== 'FALSE'
   };
+}
+
+/** Tekst o adresacie do okien dialogowych: adres, brak albo jawnie błędna wartość. */
+function alertRecipientText_() {
+  const cfg = alertConfig_();
+  if (!cfg.raw) return 'wyłączone (brak ALERT_EMAIL)';
+  if (!cfg.valid) return 'NIEPRAWIDŁOWY ADRES („' + cfg.raw + '”) – popraw Script Property ALERT_EMAIL';
+  return cfg.email;
 }
 
 function spreadsheetUrl_() {
@@ -42,13 +68,23 @@ function spreadsheetUrl_() {
  */
 function sendImportAlert_(subject, lines) {
   const cfg = alertConfig_();
-  if (!cfg.email) return false;
+  if (!cfg.raw) {
+    ALERT_STATE_.lastError = 'brak Script Property ALERT_EMAIL';
+    return false;
+  }
+  if (!cfg.valid) {
+    ALERT_STATE_.lastError = 'nieprawidłowy adres w ALERT_EMAIL („' + cfg.raw + '”)';
+    Logger.log('Alert e-mail nie został wysłany (' + subject + '): ' + ALERT_STATE_.lastError);
+    return false;
+  }
   const body = lines.concat(['', 'Arkusz: ' + spreadsheetUrl_(), 'Wersja skryptu: ' + versionLabel_()]).join('\n');
   try {
     MailApp.sendEmail(cfg.email, '[wordpress-automation] ' + subject, body);
+    ALERT_STATE_.lastError = '';
     return true;
   } catch (e) {
-    Logger.log('Alert e-mail nie został wysłany (' + subject + '): ' + (e && e.message ? e.message : e));
+    ALERT_STATE_.lastError = String(e && e.message ? e.message : e);
+    Logger.log('Alert e-mail nie został wysłany (' + subject + '): ' + ALERT_STATE_.lastError);
     return false;
   }
 }
@@ -129,12 +165,16 @@ function updateImportIncident_(source, record) {
 /**
  * Codzienny strażnik: dla każdego źródła sprawdza NIEAKTUALNE; otwiera incydent
  * 'stale' i wysyła jeden zbiorczy e-mail; zamyka incydent 'stale', gdy dane są
- * znowu aktualne (z opcjonalnym mailem). Zwraca { opened: [], closed: [] }.
+ * znowu aktualne (z opcjonalnym mailem). Handler triggera; z menu używaj
+ * sprawdzAktualnoscImportowZMenu. Zwraca { opened, closed, mail } – `mail` to
+ * czytelny opis, czy i jaki e-mail wyszedł (albo dlaczego nie).
  */
 function sprawdzAktualnoscImportow() {
   const now = new Date();
   const opened = [];
   const closed = [];
+  const mail = [];
+  const describeSend = (subject, sent) => mail.push(sent ? 'wysłany („' + subject + '”)' : 'nie wysłano („' + subject + '”): ' + ALERT_STATE_.lastError);
   const toNotify = []; // incydenty 'stale' bez wysłanego e-maila: nowe i te z dni bez ALERT_EMAIL
 
   Object.keys(importSources_()).forEach(source => {
@@ -158,10 +198,12 @@ function sprawdzAktualnoscImportow() {
   });
 
   if (toNotify.length) {
-    const sent = sendImportAlert_('NIEAKTUALNE dane: ' + toNotify.length + ' źródło(a)', [
+    const subject = 'NIEAKTUALNE dane: ' + toNotify.length + ' źródło(a)';
+    const sent = sendImportAlert_(subject, [
       'Codzienny strażnik wykrył nieaktualne dane (starsze niż ' + IMPORT_STALE_AFTER_HOURS + ' h):',
       ''
     ].concat(toNotify.map(n => '- ' + n.line)).concat(['', 'Kolejne dni nie będą zgłaszane, dopóki import nie wróci do normy.']));
+    describeSend(subject, sent);
     if (sent) {
       toNotify.forEach(n => {
         n.record.incident = Object.assign({}, n.record.incident, { notifiedAt: now.toISOString() });
@@ -170,10 +212,28 @@ function sprawdzAktualnoscImportow() {
     }
   }
   if (closed.length && alertConfig_().recovery) {
-    sendImportAlert_('Dane znowu aktualne: ' + closed.length + ' źródło(a)', closed.map(c => '- ' + c));
+    const subject = 'Dane znowu aktualne: ' + closed.length + ' źródło(a)';
+    describeSend(subject, sendImportAlert_(subject, closed.map(c => '- ' + c)));
   }
 
-  return { opened: opened.length, closed: closed.length };
+  return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
+}
+
+/** Strażnik uruchomiony z menu: to samo co trigger, plus okno z wynikiem. */
+function sprawdzAktualnoscImportowZMenu() {
+  const out = sprawdzAktualnoscImportow();
+  const now = new Date();
+  const lines = ['Sprawdzono aktualność importów:'];
+  Object.keys(importSources_()).forEach(source => {
+    lines.push('- ' + importSource_(source).label + ': ' + importStatusText_(source, now));
+  });
+  lines.push('');
+  lines.push('Otwarte incydenty (nieaktualne dane): ' + out.opened);
+  lines.push('Zamknięte incydenty (dane znowu aktualne): ' + out.closed);
+  lines.push('E-mail: ' + out.mail);
+  lines.push('Adresat: ' + alertRecipientText_());
+  SpreadsheetApp.getUi().alert(lines.join('\n'));
+  return out;
 }
 
 /** Instaluje codzienny trigger strażnika (ok. 08:00, po imporcie GSC i GA4). */
@@ -191,7 +251,9 @@ function ustawCodzienneAlerty() {
   const cfg = alertConfig_();
   SpreadsheetApp.getUi().alert(
     'Codzienny strażnik aktualności został ustawiony (ok. ' + ALERT_GUARD_HOUR + ':00).\n' +
-    (cfg.email ? 'Alerty trafią na: ' + cfg.email : 'UWAGA: brak Script Property ALERT_EMAIL, alerty nie będą wysyłane.')
+    (cfg.valid ? 'Alerty trafią na: ' + cfg.email
+      : cfg.raw ? 'UWAGA: ALERT_EMAIL ma nieprawidłową wartość („' + cfg.raw + '”), alerty nie będą wysyłane.'
+        : 'UWAGA: brak Script Property ALERT_EMAIL, alerty nie będą wysyłane.')
   );
 }
 

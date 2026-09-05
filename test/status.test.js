@@ -148,7 +148,7 @@ describe('Status.gs cells, menu and dialog', () => {
     gas.onOpen();
     const dane = gas.$menus.find(m => m.title === 'Dane');
     assert.ok(dane, 'Dane menu present');
-    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells', 'sprawdzAktualnoscImportow', 'ustawCodzienneAlerty']);
+    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells', 'sprawdzAktualnoscImportowZMenu', 'ustawCodzienneAlerty']);
     assert.deepEqual(gas.$menus.map(m => m.title), ['SEO / GSC', 'GA4 / Ads', 'WordPress', 'Dane', 'dev']);
   });
 
@@ -211,7 +211,7 @@ describe('Kod.gs GSC import end to end', () => {
     const replaced = [day, 'stale', '/y', 'pol', 'MOBILE', 9, 9, 0.9, 9, ''];
     const gas = project([keep, replaced]);
 
-    const out = gas.importDzienny();
+    const out = gas.importDzienny({ triggerUid: 'daily' }); // jak z triggera czasowego
 
     const payload = JSON.parse(gas.$fetchCalls[0].params.payload);
     assert.match(gas.$fetchCalls[0].url, /webmasters\/v3\/sites\/https%3A%2F%2Fwww\.example\.pl%2F\/searchAnalytics\/query$/);
