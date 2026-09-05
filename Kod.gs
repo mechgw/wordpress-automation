@@ -100,9 +100,9 @@ function importOstatniZakres() {
   }));
 }
 
-/** Import jednego dnia; uruchamiany przez codzienny trigger. */
-function importDzienny() {
-  return recordImportRun_('GSC', true, () => withScriptLock_('import GSC', () => {
+/** Import jednego dnia: handler codziennego triggera i pozycja menu (wtedy liczony jako ręczny). */
+function importDzienny(e) {
+  return recordImportRun_('GSC', isTriggerRun_(e), () => withScriptLock_('import GSC', () => {
     const cfg = getConfig_();
 
     const targetDate = przesunDate_(
