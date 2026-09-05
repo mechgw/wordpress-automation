@@ -41,6 +41,10 @@ The deploy and drift-check workflows need two repository secrets (Settings → S
 
 Rotate `CLASPRC_JSON` by running `clasp login` again and updating the secret.
 
+The approval gate is a repository setting, not something the workflow creates. Settings → Environments → `production` must have **Required reviewers** enabled and deployment branches limited to `main` and `v*` tags. Without that, the deploy workflow would push as soon as it is triggered.
+
+The Google account behind `CLASPRC_JSON` must also have the Apps Script API switched on at <https://script.google.com/home/usersettings>, otherwise `clasp push` fails with "User has not enabled the Apps Script API".
+
 ## Local development
 
 ```bash
@@ -81,6 +85,17 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 - **validate** — manifest is valid JSON, no duplicated `.gs.gs` files, ESLint passes on all `.gs` sources.
 - **secret-scan** — Gitleaks scans the full history for committed secrets.
 - **pr-title** — title follows the Conventional Commits format above.
+- **review-ack** — green only when (1) Copilot code review is not in progress and (2) the bot comments were acknowledged with a `/reviewed` comment.
+
+### Acknowledging bot reviews
+
+1. Wait until Copilot has finished. While it is running it is listed as a requested reviewer and the check stays red. A bot that errors out or hits its usage limit (Codex does this regularly) does not block anything.
+2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
+3. Post a PR comment that starts with `/reviewed`, followed by a short note on what was accepted and what was rejected. It has to be newer than the last commit and the last bot comment, so a new push or a new bot review means a new `/reviewed`.
+
+```bash
+gh pr comment <number> --body "/reviewed accepted the permissions fix, skipped the wording nit"
+```
 
 Dependabot opens weekly PRs for GitHub Actions and npm dev dependencies.
 

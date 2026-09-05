@@ -86,7 +86,9 @@ jobs:
 
       - name: Create immutable version
         if: env.CREATE_VERSION == 'true'
-        run: clasp version "${DEPLOY_REF} (${GITHUB_SHA::7}) deployed from GitHub by ${GITHUB_ACTOR}"
+        # Use the checked-out commit, not GITHUB_SHA: a manual run dispatched
+        # from another ref would otherwise label the version with the wrong SHA.
+        run: clasp version "${DEPLOY_REF} ($(git rev-parse --short HEAD)) deployed from GitHub by ${GITHUB_ACTOR}"
 
       - name: Remove credentials
         if: always()

@@ -20,7 +20,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Keep in sync with the categories in .github/release-drafter.yml.
+          # Superset of the categories in .github/release-drafter.yml:
+          # perf / build / revert are accepted here and land in Release
+          # Drafter's "Other Changes" (patch bump).
           types: |
             feat
             new
