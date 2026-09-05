@@ -157,7 +157,7 @@ function findLegacyGlobalFooterSnippet_(snippets) {
   const candidates = snippets.filter(snippet => {
     const code = String(snippet.code || '');
     const tags = Array.isArray(snippet.tags) ? snippet.tags : [];
-    return Boolean(snippet.active) &&
+    return snippet.active &&
       !tags.includes(GLOBAL_FOOTER_LOADER_TAG) &&
       code.includes('generate_before_footer') &&
       code.includes('cc-site-footer');
@@ -201,7 +201,7 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "add_action( 'wp_head', function () {",
     "\tif ( ! wpauto_global_footer_source_valid() ) { return; }",
     "\t$content = wpauto_global_footer_source_content();",
-    "\tif ( preg_match( '/<style\\b[^>]*id=[\"\\\']cc-global-footer-styles[\"\\\'][^>]*>.*?<\\/style>/is', $content, $match ) ) {",
+    "\tif ( preg_match( '/<style\\b[^>]*id=\"cc-global-footer-styles\"[^>]*>.*?<\\/style>/is', $content, $match ) ) {",
     "\t\techo $match[0];",
     "\t}",
     "}, 40 );",
@@ -209,7 +209,7 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "add_action( 'generate_before_footer', function () {",
     "\tif ( is_admin() || ! wpauto_global_footer_source_valid() ) { return; }",
     "\t$content = wpauto_global_footer_source_content();",
-    "\t$markup = preg_replace( '/<style\\b[^>]*id=[\"\\\']cc-global-footer-styles[\"\\\'][^>]*>.*?<\\/style>\\s*/is', '', $content, 1 );",
+    "\t$markup = preg_replace( '/<style\\b[^>]*id=\"cc-global-footer-styles\"[^>]*>.*?<\\/style>\\s*/is', '', $content, 1 );",
     "\tif ( null !== $markup ) { echo $markup; }",
     "}, 5 );",
     "",
@@ -299,7 +299,7 @@ function prepareGlobalFooterLoader() {
       loader = getCodeSnippetRaw_(loader.id);
     }
 
-    if (Boolean(loader.active)) {
+    if (loader.active) {
       throw new Error('Nowy loader jest już aktywny. Użyj audytu zamiast przygotowania kolejnego loadera.');
     }
     if (String(loader.code || '') !== expectedCode || String(loader.scope || '') !== 'front-end') {
@@ -376,10 +376,10 @@ function switchGlobalFooterToLoader() {
     if (!before.loaderCodeMatches || before.loaderCodeError) {
       throw new Error('Loader nie przechodzi preflightu kodu. Przerwano bez zapisu.');
     }
-    if (Boolean(before.loader.active) && !Boolean(before.legacy.active)) {
+    if (before.loader.active && !before.legacy.active) {
       return { alreadySwitched: true, loaderId: before.config.loaderId, legacyId: before.config.legacyId };
     }
-    if (Boolean(before.loader.active) || !Boolean(before.legacy.active)) {
+    if (before.loader.active || !before.legacy.active) {
       throw new Error('Stan aktywacji nie jest oczekiwany: stary snippet ma być aktywny, loader nieaktywny.');
     }
 
@@ -396,7 +396,7 @@ function switchGlobalFooterToLoader() {
 
     setCodeSnippetActive_(before.config.loaderId, true);
     const loaderAfterActivation = getCodeSnippetRaw_(before.config.loaderId);
-    if (!Boolean(loaderAfterActivation.active) || loaderAfterActivation.code_error) {
+    if (!loaderAfterActivation.active || loaderAfterActivation.code_error) {
       throw new Error(
         'Nie potwierdzono aktywacji nowego loadera. Stary snippet pozostaje bez zmian. ' +
         'Snapshot loadera: ' + loaderSnapshot.snapshotId
@@ -405,7 +405,7 @@ function switchGlobalFooterToLoader() {
 
     setCodeSnippetActive_(before.config.legacyId, false);
     const legacyAfter = getCodeSnippetRaw_(before.config.legacyId);
-    if (Boolean(legacyAfter.active)) {
+    if (legacyAfter.active) {
       throw new Error(
         'Nowy loader jest aktywny, ale nie potwierdzono dezaktywacji starego snippetu. ' +
         'Możliwa podwójna stopka. Snapshot starego snippetu: ' + legacySnapshot.snapshotId
@@ -437,10 +437,10 @@ function rollbackGlobalFooterToLegacy() {
   return withScriptLock_('rollback globalnej stopki', () => {
     const before = getGlobalFooterMigrationState_();
 
-    if (Boolean(before.legacy.active) && !Boolean(before.loader.active)) {
+    if (before.legacy.active && !before.loader.active) {
       return { alreadyRolledBack: true };
     }
-    if (!Boolean(before.loader.active) || Boolean(before.legacy.active)) {
+    if (!before.loader.active || before.legacy.active) {
       throw new Error('Rollback wymaga stanu: loader aktywny, stary snippet nieaktywny.');
     }
 
@@ -456,13 +456,13 @@ function rollbackGlobalFooterToLegacy() {
 
     setCodeSnippetActive_(before.config.legacyId, true);
     const legacyAfterActivation = getCodeSnippetRaw_(before.config.legacyId);
-    if (!Boolean(legacyAfterActivation.active)) {
+    if (!legacyAfterActivation.active) {
       throw new Error('Nie potwierdzono aktywacji starego snippetu. Loader pozostaje aktywny.');
     }
 
     setCodeSnippetActive_(before.config.loaderId, false);
     const loaderAfter = getCodeSnippetRaw_(before.config.loaderId);
-    if (Boolean(loaderAfter.active)) {
+    if (loaderAfter.active) {
       throw new Error('Stary snippet jest aktywny, ale loader także pozostał aktywny. Możliwa podwójna stopka.');
     }
 
