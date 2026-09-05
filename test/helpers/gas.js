@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -249,6 +249,7 @@ function createStubs(opts) {
     },
     ScriptApp: {
       getOAuthToken: () => 'test-token',
+      WeekDay: { MONDAY: 'MONDAY', TUESDAY: 'TUESDAY', WEDNESDAY: 'WEDNESDAY', THURSDAY: 'THURSDAY', FRIDAY: 'FRIDAY', SATURDAY: 'SATURDAY', SUNDAY: 'SUNDAY' },
       getProjectTriggers: () => triggers.slice(),
       deleteTrigger(trigger) {
         const i = triggers.indexOf(trigger);
@@ -260,6 +261,7 @@ function createStubs(opts) {
         const builder = {
           timeBased: () => builder,
           everyDays(n) { spec.everyDays = n; return builder; },
+          onWeekDay(day) { spec.weekDay = day; return builder; },
           atHour(h) { spec.atHour = h; return builder; },
           create() {
             const trigger = { getHandlerFunction: () => handler, $spec: spec };
