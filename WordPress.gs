@@ -1461,7 +1461,7 @@ function findSnapshot_(snapshotId) {
     try {
       mediaBefore = JSON.parse(String(values[14]));
     } catch (e) {
-      throw new Error('Nie można odczytać media_before_json snapshotu: ' + snapshotId);
+      throw new Error('Nie można odczytać media_before_json snapshotu: ' + snapshotId, { cause: e });
     }
   }
 
