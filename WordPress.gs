@@ -62,7 +62,7 @@ function wpBridgePath_(endpoint) {
 /**
  * Wspólny strażnik komend zapisu: WP_ALLOW_WRITES (albo WP_DRY_RUN, bo w trybie
  * próbnym żaden zapis i tak nie wychodzi) oraz potwierdzenie YES w kolumnie confirm.
- * Zwraca konfigurację, żeby komenda nie czytała jej drugi raz.
+ * Rzuca błąd zamiast cokolwiek zwracać; komendy czytają konfigurację przez wpFetch_.
  */
 function requireWpWrite_(command) {
   const config = getWpConfig_();
@@ -74,8 +74,6 @@ function requireWpWrite_(command) {
   if (command.confirm !== 'YES') {
     throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
   }
-
-  return config;
 }
 
 function getWpHeaders_(config) {
