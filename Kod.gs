@@ -10,6 +10,9 @@ function onOpen() {
     .addItem('Importuj dzień', 'importDzienny')
     .addSeparator()
     .addItem('Włącz codzienny import', 'ustawAutomatycznyImport')
+    .addSeparator()
+    .addItem('Sprawdź indeksowanie (URL INSPEKCJA)', 'sprawdzIndeksowanie')
+    .addItem('Włącz cotygodniową inspekcję URL', 'ustawTygodniowaInspekcje')
     .addToUi();
 
     addGa4Menu_();

@@ -33,6 +33,11 @@
       "rationale": "New in #42 with full coverage: incident open/silent/close, guard, trigger, dialog line."
     },
     {
+      "pattern": "UrlInspection.gs",
+      "threshold": 95,
+      "rationale": "New in #45 with full coverage: sheet bootstrap, per-row results, errors, change flag, cap, lock, trigger."
+    },
+    {
       "pattern": "WordPress.gs",
       "threshold": 90,
       "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94%). Remaining lines are alert texts of the menu tests."
