@@ -9,6 +9,8 @@ const { loadProject, plain } = require('./helpers/gas');
 
 const ROOT = path.resolve(__dirname, '..');
 const FOOTER_MIGRATION_CODE = fs.readFileSync(path.join(ROOT, 'GlobalFooterMigration.gs'), 'utf8');
+const FORM_TYPE_FIELD = 'form-type-field';
+const SOURCE_PAGE_FIELD = 'source-page-field';
 const RESULTS_HEADER = [
   'result_id', 'command_id', 'wp_id', 'slug', 'status', 'link', 'title',
   'modified', 'content', 'at', 'rm_title', 'rm_desc', 'kind'
@@ -22,7 +24,9 @@ const SNAPSHOTS_HEADER = [
 const BASE_PROPS = {
   WP_BASE_URL: 'https://www.example.pl',
   WP_USERNAME: 'bot',
-  WP_APP_PASSWORD: 'pw'
+  WP_APP_PASSWORD: 'pw',
+  WP_B2B_FORM_TYPE_FIELD: FORM_TYPE_FIELD,
+  WP_B2B_SOURCE_PAGE_FIELD: SOURCE_PAGE_FIELD
 };
 
 function makeSnippet(gas, overrides = {}) {
@@ -123,7 +127,7 @@ function makeBrowserForm(type, { withSourceField = true, attached = true } = {})
   } : null;
   const form = {
     querySelector(selector) {
-      return selector === 'input[name="hidden-13"]' ? field : null;
+      return selector === `input[name="${SOURCE_PAGE_FIELD}"]` ? field : null;
     }
   };
   const marker = {
@@ -145,7 +149,7 @@ function executeBrowserSnippet(code, initialForms = [], location = {}) {
   const document = {
     readyState: 'complete',
     querySelectorAll(selector) {
-      return selector === 'input[name="hidden-11"]' ? forms.map(item => item.marker) : [];
+      return selector === `input[name="${FORM_TYPE_FIELD}"]` ? forms.map(item => item.marker) : [];
     },
     addEventListener(type, handler) { documentListeners.set(type, handler); }
   };
@@ -220,16 +224,32 @@ test('browser snippet obsługuje właściwe zdarzenie AJAX Forminatora dla formu
   assert.equal(browser.jqueryListeners.has('after.load.forminator'), true);
 });
 
-test('kod kontekstu nie odczytuje ani nie zapisuje danych marketingowych', () => {
+test('kod kontekstu używa skonfigurowanych pól i nie dotyka danych marketingowych', () => {
   const gas = project();
   const code = gas.buildB2BSourceContextCode_();
 
-  assert.match(code, /hidden-11/);
-  assert.match(code, /hidden-13/);
+  assert.match(code, new RegExp(FORM_TYPE_FIELD));
+  assert.match(code, new RegExp(SOURCE_PAGE_FIELD));
   assert.match(code, /b2b_lead/);
   assert.match(code, /after\.load\.forminator/);
   assert.doesNotMatch(code, /cmplz|consent/i);
   assert.doesNotMatch(code, /cookie|localStorage|gclid|gbraid|wbraid|utm_/i);
+});
+
+test('konfiguracja pól odrzuca brak, niebezpieczny identyfikator i to samo pole po obu stronach', () => {
+  let gas = project({ properties: { WP_B2B_FORM_TYPE_FIELD: '' } });
+  assert.throws(() => gas.getB2BSourceContextFieldConfig_(), /brak Script Property WP_B2B_FORM_TYPE_FIELD/);
+
+  gas = project({ properties: { WP_B2B_SOURCE_PAGE_FIELD: 'bad"]selector' } });
+  assert.throws(() => gas.getB2BSourceContextFieldConfig_(), /nieprawidłowa nazwa pola/);
+
+  gas = project({
+    properties: {
+      WP_B2B_FORM_TYPE_FIELD: 'same-field',
+      WP_B2B_SOURCE_PAGE_FIELD: 'same-field'
+    }
+  });
+  assert.throws(() => gas.getB2BSourceContextFieldConfig_(), /muszą być różne/);
 });
 
 test('approval i walidacja blokują niejawne lub niezgodne zapisy', () => {
@@ -419,7 +439,7 @@ test('rollback działa awaryjnie mimo driftu kodu lub błędu snippetu', () => {
 
   const result = gas.rollbackB2BSourcePageContext();
 
-  assert.deepEqual(plain(result).active, false);
+  assert.equal(result.active, false);
   assert.equal(router.state.snippet.active, false);
   assert.equal(gas.$sheet('WP SNAPSHOTS').length >= 2, true);
 });
