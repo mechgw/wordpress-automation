@@ -4,7 +4,7 @@ Google Apps Script automation for WordPress, Google Search Console and Google An
 
 ## Project status
 
-The repository is the canonical source for the Apps Script project. The latest release is **v2.9.0**; check the Releases page for the current one.
+The repository is the canonical source for the Apps Script project. The current production version is the [latest release](https://github.com/mechgw/wordpress-automation/releases/latest).
 
 Merging into `main` does **not** deploy anything. Publishing a GitHub release triggers the *Deploy to Apps Script* workflow for that tag, and a maintainer approves it in the `production` environment before anything is pushed. The same workflow can also be run by hand against `main`.
 
