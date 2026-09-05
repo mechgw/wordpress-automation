@@ -14,6 +14,7 @@ function onOpen() {
 
     addGa4Menu_();
     addWpMenu_();
+    addStatusMenu_();
     addVersionMenu_();
 }
 
@@ -84,29 +85,35 @@ function testPolaczenia() {
   );
 }
 
+/** Ręczny import z menu: ostatnie daysBack dni z opóźnieniem dailyLagDays. */
 function importOstatniZakres() {
-  const cfg = getConfig_();
+  return recordImportRun_('GSC', false, () => {
+    const cfg = getConfig_();
 
-  const end = przesunDate_(new Date(), -cfg.dailyLagDays);
-  const start = przesunDate_(end, -(cfg.daysBack - 1));
+    const end = przesunDate_(new Date(), -cfg.dailyLagDays);
+    const start = przesunDate_(end, -(cfg.daysBack - 1));
 
-  importRange_(
-    formatujDate_(start),
-    formatujDate_(end)
-  );
+    return importRange_(
+      formatujDate_(start),
+      formatujDate_(end)
+    );
+  });
 }
 
+/** Import jednego dnia; uruchamiany przez codzienny trigger. */
 function importDzienny() {
-  const cfg = getConfig_();
+  return recordImportRun_('GSC', true, () => {
+    const cfg = getConfig_();
 
-  const targetDate = przesunDate_(
-    new Date(),
-    -cfg.dailyLagDays
-  );
+    const targetDate = przesunDate_(
+      new Date(),
+      -cfg.dailyLagDays
+    );
 
-  const date = formatujDate_(targetDate);
+    const date = formatujDate_(targetDate);
 
-  importRange_(date, date);
+    return importRange_(date, date);
+  });
 }
 
 function importRange_(startDate, endDate) {
@@ -177,13 +184,8 @@ function importRange_(startDate, endDate) {
 
   replaceRange_(startDate, endDate, output);
 
-  ustawStatus_(
-    'AKTYWNE – ostatni import: ' +
-    formatujDateCzas_(new Date()) +
-    ' | ' +
-    output.length +
-    ' wierszy'
-  );
+  // Status komórki B8 zapisuje recordImportRun_() na podstawie tego wyniku.
+  return { rows: output.length, detail: output.length + ' wierszy (' + startDate + ' – ' + endDate + ')' };
 }
 
 function replaceRange_(startDate, endDate, newRows) {
@@ -322,6 +324,8 @@ function ustawAutomatycznyImport() {
     .everyDays(1)
     .atHour(5)
     .create();
+
+  writeImportStatusCell_('GSC');
 
   SpreadsheetApp.getUi().alert(
     'Codzienny import został ustawiony.'

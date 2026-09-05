@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs'];
+const SOURCES = ['Version.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'Status.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -143,7 +143,7 @@ function makeSheet(name, initialRows) {
 }
 
 /** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
-function makeSpreadsheet(sheets = {}, alerts = []) {
+function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   const instances = new Map();
   const sheetFor = name => {
     if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
@@ -152,8 +152,14 @@ function makeSpreadsheet(sheets = {}, alerts = []) {
   };
   const ui = {
     alert: (...args) => { alerts.push(args); },
-    createMenu: () => {
-      const menu = { addItem: () => menu, addSeparator: () => menu, addSubMenu: () => menu, addToUi() {} };
+    createMenu: title => {
+      const entry = { title, items: [] };
+      const menu = {
+        addItem(label, fn) { entry.items.push({ label, fn }); return menu; },
+        addSeparator: () => menu,
+        addSubMenu: () => menu,
+        addToUi() { menus.push(entry); }
+      };
       return menu;
     }
   };
@@ -168,8 +174,10 @@ function createStubs(opts) {
   const properties = Object.assign({}, opts.properties || {});
   const fetchCalls = [];
   const alerts = [];
+  const triggers = (opts.triggers || []).map(handler => ({ getHandlerFunction: () => handler }));
+  const menus = [];
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
-  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts);
+  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus);
 
   return {
     SpreadsheetApp: spreadsheet,
@@ -199,9 +207,26 @@ function createStubs(opts) {
     },
     ScriptApp: {
       getOAuthToken: () => 'test-token',
-      getProjectTriggers: () => [],
-      deleteTrigger() {},
-      newTrigger() { throw new Error('ScriptApp.newTrigger is not stubbed'); }
+      getProjectTriggers: () => triggers.slice(),
+      deleteTrigger(trigger) {
+        const i = triggers.indexOf(trigger);
+        if (i >= 0) triggers.splice(i, 1);
+      },
+      // Minimal time-based trigger builder; create() registers the trigger.
+      newTrigger(handler) {
+        const spec = { handler, everyDays: null, atHour: null };
+        const builder = {
+          timeBased: () => builder,
+          everyDays(n) { spec.everyDays = n; return builder; },
+          atHour(h) { spec.atHour = h; return builder; },
+          create() {
+            const trigger = { getHandlerFunction: () => handler, $spec: spec };
+            triggers.push(trigger);
+            return trigger;
+          }
+        };
+        return builder;
+      }
     },
     Session: { getScriptTimeZone: () => 'Europe/Warsaw' },
     Logger: { log() {} },
@@ -209,6 +234,8 @@ function createStubs(opts) {
     $fetchCalls: fetchCalls,
     $alerts: alerts,
     $properties: properties,
+    $triggers: triggers,
+    $menus: menus,
     $sheet: name => spreadsheet.$sheet(name),
     $cell: (name, a1) => {
       const { row, col } = parseA1(a1);
@@ -223,6 +250,7 @@ function createStubs(opts) {
  * @param {Record<string,string>} [opts.properties]  Script Properties
  * @param {Record<string,any[][]>} [opts.sheets]      sheet name → rows (row 1 first)
  * @param {(url, params) => {code, text?, json?, headers?}} [opts.fetch]
+ * @param {string[]} [opts.triggers]                  handler names of installed triggers
  * @param {string[]} [opts.skip]                      source files to omit
  * @param {Record<string,string>} [opts.override]     source file → replacement code
  */
