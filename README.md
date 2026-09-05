@@ -165,7 +165,7 @@ The normal path is a release:
 2. Releases → open the draft prepared by Release Drafter → *Publish release*. This creates the `vX.Y.Z` tag.
 3. Actions → the *Deploy to Apps Script* run that just started → *Review deployments* → approve `production`. Nothing is pushed until approved.
 
-The workflow checks out the released tag, runs lint, prints the files clasp will push, runs `clasp push --force`, and records an immutable Apps Script version named after the tag. Pre-releases are ignored.
+The workflow checks out the released tag, runs lint and the tests, prints the files clasp will push, runs `clasp push --force`, records an immutable Apps Script version named after the tag, and then **verifies the live project**: it pulls the project back and compares it with the tag (`scripts/quality/apps-script-compare.js`, the same script the drift check uses). A red verification step means the push already happened but the project differs; investigate or roll back with `deploy_ref`. The job summary lists the pushed files, the version and the comparison result. Pre-releases are ignored.
 
 For an ad-hoc deploy without a release: Actions → *Deploy to Apps Script* → *Run workflow*, leave *Use workflow from* on `main`, keep *deploy_ref* as `main`, optionally tick *create_version*, then approve it the same way.
 
@@ -179,7 +179,7 @@ clasp is a pinned dev dependency (`package-lock.json`), so local runs and both w
 
 ## Drift check
 
-*Apps Script drift check* runs every Monday (and on demand). It pulls the live project and compares it with `main`. If someone edited code directly in the Apps Script editor, the run fails and attaches a patch with the differences so the change can be brought back into the repository.
+*Apps Script drift check* runs every Monday (and on demand). It pulls the live project and compares it with `main` using `scripts/quality/apps-script-compare.js` (trailing newlines normalised, `Version.gs` ignored, only `*.gs` and `appsscript.json` compared). If someone edited code directly in the Apps Script editor, the run fails and attaches a patch with the differences so the change can be brought back into the repository.
 
 ## Releases
 

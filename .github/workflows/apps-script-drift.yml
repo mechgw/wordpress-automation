@@ -48,42 +48,19 @@ jobs:
           # scriptExtensions keeps clasp 3 on .gs (its default is .js).
           printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
-      - name: Pull live project
-        run: npx clasp pull
-
-      - name: Compare with main
-        id: diff
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The Apps Script editor strips the trailing newline from every file.
-          # Add it back so the comparison only reports real content changes.
-          for f in *.gs appsscript.json; do
-            [ -f "$f" ] && sed -i -e '$a\' "$f"
-          done
-          # Version.gs is generated at deploy time (tag, commit, date); the
-          # repo keeps placeholders, so it must not count as drift.
-          git checkout -- Version.gs
-          # .clasp.json is git-ignored, so only Apps Script sources show up here.
-          changes="$(git status --porcelain)"
-          if [ -z "$changes" ]; then
-            echo "No drift: Apps Script matches main."
-            exit 0
-          fi
-          echo "::error::Apps Script project differs from main. Someone edited it outside GitHub."
-          echo "$changes"
-          git add -A
-          git --no-pager diff --cached --stat
-          git --no-pager diff --cached > apps-script-drift.patch
-          echo "drift=true" >> "$GITHUB_OUTPUT"
-          exit 1
+      # Shared with the deploy workflow: clasp pull, trailing-newline
+      # normalisation, Version.gs restored from git, git status limited to the
+      # sources. See scripts/quality/apps-script-compare.js (unit-tested).
+      - name: Pull live project and compare with main
+        run: node scripts/quality/apps-script-compare.js --label main --patch apps-script-drift.patch
 
       - name: Upload drift patch
-        if: failure() && steps.diff.outputs.drift == 'true'
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: apps-script-drift
           path: apps-script-drift.patch
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Remove credentials
