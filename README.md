@@ -14,6 +14,7 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `Kod.gs` — shared entry points and Google Search Console integration.
 - `GA4.gs` — Google Analytics 4 and Ads-related automation.
 - `WordPress.gs` — WordPress REST automation bridge.
+- `Status.gs` — import status: run records in Script Properties, one-line status in the config cells, the *Dane* menu.
 - `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
@@ -37,6 +38,23 @@ Optional:
 `WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
 
 Nothing site-specific (domain, company name, REST namespace) is hardcoded in the sources; it all lives in Script Properties so the repository can stay public.
+
+### Import status (is the data fresh?)
+
+Every GSC and GA4 import, manual or from the daily trigger, records its outcome in Script Properties (`LAST_IMPORT_GSC`, `LAST_IMPORT_GA4`: last run and last successful run with timestamp, row counts, error, duration). Two places show it:
+
+- **Cells** `Konfiguracja GSC!B8` and `Konfiguracja GA4!B9`, one line each, readable by people and by anything that reads the sheet through the API:
+
+  | Cell text | Meaning |
+  | --- | --- |
+  | `AKTYWNE – ostatni import: 2026-09-05 06:02 \| 1234 wierszy \| trigger: TAK` | last run succeeded, data is fresh, daily trigger installed |
+  | `BŁĄD 2026-09-06 06:01: <message> \| ostatni poprawny import: 2026-09-05 06:02 \| trigger: TAK` | last run failed; the data is from the previous successful run |
+  | `NIEAKTUALNE – …` | last successful import is older than 36 hours (or there is none); do not trust the data |
+  | `BRAK IMPORTU – uruchom import z menu \| trigger: NIE` | never imported |
+
+- **Menu *Dane* → *Status danych***: the same for both sources plus schedule, last run result, manual/trigger and duration. *Odśwież status w komórkach* rewrites the cells (for example after installing a trigger).
+
+A failed trigger run therefore never masquerades as a fresh import, and the cells say whether the trigger is still installed.
 
 ### GitHub repository secrets
 
@@ -67,7 +85,11 @@ npm test
 
 - date parsing and shifting, hostname/domain matching, GA4 row extraction, WordPress response helpers;
 - `getWpConfig_` / `wpBridgePath_` validation (missing or malformed Script Properties), `wpFetch_` request shape and response parsing;
-- `getGa4Config_` defaults, `Version.gs` presence/absence.
+- `getGa4Config_` defaults, `Version.gs` presence/absence;
+- `testGA4` end to end against stubbed Admin/Data API responses (property auto-pick by stream domain, ambiguous and empty cases, what lands in the config sheet);
+- the WordPress bridge flows: `testRankMathBridge`, `getPageRawById_`, `writeRankMathField_`, `getPageLayout_`, `copyPageLayout_`, including the result rows appended to *WP RESULTS* and every named failure path.
+
+The sheet stub is a real cell grid: fixtures start at row 1, `gas.$cell('Konfiguracja GA4', 'B9')` reads a cell, `gas.$sheet(name)` the whole grid, `gas.$alerts` the UI alerts, and `fetchRouter([[urlSubstring, response], ...])` routes stubbed HTTP calls.
 
 Everything that talks to Sheets, GA4 or WordPress for real stays covered by the sheet's *Sprawdź połączenie* / *Test …* menu items and the drift check. Two VM gotchas when writing tests: create `Date` objects with `gas.$Date`, and compare objects returned from the sources through `plain()` (different realm, different prototypes).
 
