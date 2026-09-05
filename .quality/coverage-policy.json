@@ -8,14 +8,19 @@
       "rationale": "Placeholder constant only; fully executed when the harness loads it."
     },
     {
+      "pattern": "Status.gs",
+      "threshold": 95,
+      "rationale": "New in #39 with full coverage (100%); keep it near-complete."
+    },
+    {
       "pattern": "Kod.gs",
-      "threshold": 23,
-      "rationale": "BASELINE 2026-09-05: GSC import, sheet writes and trigger management still call Google services directly and are covered only by the sheet's manual test menu. Raise as those paths get stubbed tests."
+      "threshold": 85,
+      "rationale": "RATCHET 2026-09-05 (#39): GSC import end to end, trigger installation, menus and status wiring are covered (87%). testPolaczenia and the sheet-formatting tail of replaceRange_ remain."
     },
     {
       "pattern": "GA4.gs",
-      "threshold": 40,
-      "rationale": "RATCHET 2026-09-05 (#33): testGA4, Admin/Data API request layer, config parsing and helpers are covered (41%). Report imports, key-event configuration and sheet formatting are not yet. Raise as stubbed tests are added."
+      "threshold": 78,
+      "rationale": "RATCHET 2026-09-05 (#39): daily and range imports end to end (all four reports, business fallback, Ads degradation), testGA4, API layer and helpers are covered (80%). Event diagnostics and key-event configuration remain."
     },
     {
       "pattern": "WordPress.gs",

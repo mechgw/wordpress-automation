@@ -279,17 +279,21 @@ function hostnameMatchesDomain_(hostname, domain) {
 
 /** Pierwszy/ręczny import: domyślnie 90 dni z opóźnieniem z konfiguracji. */
 function importGA4OstatniZakres() {
-  const cfg = requireGa4Config_();
-  const end = addDays_(todayGa4_(), -cfg.dailyLagDays);
-  const start = addDays_(end, -(cfg.daysBack - 1));
-  importGa4Range_(start, end, cfg);
+  return recordImportRun_('GA4', false, () => {
+    const cfg = requireGa4Config_();
+    const end = addDays_(todayGa4_(), -cfg.dailyLagDays);
+    const start = addDays_(end, -(cfg.daysBack - 1));
+    return importGa4Range_(start, end, cfg);
+  });
 }
 
 /** Import jednego dnia; przeznaczony do triggera. */
 function importGA4Dzienny() {
-  const cfg = requireGa4Config_();
-  const day = addDays_(todayGa4_(), -cfg.dailyLagDays);
-  importGa4Range_(day, day, cfg);
+  return recordImportRun_('GA4', true, () => {
+    const cfg = requireGa4Config_();
+    const day = addDays_(todayGa4_(), -cfg.dailyLagDays);
+    return importGa4Range_(day, day, cfg);
+  });
 }
 
 /** Ustawia codzienny import GA4 około 06:00. */
@@ -304,10 +308,8 @@ function ustawAutomatycznyImportGA4() {
     .atHour(6)
     .create();
 
-  SpreadsheetApp.getActive()
-    .getSheetByName(GA4_CONFIG_SHEET)
-    .getRange('B9')
-    .setValue('AUTOMATYCZNY IMPORT WŁĄCZONY – około 06:00');
+  // Komórka B9 pokaże "trigger: TAK" i stan ostatniego importu.
+  writeImportStatusCell_('GA4');
 }
 
 function importGa4Range_(startDate, endDate, cfg) {
@@ -544,18 +546,15 @@ function importGa4Range_(startDate, endDate, cfg) {
     timestampColumn: 14
   });
 
-  SpreadsheetApp.getActive()
-    .getSheetByName(GA4_CONFIG_SHEET)
-    .getRange('B9')
-    .setValue(
-      'AKTYWNE – ostatni import: ' +
-      Utilities.formatDate(importedAt, GA4_TZ, 'yyyy-MM-dd HH:mm') +
-      ' | landing: ' + landingRows.length +
+  // Status komórki B9 zapisuje recordImportRun_() na podstawie tego wyniku.
+  return {
+    rows: landingRows.length + eventRows.length + businessRows.length + adsRows.length,
+    detail: 'landing: ' + landingRows.length +
       ' | key events: ' + eventRows.length +
       ' | business: ' + businessRows.length +
-      ' | ads: ' + adsRows.length +
-      (adsWarning ? ' | UWAGA ADS: ' + adsWarning : '')
-    );
+      ' | ads: ' + adsRows.length,
+    warning: adsWarning ? 'ADS: ' + adsWarning : ''
+  };
 }
 
 
