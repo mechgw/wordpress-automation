@@ -126,17 +126,24 @@ function recordImportRun_(source, trigger, fn) {
 function ensureImportLogSheet_() {
   const ss = SpreadsheetApp.getActive();
   let sheet = ss.getSheetByName(IMPORT_LOG_SHEET);
-  if (sheet) return sheet;
 
-  try {
-    sheet = ss.insertSheet(IMPORT_LOG_SHEET);
-  } catch (e) {
-    sheet = ss.getSheetByName(IMPORT_LOG_SHEET);
-    if (!sheet) throw e;
-    return sheet;
+  if (!sheet) {
+    try {
+      sheet = ss.insertSheet(IMPORT_LOG_SHEET);
+    } catch (e) {
+      // Duplikat z równoległego wykonania: bierzemy arkusz, który już istnieje.
+      // Jeśli go nadal nie ma, insertSheet zawiódł z innego powodu i to jest błąd.
+      sheet = ss.getSheetByName(IMPORT_LOG_SHEET);
+      if (!sheet) throw e;
+    }
   }
-  sheet.getRange(1, 1, 1, IMPORT_LOG_HEADER.length).setValues([IMPORT_LOG_HEADER]);
-  sheet.setFrozenRows(1);
+
+  // Nagłówek dopisuje ten, kto zastanie arkusz pusty: także przegrany wyścigu,
+  // żeby appendRow nigdy nie trafił do wiersza 1 zanim zwycięzca zapisze nagłówek.
+  if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== IMPORT_LOG_HEADER[0]) {
+    sheet.getRange(1, 1, 1, IMPORT_LOG_HEADER.length).setValues([IMPORT_LOG_HEADER]);
+    sheet.setFrozenRows(1);
+  }
   return sheet;
 }
 
@@ -167,21 +174,30 @@ function importLogCutoff_(now) {
 
 /**
  * Usuwa wszystkie wiersze spoza okna retencji, niezależnie od ich położenia
- * (arkusz mógł zostać ręcznie posortowany). Usuwanie od dołu, żeby numery
- * wierszy nie przesuwały się w trakcie.
+ * (arkusz mógł zostać ręcznie posortowany). Ciągłe bloki wygasłych wierszy
+ * są usuwane jednym wywołaniem, od dołu, żeby numery wierszy nie przesuwały
+ * się w trakcie i żeby nie mnożyć wywołań usługi Spreadsheet.
  */
 function pruneImportLog_(sheet, now) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return 0;
   const cutoff = importLogCutoff_(now);
   const dates = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const stale = dates.map(r => {
+    const d = new Date(r[0]);
+    return !isNaN(d.getTime()) && d.getTime() < cutoff;
+  });
+
   let removed = 0;
-  for (let i = dates.length - 1; i >= 0; i--) {
-    const d = new Date(dates[i][0]);
-    if (!isNaN(d.getTime()) && d.getTime() < cutoff) {
-      sheet.deleteRows(i + 2, 1);
-      removed++;
-    }
+  let i = stale.length - 1;
+  while (i >= 0) {
+    if (!stale[i]) { i--; continue; }
+    let start = i;
+    while (start > 0 && stale[start - 1]) start--;
+    const count = i - start + 1;
+    sheet.deleteRows(start + 2, count);
+    removed += count;
+    i = start - 1;
   }
   return removed;
 }

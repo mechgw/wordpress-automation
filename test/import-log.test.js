@@ -89,6 +89,33 @@ describe('IMPORT LOG: zapis historii', () => {
     assert.equal(gas.$sheet(LOG).length, 2, 'header + the new row, no second sheet');
   });
 
+  test('przegrany wyścigu zastaje pusty arkusz: dopisuje nagłówek zanim doda wiersz', () => {
+    const gas = loadProject({ sheets: baseSheets() });
+    const ss = gas.SpreadsheetApp.getActive();
+    const realGet = ss.getSheetByName;
+    let calls = 0;
+    ss.getSheetByName = name => (name === LOG && calls++ === 0 ? null : realGet(name));
+    ss.insertSheet(LOG); // zwycięzca utworzył arkusz, ale nie zdążył zapisać nagłówka
+    gas.recordImportRun_('GSC', true, () => ({ rows: 1, days: 1 }));
+    const log = gas.$sheet(LOG);
+    assert.deepEqual(plain(log[0]), HEADER, 'header written first');
+    assert.equal(log[1][1], 'GSC', 'run lands in row 2, never in row 1');
+  });
+
+  test('retencja usuwa ciągłe bloki jednym wywołaniem, od dołu', () => {
+    const sheets = baseSheets();
+    sheets[LOG] = [HEADER, logRow(120, 'GSC', 'trigger', 1, 5), logRow(110, 'GSC', 'trigger', 1, 5), logRow(10, 'GSC', 'trigger', 1, 5), logRow(100, 'GA4', 'trigger', 1, 5), logRow(95, 'GA4', 'trigger', 1, 5), logRow(1, 'GSC', 'trigger', 1, 5)];
+    const gas = loadProject({ sheets });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(LOG);
+    const calls = [];
+    const realDelete = sheet.deleteRows.bind(sheet);
+    sheet.deleteRows = (row, n) => { calls.push([row, n]); return realDelete(row, n); };
+    const removed = gas.pruneImportLog_(sheet, new gas.$Date());
+    assert.equal(removed, 4);
+    assert.deepEqual(plain(calls), [[5, 2], [2, 2]], 'two contiguous blocks, bottom first');
+    assert.equal(gas.$sheet(LOG).length, 3, 'header + two recent rows');
+  });
+
   test('inny błąd insertSheet (nie duplikat) jest zgłaszany, nie ukrywany', () => {
     const gas = loadProject({ sheets: baseSheets() });
     gas.SpreadsheetApp.getActive().insertSheet = () => { throw new Error('quota exceeded'); };
