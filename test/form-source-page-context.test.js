@@ -250,6 +250,10 @@ test('konfiguracja pól odrzuca brak, niebezpieczny identyfikator i to samo pole
     }
   });
   assert.throws(() => gas.getB2BSourceContextFieldConfig_(), /muszą być różne/);
+  assert.throws(
+    () => gas.buildB2BSourceContextCode_({ formTypeField: 'same-field', sourcePageField: 'same-field' }),
+    /muszą być różne/
+  );
 });
 
 test('approval i walidacja blokują niejawne lub niezgodne zapisy', () => {
