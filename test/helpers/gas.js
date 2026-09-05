@@ -158,6 +158,9 @@ function makeSheet(name, initialRows) {
     getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
     insertRowsAfter() { return this; },
     insertColumnsAfter() { return this; },
+    deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
+    setFrozenRows() { return this; },
+    setColumnWidth() { return this; },
     appendRow(row) { grid.push(row.slice()); return this; },
     $grid: grid
   };
@@ -188,8 +191,12 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
       return menu;
     }
   };
+  const insertSheet = name => {
+    sheets[name] = [];
+    return sheetFor(name);
+  };
   return {
-    getActive: () => ({ getSheetByName: sheetFor }),
+    getActive: () => ({ getSheetByName: sheetFor, insertSheet }),
     getUi: () => ui,
     flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid,
