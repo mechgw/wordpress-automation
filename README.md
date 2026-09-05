@@ -139,7 +139,7 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 
 1. Wait until Copilot has finished. While it is running it is listed as a requested reviewer and the check stays red. A bot that errors out or hits its usage limit (Codex does this regularly) does not block anything.
 2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
-3. Post a PR comment that starts with `/reviewed`, followed by a short note on what was accepted and what was rejected. It has to be newer than the last commit and the last bot comment, so a new push or a new bot review means a new `/reviewed`.
+3. Post a PR comment that starts with `/reviewed`, followed by a short note on what was accepted and what was rejected. It has to be newer than the last commit and the last bot **review** (a review object or an inline comment), so a new push or a new bot review means a new `/reviewed`. Plain bot comments to the PR, such as Codex's usage-limit notice, do not reset it. The logic lives in `scripts/quality/review-ack.js` with unit tests in `test/review-ack.test.js`.
 
 The check runs on every push and review request. Every PR comment (including `/reviewed`) re-runs the latest evaluation for that PR, so the comment is what turns the check green; Copilot finishing its review produces no event on its own. If it ever looks stale, post `/reviewed` again or run *Review gate* by hand with the PR number.
 
