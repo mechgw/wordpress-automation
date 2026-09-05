@@ -97,6 +97,21 @@ describe('apps-script-compare', () => {
     assert.equal(r.status, 0, r.out);
   });
 
+  test('a ref without Version.gs (older tag) is compared without trying to restore it', () => {
+    const { root, fake } = repo('');
+    execFileSync('git', ['rm', '-q', 'Version.gs'], { cwd: root });
+    execFileSync('git', ['-c', 'user.email=t@e.pl', '-c', 'user.name=t', 'commit', '-q', '-m', 'no version file'], { cwd: root });
+    const r = run(root, fake);
+    assert.equal(r.status, 0, r.out);
+  });
+
+  test('a flag without a value fails fast with a clear message', () => {
+    const { root, fake } = repo('');
+    const r = spawnSync(process.execPath, [SCRIPT, '--cwd', root, '--label'], { encoding: 'utf8', env: { ...process.env, APPS_SCRIPT_PULL_CMD: `"${process.execPath}" "${fake}"` } });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /--label requires a value/);
+  });
+
   test('a failing pull is reported as a clear failure, not a diff', () => {
     const { root, fake } = repo(`process.exit(3);`);
     const r = run(root, fake);

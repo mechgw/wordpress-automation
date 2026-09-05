@@ -29,10 +29,14 @@ const path = require('path');
 
 function parseArgs(argv) {
   const opts = { label: 'the checked-out ref', patch: '', cwd: process.cwd() };
+  const value = (i, flag) => {
+    if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
+    return argv[i + 1];
+  };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--label') opts.label = argv[++i];
-    else if (argv[i] === '--patch') opts.patch = argv[++i];
-    else if (argv[i] === '--cwd') opts.cwd = path.resolve(argv[++i]);
+    if (argv[i] === '--label') opts.label = value(i++, '--label');
+    else if (argv[i] === '--patch') opts.patch = value(i++, '--patch');
+    else if (argv[i] === '--cwd') opts.cwd = path.resolve(value(i++, '--cwd'));
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
   return opts;
@@ -43,8 +47,14 @@ function git(cwd, args) {
 }
 
 function pull(cwd) {
-  const cmd = process.env.APPS_SCRIPT_PULL_CMD || 'npx clasp pull';
-  const r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8' });
+  const override = process.env.APPS_SCRIPT_PULL_CMD;
+  // Default runs without a shell; only an explicit override (tests) goes
+  // through one. On Windows npx is a .cmd wrapper and needs the shell anyway.
+  const r = override
+    ? spawnSync(override, { cwd, shell: true, encoding: 'utf8' })
+    : spawnSync('npx', ['clasp', 'pull'], { cwd, shell: process.platform === 'win32', encoding: 'utf8' });
+  const cmd = override || 'npx clasp pull';
+  if (r.error) throw new Error(`Pull failed (${cmd}): ${r.error.message}`);
   if (r.status !== 0) {
     throw new Error(`Pull failed (${cmd}): ${(r.stderr || r.stdout || '').trim()}`);
   }
@@ -63,7 +73,8 @@ function normalizeTrailingNewline(cwd) {
 /** Zwraca { changes: string, patch: string } albo puste stringi gdy brak różnic. */
 function compare(cwd) {
   normalizeTrailingNewline(cwd);
-  if (git(cwd, ['ls-files', '--error-unmatch', 'Version.gs']).trim()) {
+  // Restore only when the ref tracks Version.gs (older tags do not have it).
+  if (git(cwd, ['ls-files', '--', 'Version.gs']).trim()) {
     git(cwd, ['checkout', '--', 'Version.gs']);
   }
   const pathspec = ['--', '*.gs', 'appsscript.json'];
