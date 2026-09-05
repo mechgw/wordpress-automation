@@ -68,8 +68,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The base SHA needs no origin/<branch> ref, only the full history.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm run quality:gate -- --changed="base:origin/${{ github.base_ref }}"
+            npm run quality:gate -- --changed="base:${{ github.event.pull_request.base.sha }}"
           else
             npm run quality:gate -- --changed=none
           fi

@@ -30,6 +30,8 @@ identity lives in Script Properties (`WP_REST_NAMESPACE`, `SITE_DOMAIN`, `WP_*`)
   (`.quality/coverage-policy.json`) and **100% coverage of changed `*.gs` lines**; exceptions with
   reasons in `.quality/changed-lines-ignore.json`.
 - Pre-commit hook (`.githooks/pre-commit`, installed by `npm ci`) runs the same on staged files.
+- Three checkpoints, always: run tests locally before committing, CI before merge, deploy workflow
+  before `clasp push`. Never bypass one to reach the next.
 - Standards: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
 
 ## Do / don't

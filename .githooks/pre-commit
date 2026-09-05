@@ -22,7 +22,7 @@ step() { printf '\n[pre-commit] %s\n' "$1"; }
 step "Forbidden artifacts"
 if bad="$(printf '%s\n' "$staged" | grep -E '^(\.clasp\.json|\.clasprc\.json|coverage/|node_modules/)' || true)"; [ -n "$bad" ]; then
   echo "These files must never be committed:"
-  printf '  %s\n' $bad
+  while IFS= read -r f; do printf '  %s\n' "$f"; done <<<"$bad"
   exit 1
 fi
 echo "OK"

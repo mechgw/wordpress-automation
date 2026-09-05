@@ -84,6 +84,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Third line of defence: the same tests and coverage thresholds that
+      # guard commits (pre-commit) and merges (CI) must pass on the exact ref
+      # being deployed, after the production approval and before clasp push.
+      - name: Unit tests + coverage thresholds
+        run: npm run quality:gate -- --changed=none
+
       # clasp comes from devDependencies (pinned by package-lock.json, bumped
       # by Dependabot), so every deploy uses the same version.
       - name: clasp version

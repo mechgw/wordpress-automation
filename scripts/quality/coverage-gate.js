@@ -125,7 +125,12 @@ function thresholdFor(file, policy) {
 }
 
 function git(args) {
-  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  try {
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    const detail = (e.stderr || e.message || '').toString().trim().split('\n')[0];
+    fail(`git ${args.join(' ')} failed: ${detail}. Is this a git checkout with the base ref available (CI needs fetch-depth: 0)?`);
+  }
 }
 
 /** Changed *.gs lines as Map<file, Set<line>> for the requested mode. */

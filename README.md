@@ -76,7 +76,8 @@ Everything that talks to Sheets, GA4 or WordPress for real stays covered by the 
 - **Standard:** [docs/quality/testing-standard.md](docs/quality/testing-standard.md) (layers, ten rules, gold standard, forbidden patterns). Plan tests with [docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md) and record evidence in the PR template.
 - **Coverage gate:** `npm run quality:gate -- --changed=base:origin/main` runs the tests with V8 coverage and enforces two rules: per-file thresholds from `.quality/coverage-policy.json` (a ratchet, thresholds only go up) and **100% coverage of changed `*.gs` lines**. Justified exceptions live in `.quality/changed-lines-ignore.json`.
 - **Pre-commit hook:** `npm ci` points git at `.githooks/` (`core.hooksPath`). On every commit the hook blocks credentials and build artifacts, lints the staged files, and runs the tests plus the coverage gate on the staged `*.gs` lines. `git commit --no-verify` skips it locally; CI runs the same gate against `main` and blocks the merge.
-- **CI:** the `validate` job runs lint, tests and the gate (`--changed=base:origin/<base>` on pull requests).
+- **CI:** the `validate` job runs lint, tests and the gate against the PR base commit.
+- **Deploy:** the deploy workflow runs lint, tests and the per-file thresholds on the tag being deployed, after the `production` approval and before `clasp push`. Tests therefore guard every stage: commit, merge, deploy.
 
 To work against the live Apps Script project, log in once (clasp is installed by `npm ci`):
 

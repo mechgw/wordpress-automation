@@ -84,6 +84,16 @@ None of them replaces another.
 
 ## 6. Gates
 
+Three checkpoints, same tests each time:
+
+1. **Before commit** — you run the tests locally after every code change; the pre-commit hook
+   runs lint, tests and the coverage gate on the staged lines and refuses the commit otherwise.
+2. **Before merge** — CI runs lint, tests and the gate against the base branch; `validate` is a
+   required check, nothing merges red.
+3. **Before deploy** — the deploy workflow, after the `production` approval, runs lint, tests and
+   the per-file thresholds on the exact tag being pushed to Apps Script. A release with a red test
+   never reaches the sheet.
+
 | Gate                          | Where                | What fails it                                                                 |
 | ----------------------------- | -------------------- | ----------------------------------------------------------------------------- |
 | Forbidden artifacts           | pre-commit           | `.clasp.json`, `.clasprc.json`, `coverage/`, `node_modules/` staged           |
