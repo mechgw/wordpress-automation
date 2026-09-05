@@ -30,28 +30,9 @@ const URL_INSPECTION_ENDPOINT = 'https://searchconsole.googleapis.com/v1/urlInsp
 const URL_INSPECTION_TRIGGER_HANDLER = 'sprawdzIndeksowanieTrigger';
 const URL_INSPECTION_TRIGGER_HOUR = 7;
 
-/** Arkusz z listą adresów; tworzony z nagłówkiem, gdy go nie ma (odporne na wyścig jak IMPORT LOG). */
+/** Arkusz z listą adresów; tworzony z nagłówkiem, gdy go nie ma (wspólny helper ze Status.gs). */
 function ensureUrlInspectionSheet_() {
-  const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(URL_INSPECTION_SHEET);
-  if (!sheet) {
-    try {
-      sheet = ss.insertSheet(URL_INSPECTION_SHEET);
-    } catch (e) {
-      sheet = ss.getSheetByName(URL_INSPECTION_SHEET);
-      if (!sheet) throw e;
-    }
-  }
-  if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== URL_INSPECTION_HEADER[0]) {
-    // Arkusz z danymi, ale bez nagłówka (np. wklejona lista): nagłówek idzie
-    // NAD dane, żeby nie nadpisać pierwszego adresu.
-    if (sheet.getLastRow() >= 1 && !sheet.getRange(1, 1, 1, URL_INSPECTION_HEADER.length).isBlank()) {
-      sheet.insertRowBefore(1);
-    }
-    sheet.getRange(1, 1, 1, URL_INSPECTION_HEADER.length).setValues([URL_INSPECTION_HEADER]);
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
+  return ensureSheetWithHeader_(URL_INSPECTION_SHEET, URL_INSPECTION_HEADER);
 }
 
 /** Czas z kolumny „Sprawdzono” jako liczba; brak lub nieczytelny = 0 (najpilniejszy). */
