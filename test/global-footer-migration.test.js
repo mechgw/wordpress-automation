@@ -209,6 +209,16 @@ test('approval, snapshot i walidatory pokrywają bezpieczne ścieżki pomocnicze
   assert.throws(() => gas.validateGlobalFooterSourcePage_({}), /prawidłowego ID/);
   assert.throws(() => gas.validateGlobalFooterSourcePage_({ id: 1, status: 'publish', content: { raw: '' } }), /opublikowanym/);
   assert.throws(() => gas.validateGlobalFooterSourcePage_({ id: 1, status: 'draft', content: { raw: '<footer></footer>' } }), /dokładnie jeden/);
+
+  const incompleteStyle = sourcePage();
+  incompleteStyle.content.raw = '<style id="cc-global-footer-styles">.x{}\n' +
+    '<footer class="cc-site-footer">X</footer>';
+  assert.throws(() => gas.validateGlobalFooterSourcePage_(incompleteStyle), /kompletny/);
+
+  const incompleteFooter = sourcePage();
+  incompleteFooter.content.raw = '<style id="cc-global-footer-styles">.x{}</style>\n' +
+    '<footer class="cc-site-footer">X';
+  assert.throws(() => gas.validateGlobalFooterSourcePage_(incompleteFooter), /kompletny/);
   assert.match(gas.validateGlobalFooterSourcePage_(sourcePage()), /cc-site-footer/);
 
   assert.throws(() => gas.findLegacyGlobalFooterSnippet_([]), /Kandydaci: 0/);
@@ -219,8 +229,11 @@ test('approval, snapshot i walidatory pokrywają bezpieczne ścieżki pomocnicze
   assert.throws(() => gas.buildGlobalFooterLoaderCode_('bad'), /numerycznego ID/);
   const php = gas.buildGlobalFooterLoaderCode_(101);
   assert.match(php, /get_post\( 101 \)/);
+  assert.match(php, /\$style_ok =/);
+  assert.match(php, /\$footer_ok =/);
   assert.match(php, /echo \$match\[0\];/);
   assert.match(php, /return wpauto_global_footer_source_valid\(\) \? '' : \$copyright;/);
+  assert.doesNotMatch(php, /stripos\( \$content, 'cc-site-footer' \)/);
   assert.doesNotMatch(php, /\\"/);
 
   assert.throws(() => gas.setCodeSnippetActive_('bad', true), /numerycznego ID/);
@@ -343,6 +356,7 @@ test('migration state, switch, audit i rollback zachowują kolejność availabil
 
   const rolled = gas.rollbackGlobalFooterToLegacy();
   assert.equal(rolled.rolledBack, true);
+  assert.equal(rolled.recoveredDoubleActive, false);
   assert.equal(router.state.legacy.active, true);
   assert.equal(router.state.loader.active, false);
   toggles = router.state.calls.filter(call => /\/(activate|deactivate)$/.test(new URL(call.url).pathname));
@@ -384,13 +398,38 @@ test('switch preflight, cancel i failure paths nie ukrywają niepotwierdzonego s
   assert.equal(router.state.legacy.active, true);
 });
 
+test('rollback działa przy uszkodzonym źródle i odzyskuje stan double-active', () => {
+  const seed = project();
+  const props = migrationProps();
+
+  let router = makeRouter({ source: null, loader: buildLoader(seed, 202, true), legacy: legacySnippet(201, false) });
+  let gas = project({ router, properties: props, uiAnswer: 'YES' });
+  let rolled = gas.rollbackGlobalFooterToLegacy();
+  assert.equal(rolled.rolledBack, true);
+  assert.equal(rolled.recoveredDoubleActive, false);
+  assert.equal(router.state.legacy.active, true);
+  assert.equal(router.state.loader.active, false);
+  assert.equal(router.state.calls.some(call => new URL(call.url).pathname.startsWith('/wp-json/wp/v2/pages')), false);
+
+  router = makeRouter({ source: null, loader: buildLoader(seed, 202, true), legacy: legacySnippet(201, true) });
+  gas = project({ router, properties: props, uiAnswer: 'YES' });
+  rolled = gas.rollbackGlobalFooterToLegacy();
+  assert.equal(rolled.rolledBack, true);
+  assert.equal(rolled.recoveredDoubleActive, true);
+  assert.equal(router.state.legacy.active, true);
+  assert.equal(router.state.loader.active, false);
+  const toggles = router.state.calls.filter(call => /\/(activate|deactivate)$/.test(new URL(call.url).pathname));
+  assert.equal(toggles.length, 1);
+  assert.match(toggles[0].url, /\/202\/deactivate$/);
+});
+
 test('rollback cancel i failure paths nigdy nie wyłączają jedynej działającej wersji', () => {
   const seed = project();
   const props = migrationProps();
 
   let router = makeRouter({ loader: buildLoader(seed, 202, false), legacy: legacySnippet(201, false) });
   let gas = project({ router, properties: props, uiAnswer: 'YES' });
-  assert.throws(() => gas.rollbackGlobalFooterToLegacy(), /Rollback wymaga stanu/);
+  assert.throws(() => gas.rollbackGlobalFooterToLegacy(), /Rollback wymaga/);
 
   router = makeRouter({ loader: buildLoader(seed, 202, true), legacy: legacySnippet(201, false) });
   gas = project({ router, properties: props, uiAnswer: 'NO' });
