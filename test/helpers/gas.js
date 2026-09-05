@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -200,7 +200,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
     return sheetFor(name);
   };
   // One stable spreadsheet object, like Apps Script: tests may patch its methods.
-  const active = { getSheetByName: sheetFor, insertSheet };
+  const active = { getSheetByName: sheetFor, insertSheet, getUrl: () => 'https://docs.google.com/spreadsheets/d/test-sheet/edit' };
   return {
     getActive: () => active,
     getUi: () => ui,
@@ -217,6 +217,7 @@ function createStubs(opts) {
   const triggers = (opts.triggers || []).map(handler => ({ getHandlerFunction: () => handler }));
   const menus = [];
   const lockLog = [];
+  const mails = [];
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
   const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus);
 
@@ -279,7 +280,12 @@ function createStubs(opts) {
       })
     },
     Logger: { log() {} },
+    MailApp: {
+      sendEmail: (to, subject, body) => { mails.push({ to, subject, body }); },
+      getRemainingDailyQuota: () => 100
+    },
     console,
+    $mails: mails,
     $lock: lockLog,
     $fetchCalls: fetchCalls,
     $alerts: alerts,

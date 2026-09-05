@@ -85,6 +85,7 @@ function recordImportRun_(source, trigger, fn) {
     writeImportRecord_(source, record);
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
+    updateImportIncident_(source, record);
     throw e;
   }
 
@@ -112,6 +113,7 @@ function recordImportRun_(source, trigger, fn) {
   writeImportRecord_(source, record);
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
+  updateImportIncident_(source, record);
   return result;
 }
 
@@ -264,6 +266,12 @@ function formatImportTime_(iso) {
   return Utilities.formatDate(d, TZ, 'yyyy-MM-dd HH:mm');
 }
 
+/** lastOk rekordu; udany lastRun bez lastOk (starszy/częściowy rekord) liczy się jako ostatni poprawny import. */
+function effectiveLastOk_(record) {
+  const lastRun = record && record.lastRun;
+  return (record && record.lastOk) || (lastRun && lastRun.ok ? lastRun : null);
+}
+
 function isImportStale_(lastOk, now) {
   if (!lastOk || !lastOk.finishedAt) return true;
   const age = (now || new Date()).getTime() - new Date(lastOk.finishedAt).getTime();
@@ -275,8 +283,7 @@ function importStatusText_(source, now) {
   const record = readImportRecord_(source);
   const lastRun = record.lastRun;
   // Rekord częściowy (np. ręcznie edytowany albo z wcześniejszej wersji): udany
-  // lastRun bez lastOk traktujemy jako ostatni poprawny import.
-  const lastOk = record.lastOk || (lastRun && lastRun.ok ? lastRun : null);
+  const lastOk = effectiveLastOk_(record);
   const triggerPart = ' | trigger: ' + (hasImportTrigger_(source) ? 'TAK' : 'NIE');
 
   if (!lastOk && !lastRun) {
@@ -322,6 +329,9 @@ function addStatusMenu_() {
     .createMenu('Dane')
     .addItem('Status danych', 'showImportStatus')
     .addItem('Odśwież status w komórkach', 'refreshImportStatusCells')
+    .addSeparator()
+    .addItem('Sprawdź aktualność teraz (alerty)', 'sprawdzAktualnoscImportow')
+    .addItem('Włącz codzienne alerty e-mail', 'ustawCodzienneAlerty')
     .addToUi();
 }
 
@@ -343,9 +353,13 @@ function showImportStatus() {
         ' | ' + (lastRun.trigger ? 'trigger' : 'ręcznie') +
         ' | ' + Math.round((lastRun.durationMs || 0) / 1000) + ' s');
     }
+    lines.push('  ' + incidentSummary_(record));
     lines.push('');
   });
 
   lines.push('Dane uznajemy za nieaktualne po ' + IMPORT_STALE_AFTER_HOURS + ' h od ostatniego poprawnego importu.');
+  const alerts = alertConfig_();
+  lines.push('Alerty e-mail: ' + (alerts.email ? alerts.email : 'wyłączone (brak ALERT_EMAIL)') +
+    ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }

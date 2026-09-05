@@ -148,7 +148,7 @@ describe('Status.gs cells, menu and dialog', () => {
     gas.onOpen();
     const dane = gas.$menus.find(m => m.title === 'Dane');
     assert.ok(dane, 'Dane menu present');
-    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells']);
+    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells', 'sprawdzAktualnoscImportow', 'ustawCodzienneAlerty']);
     assert.deepEqual(gas.$menus.map(m => m.title), ['SEO / GSC', 'GA4 / Ads', 'WordPress', 'Dane', 'dev']);
   });
 
