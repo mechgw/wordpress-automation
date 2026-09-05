@@ -1,0 +1,53 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+filter-by-commitish: true
+commitish: main
+
+categories:
+  - title: "🚀 Features"
+    labels:
+      - "enhancement"
+  - title: "🐛 Bug Fixes"
+    labels:
+      - "bug"
+  - title: "📝 Documentation"
+    labels:
+      - "documentation"
+
+# PR titles such as "feat: ..." or "fix: ..." are labelled automatically.
+autolabeler:
+  - label: "enhancement"
+    regex:
+      - '^(feat|new)(\(|:|\s|$)'
+    branch:
+      - '/^feat\//'
+  - label: "bug"
+    regex:
+      - '^(fix|bug|hotfix)(\(|:|\s|$)'
+    branch:
+      - '/^(fix|hotfix)\//'
+  - label: "documentation"
+    regex:
+      - '^docs(\(|:|\s|$)'
+    branch:
+      - '/^docs\//'
+
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+
+version-resolver:
+  minor:
+    labels:
+      - "enhancement"
+  patch:
+    labels:
+      - "bug"
+      - "documentation"
+  default: patch
+
+template: |
+  ## What's changed in $RESOLVED_VERSION
+
+  $CHANGES
+
+  ---
+  Thanks to everyone who contributed.
