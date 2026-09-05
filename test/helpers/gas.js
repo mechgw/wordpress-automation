@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'ForminatorHistory.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -91,25 +91,18 @@ function makeSheet(name, initialRows) {
       return out;
     },
     getValue: () => (grid[row - 1] || [])[col - 1] ?? '',
-    isBlank() {
-      for (let r = row; r < row + rows; r++) {
-        for (let c = col; c < col + cols; c++) {
-          const v = (grid[r - 1] || [])[c - 1];
-          if (v !== undefined && v !== null && v !== '') return false;
-        }
-      }
-      return true;
-    },
     setValue(value) {
       ensure(row, col);
       grid[row - 1][col - 1] = value;
       return this;
     },
     setValues(values) {
-      values.forEach((line, i) => line.forEach((v, j) => {
-        ensure(row + i, col + j);
-        grid[row + i - 1][col + j - 1] = v;
-      }));
+      values.forEach((line, rOffset) => {
+        line.forEach((value, cOffset) => {
+          ensure(row + rOffset, col + cOffset);
+          grid[row + rOffset - 1][col + cOffset - 1] = value;
+        });
+      });
       return this;
     },
     clearContent() {
@@ -121,230 +114,181 @@ function makeSheet(name, initialRows) {
       return this;
     },
     setNumberFormat() { return this; },
-    setFontWeight() { return this; },
     setBackground() { return this; },
+    setFontWeight() { return this; },
     setFontColor() { return this; },
-    // Minimal TextFinder: exact (matchEntireCell) or substring search within the range.
-    createTextFinder(text) {
-      let entire = false;
-      const finder = {
-        matchEntireCell(flag) { entire = Boolean(flag); return finder; },
-        findNext() {
-          for (let r = row; r < row + rows; r++) {
-            for (let c = col; c < col + cols; c++) {
-              const v = String((grid[r - 1] || [])[c - 1] ?? '');
-              if (entire ? v === String(text) : v.includes(String(text))) {
-                return { getRow: () => r, getColumn: () => c, getValue: () => v };
-              }
-            }
-          }
-          return null;
+    setWrap() { return this; },
+    setHorizontalAlignment() { return this; },
+    setVerticalAlignment() { return this; },
+    setBorder() { return this; },
+    setFormula(value) { return this.setValue(value); },
+    setFormulas(values) { return this.setValues(values); },
+    getFormula: () => String((grid[row - 1] || [])[col - 1] || '').startsWith('=') ? (grid[row - 1] || [])[col - 1] : '',
+    getFormulas: () => {
+      const values = [];
+      for (let r = row; r < row + rows; r++) {
+        const line = [];
+        for (let c = col; c < col + cols; c++) {
+          const value = (grid[r - 1] || [])[c - 1] ?? '';
+          line.push(String(value).startsWith('=') ? value : '');
         }
-      };
-      return finder;
+        values.push(line);
+      }
+      return values;
     }
   });
+
   return {
-    getName: () => name,
-    getRange: (...args) => {
-      if (typeof args[0] === 'string') {
-        const { row, col, rows, cols } = parseA1(args[0], grid.length);
-        return rangeOf(row, col, rows, cols);
+    name,
+    grid,
+    getRange(a, b, c, d) {
+      if (typeof a === 'string') {
+        const parsed = parseA1(a, grid.length);
+        return rangeOf(parsed.row, parsed.col, parsed.rows, parsed.cols);
       }
-      return rangeOf(args[0], args[1], args[2] ?? 1, args[3] ?? 1);
+      return rangeOf(a, b, c || 1, d || 1);
     },
-    getLastRow: () => grid.length,
-    getMaxRows: () => Math.max(grid.length, 1000),
-    getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
-    insertRowsAfter() { return this; },
+    getLastRow() {
+      let last = 0;
+      grid.forEach((line, index) => {
+        if (line.some(v => v !== '' && v !== null && v !== undefined)) last = index + 1;
+      });
+      return last;
+    },
+    getLastColumn() {
+      return grid.reduce((max, line) => Math.max(max, line.length), 0);
+    },
+    getMaxColumns() { return Math.max(this.getLastColumn(), 1); },
     insertColumnsAfter() { return this; },
-    deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
-    setFrozenRows() { return this; },
-    setColumnWidth() { return this; },
-    appendRow(row) { grid.push(row.slice()); return this; },
-    $grid: grid
-  };
-}
-
-/** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
-function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
-  const instances = new Map();
-  const sheetFor = name => {
-    if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
-    if (!instances.has(name)) instances.set(name, makeSheet(name, sheets[name]));
-    return instances.get(name);
-  };
-  const ui = {
-    Button: { YES: 'YES', NO: 'NO', OK: 'OK', CANCEL: 'CANCEL' },
-    ButtonSet: { OK: 'OK', YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
-    // alert(text) or alert(title, text, buttons); the answer comes from ui.$answer (default OK).
-    alert: (...args) => { alerts.push(args); return ui.$answer; },
-    $answer: 'OK',
-    createMenu: title => {
-      const entry = { title, items: [] };
-      const menu = {
-        addItem(label, fn) { entry.items.push({ label, fn }); return menu; },
-        addSeparator: () => menu,
-        addSubMenu: () => menu,
-        addToUi() { menus.push(entry); }
-      };
-      return menu;
-    }
-  };
-  const insertSheet = name => {
-    // Like Apps Script: a duplicate name is an error, not a silent no-op.
-    if (Object.prototype.hasOwnProperty.call(sheets, name)) {
-      throw new Error(`A sheet with the name "${name}" already exists. Please enter another name.`);
-    }
-    sheets[name] = [];
-    return sheetFor(name);
-  };
-  // One stable spreadsheet object, like Apps Script: tests may patch its methods.
-  const active = { getSheetByName: sheetFor, insertSheet, getUrl: () => 'https://docs.google.com/spreadsheets/d/test-sheet/edit' };
-  return {
-    getActive: () => active,
-    getUi: () => ui,
-    flush() {},
-    $sheet: name => (sheetFor(name) || {}).$grid,
-    $ui: ui
-  };
-}
-
-function createStubs(opts) {
-  const properties = Object.assign({}, opts.properties || {});
-  const fetchCalls = [];
-  const alerts = [];
-  const triggers = (opts.triggers || []).map(handler => ({ getHandlerFunction: () => handler }));
-  const menus = [];
-  const lockLog = [];
-  const mails = [];
-  const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
-  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus);
-
-  return {
-    SpreadsheetApp: spreadsheet,
-    PropertiesService: {
-      getScriptProperties: () => ({
-        getProperty: key => (Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null),
-        setProperty: (key, value) => { properties[key] = String(value); }
-      })
+    appendRow(values) {
+      grid.push(values.slice());
+      return this;
     },
-    UrlFetchApp: {
-      fetch: (url, params) => {
-        fetchCalls.push({ url, params });
-        const r = fetchImpl(url, params);
-        if (!r) throw new Error(`fetch stub returned nothing for ${url}`);
+    clear() {
+      grid.splice(0, grid.length);
+      return this;
+    },
+    setFrozenRows() { return this; },
+    autoResizeColumns() { return this; }
+  };
+}
+
+function loadProject(options = {}) {
+  const propertyStore = Object.assign({}, options.properties || {});
+  const sheetMap = new Map();
+  Object.entries(options.sheets || {}).forEach(([name, rows]) => sheetMap.set(name, makeSheet(name, rows)));
+
+  const alerts = [];
+  const ui = {
+    Button: { YES: 'YES', NO: 'NO', OK: 'OK' },
+    ButtonSet: { YES_NO: 'YES_NO' },
+    alert(...args) {
+      alerts.push(args);
+      if (args[2] === this.ButtonSet.YES_NO) return this.$answer || this.Button.YES;
+      return this.Button.OK;
+    },
+    createMenu() {
+      return {
+        addItem() { return this; },
+        addSeparator() { return this; },
+        addSubMenu() { return this; },
+        addToUi() { return this; }
+      };
+    },
+    $answer: 'YES'
+  };
+
+  const fetchCalls = [];
+  const fetchImpl = options.fetch || (() => ({ code: 200, text: '{}', json: {}, headers: {} }));
+
+  const context = vm.createContext({
+    console,
+    Date,
+    Math,
+    JSON,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Error,
+    Map,
+    Set,
+    encodeURIComponent,
+    decodeURIComponent,
+    Utilities: {
+      base64Encode(value) { return Buffer.from(String(value), 'utf8').toString('base64'); },
+      formatDate,
+      getUuid() { return '12345678-1234-1234-1234-123456789abc'; }
+    },
+    Session: {
+      getScriptTimeZone() { return 'Europe/Warsaw'; }
+    },
+    PropertiesService: {
+      getScriptProperties() {
         return {
-          getResponseCode: () => r.code,
-          getContentText: () => (typeof r.text === 'string' ? r.text : JSON.stringify(r.json ?? {})),
-          getAllHeaders: () => r.headers || {}
+          getProperty(key) { return propertyStore[key] ?? null; },
+          setProperty(key, value) { propertyStore[key] = String(value); },
+          deleteProperty(key) { delete propertyStore[key]; }
         };
       }
     },
-    Utilities: {
-      formatDate,
-      base64Encode: s => Buffer.from(String(s), 'utf8').toString('base64'),
-      getUuid: () => '00000000-0000-4000-8000-000000000000',
-      sleep() {}
-    },
-    ScriptApp: {
-      getOAuthToken: () => 'test-token',
-      getProjectTriggers: () => triggers.slice(),
-      deleteTrigger(trigger) {
-        const i = triggers.indexOf(trigger);
-        if (i >= 0) triggers.splice(i, 1);
-      },
-      // Minimal time-based trigger builder; create() registers the trigger.
-      newTrigger(handler) {
-        const spec = { handler, everyDays: null, atHour: null };
-        const builder = {
-          timeBased: () => builder,
-          everyDays(n) { spec.everyDays = n; return builder; },
-          atHour(h) { spec.atHour = h; return builder; },
-          create() {
-            const trigger = { getHandlerFunction: () => handler, $spec: spec };
-            triggers.push(trigger);
-            return trigger;
+    SpreadsheetApp: {
+      getUi() { return ui; },
+      getActive() {
+        return {
+          getSheetByName(name) { return sheetMap.get(name) || null; },
+          insertSheet(name) {
+            const sheet = makeSheet(name, []);
+            sheetMap.set(name, sheet);
+            return sheet;
           }
         };
-        return builder;
       }
     },
-    Session: { getScriptTimeZone: () => 'Europe/Warsaw' },
-    // Script lock: opts.lockHeld simulates another run holding it; $lock records calls.
-    LockService: {
-      getScriptLock: () => ({
-        tryLock(ms) { lockLog.push(['tryLock', ms]); if (opts.lockHeld) return false; lockLog.held = true; return true; },
-        releaseLock() { lockLog.push(['releaseLock']); lockLog.held = false; },
-        hasLock: () => Boolean(lockLog.held)
-      })
+    UrlFetchApp: {
+      fetch(url, params = {}) {
+        fetchCalls.push({ url, params });
+        const out = fetchImpl(url, params) || {};
+        const code = out.code ?? 200;
+        const text = out.text ?? (out.json !== undefined ? JSON.stringify(out.json) : '{}');
+        const headers = out.headers || {};
+        return {
+          getResponseCode() { return code; },
+          getContentText() { return text; },
+          getAllHeaders() { return headers; }
+        };
+      }
     },
-    Logger: { log() {} },
-    MailApp: {
-      sendEmail: (to, subject, body) => { mails.push({ to, subject, body }); },
-      getRemainingDailyQuota: () => 100
-    },
-    console,
-    $mails: mails,
-    $lock: lockLog,
-    $fetchCalls: fetchCalls,
-    $alerts: alerts,
-    $properties: properties,
-    $triggers: triggers,
-    $menus: menus,
-    $sheet: name => spreadsheet.$sheet(name),
-    $ui: spreadsheet.$ui,
-    $cell: (name, a1) => {
-      const { row, col } = parseA1(a1);
-      const grid = spreadsheet.$sheet(name) || [];
-      return (grid[row - 1] || [])[col - 1] ?? '';
-    }
-  };
-}
+    MailApp: { sendEmail() {} }
+  });
 
-/**
- * @param {object} [opts]
- * @param {Record<string,string>} [opts.properties]  Script Properties
- * @param {Record<string,any[][]>} [opts.sheets]      sheet name → rows (row 1 first)
- * @param {(url, params) => {code, text?, json?, headers?}} [opts.fetch]
- * @param {string[]} [opts.triggers]                  handler names of installed triggers
- * @param {boolean}  [opts.lockHeld]                  another run holds the script lock
- * @param {string[]} [opts.skip]                      source files to omit
- * @param {Record<string,string>} [opts.override]     source file → replacement code
- */
-function loadProject(opts = {}) {
-  const ctx = vm.createContext(createStubs(opts));
-  for (const file of SOURCES) {
-    if ((opts.skip || []).includes(file)) continue;
-    const code = opts.override && Object.prototype.hasOwnProperty.call(opts.override, file)
-      ? opts.override[file]
-      : fs.readFileSync(path.join(ROOT, file), 'utf8');
-    vm.runInContext(code, ctx, { filename: path.join(ROOT, file) });
+  for (const source of SOURCES) {
+    if ((options.skip || []).includes(source)) continue;
+    const code = (options.override && options.override[source]) || fs.readFileSync(path.join(ROOT, source), 'utf8');
+    vm.runInContext(code, context, { filename: path.join(ROOT, source) });
   }
-  ctx.$get = name => vm.runInContext(name, ctx);
-  // Dates must be created inside the VM: an `instanceof Date` check in the
-  // sources fails for Date objects from the test realm.
-  ctx.$Date = vm.runInContext('Date', ctx);
-  return ctx;
-}
 
-/**
- * Objects created inside the VM have a different Object prototype than the
- * test's realm, which makes assert.deepStrictEqual fail on identical data.
- * Round-trip through JSON to compare structure only.
- */
-function plain(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
-/** Routes fetch calls by URL substring: [[needle, response | fn(url, params)], ...]. */
-function fetchRouter(routes) {
-  return (url, params) => {
-    for (const [needle, response] of routes) {
-      if (url.includes(needle)) return typeof response === 'function' ? response(url, params) : response;
-    }
-    throw new Error(`fetch stub: no route for ${url}`);
+  context.$fetchCalls = fetchCalls;
+  context.$alerts = alerts;
+  context.$properties = propertyStore;
+  context.$ui = ui;
+  context.$sheet = name => sheetMap.get(name)?.grid || null;
+  context.$cell = (name, a1) => {
+    const sheet = sheetMap.get(name);
+    if (!sheet) return undefined;
+    const parsed = parseA1(a1, sheet.grid.length);
+    return (sheet.grid[parsed.row - 1] || [])[parsed.col - 1] ?? '';
   };
+  context.$get = name => vm.runInContext(name, context);
+
+  return context;
 }
 
-module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter };
+/** Convert VM objects to plain host objects before deep equality assertions. */
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+module.exports = { loadProject, plain };
