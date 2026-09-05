@@ -192,11 +192,17 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
     }
   };
   const insertSheet = name => {
+    // Like Apps Script: a duplicate name is an error, not a silent no-op.
+    if (Object.prototype.hasOwnProperty.call(sheets, name)) {
+      throw new Error(`A sheet with the name "${name}" already exists. Please enter another name.`);
+    }
     sheets[name] = [];
     return sheetFor(name);
   };
+  // One stable spreadsheet object, like Apps Script: tests may patch its methods.
+  const active = { getSheetByName: sheetFor, insertSheet };
   return {
-    getActive: () => ({ getSheetByName: sheetFor, insertSheet }),
+    getActive: () => active,
     getUi: () => ui,
     flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid,
