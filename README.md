@@ -6,7 +6,7 @@ Google Apps Script automation for WordPress, Google Search Console and Google An
 
 The repository is the canonical source for the Apps Script project. The current production baseline is **v2.8.0**.
 
-Deployment to Google Apps Script is manual but automated: merging into `main` does **not** deploy anything. A maintainer triggers the *Deploy to Apps Script* workflow and approves it in the `production` environment.
+Merging into `main` does **not** deploy anything. Publishing a GitHub release triggers the *Deploy to Apps Script* workflow for that tag, and a maintainer approves it in the `production` environment before anything is pushed. The same workflow can also be run by hand against `main`.
 
 ## Files
 
@@ -86,11 +86,17 @@ Dependabot opens weekly PRs for GitHub Actions and npm dev dependencies.
 
 ## Deploying to Apps Script
 
-1. Merge the change into `main` and make sure CI is green.
-2. Actions → *Deploy to Apps Script* → *Run workflow*. Optionally tick *create_version* to also record an immutable Apps Script version.
-3. Approve the pending `production` deployment. Nothing is pushed until approved.
+The normal path is a release:
 
-The workflow runs lint again, prints the files clasp will push, and then runs `clasp push --force` against the script id from the secret.
+1. Merge the changes into `main` and make sure CI is green.
+2. Releases → open the draft prepared by Release Drafter → *Publish release*. This creates the `vX.Y.Z` tag.
+3. Actions → the *Deploy to Apps Script* run that just started → *Review deployments* → approve `production`. Nothing is pushed until approved.
+
+The workflow checks out the released tag, runs lint, prints the files clasp will push, runs `clasp push --force`, and records an immutable Apps Script version named after the tag. Pre-releases are ignored.
+
+For an ad-hoc deploy of `main` without a release: Actions → *Deploy to Apps Script* → *Run workflow*, optionally ticking *create_version*, then approve it the same way.
+
+Only `main` and `v*` tags are allowed to deploy to `production`.
 
 ## Drift check
 
@@ -104,7 +110,7 @@ Release notes are prepared automatically by **Release Drafter**.
 - Merging a PR into `main` refreshes the draft release.
 - `feat`/`new` resolve to a minor bump; everything else to a patch bump.
 
-Publish the draft from the Releases page when a deployment is done. The initial baseline is `v2.8.0`; future versions follow Semantic Versioning.
+Publishing the draft from the Releases page is what triggers a deployment (see above). The initial baseline is `v2.8.0`; future versions follow Semantic Versioning.
 
 ## License
 

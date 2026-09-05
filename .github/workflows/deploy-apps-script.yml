@@ -1,17 +1,22 @@
 name: Deploy to Apps Script
 
-# Manual, gated deployment of `main` to the Apps Script project.
+# Gated deployment of the repository sources to the Apps Script project.
 #
-# - Triggered only by hand (workflow_dispatch).
-# - The `production` environment requires a reviewer to approve the run before
-#   any secret is exposed or any file is pushed.
-# - Lint must pass before clasp push runs.
+# Triggers:
+#   - release published  → deploys the released tag (pre-releases are skipped)
+#   - workflow_dispatch  → deploys `main` on demand
+#
+# Either way the `production` environment requires a reviewer to approve the
+# run before any secret is exposed or any file is pushed, and lint must pass
+# before clasp push runs.
 #
 # Required repository secrets:
 #   CLASPRC_JSON    contents of ~/.clasprc.json after `clasp login`
 #   APPS_SCRIPT_ID  the Apps Script project id (Project settings → Script ID)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       create_version:
@@ -28,15 +33,21 @@ concurrency:
 
 jobs:
   push:
-    name: clasp push (main)
+    name: clasp push (${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }})
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
+    env:
+      # Released tag for release events, main for manual runs.
+      DEPLOY_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+      # Every release gets an immutable Apps Script version; manual runs opt in.
+      CREATE_VERSION: ${{ github.event_name == 'release' || inputs.create_version == true }}
     steps:
-      - name: Checkout main
+      - name: Checkout ${{ env.DEPLOY_REF }}
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ env.DEPLOY_REF }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -74,8 +85,8 @@ jobs:
         run: clasp push --force
 
       - name: Create immutable version
-        if: ${{ inputs.create_version }}
-        run: clasp version "Deployed from GitHub ${GITHUB_SHA::7} by ${GITHUB_ACTOR}"
+        if: env.CREATE_VERSION == 'true'
+        run: clasp version "${DEPLOY_REF} (${GITHUB_SHA::7}) deployed from GitHub by ${GITHUB_ACTOR}"
 
       - name: Remove credentials
         if: always()
