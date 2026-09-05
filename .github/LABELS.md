@@ -17,6 +17,8 @@ The **Sync GitHub labels** Action reconciles names, colors and descriptions afte
 
 Priority and risk are independent. A tiny but urgent production defect can be `P0` + `T1`; a large security-sensitive refactor can be `P2` + `T3`.
 
+Priority lives in the label, not in the Issue title. After migration, do not prefix titles with `[P0]`, `[P1]`, etc.; duplicating the value in the title would create two sources of truth that can drift apart.
+
 ## Color semantics
 
 The colors are deliberately consistent with the established taxonomy in `system.produkcja`:
