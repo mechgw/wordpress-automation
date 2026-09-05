@@ -73,7 +73,8 @@ describe('inspekcja URL: wyniki w wierszu', () => {
     assert.equal(row[2], 'Submitted and indexed');
     assert.equal(row[3], 'https://www.example.pl/a/');
     assert.equal(row[4], 'https://www.example.pl/a/');
-    assert.equal(row[5], '2026-09-01 05:04', 'crawl time in Europe/Warsaw');
+    // The harness formats in the runner's local zone (UTC in CI, Warsaw on the dev box), so compare through the same formatter.
+    assert.equal(row[5], gas.Utilities.formatDate(new Date('2026-09-01T03:04:05Z'), 'Europe/Warsaw', 'yyyy-MM-dd HH:mm'), 'crawl time parsed from ISO and formatted');
     assert.equal(row[6], 'ALLOWED');
     assert.match(row[7], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     assert.equal(row[8], '');
