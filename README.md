@@ -93,6 +93,8 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
 3. Post a PR comment that starts with `/reviewed`, followed by a short note on what was accepted and what was rejected. It has to be newer than the last commit and the last bot comment, so a new push or a new bot review means a new `/reviewed`.
 
+The check is re-evaluated on every push, review request and PR comment. Copilot finishing its review produces no event, so the `/reviewed` comment is what turns the check green. If it ever looks stale, post `/reviewed` again or run *Review gate* by hand with the PR number.
+
 ```bash
 gh pr comment <number> --body "/reviewed accepted the permissions fix, skipped the wording nit"
 ```
