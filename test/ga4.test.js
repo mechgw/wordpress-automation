@@ -2,7 +2,7 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadProject } = require('./helpers/gas');
+const { loadProject, plain, fetchRouter } = require('./helpers/gas');
 
 describe('GA4.gs hostname / domain helpers', () => {
   const gas = loadProject();
@@ -111,6 +111,7 @@ describe('GA4.gs getGa4Config_', () => {
     const gas = loadProject({
       sheets: {
         'Konfiguracja GA4': [
+          ['Klucz', 'Wartość'],
           ['propertyId', 'properties/123456'],
           ['daysBack', 30],
           ['', 'ignored'],
@@ -134,7 +135,152 @@ describe('GA4.gs getGa4Config_', () => {
   });
 
   test('requireGa4Config_ insists on a propertyId', () => {
-    const gas = loadProject({ sheets: { 'Konfiguracja GA4': [['daysBack', 7]] } });
+    const gas = loadProject({ sheets: { 'Konfiguracja GA4': [['Klucz', 'Wartość'], ['daysBack', 7]] } });
     assert.throws(() => gas.requireGa4Config_(), /Brak propertyId/);
+  });
+});
+
+describe('GA4.gs ga4ApiRequest_', () => {
+  test('sends a bearer token, JSON payload for POST, and parses the response', () => {
+    const gas = loadProject({ fetch: () => ({ code: 200, json: { rows: [] } }) });
+    const out = gas.ga4ApiRequest_('https://analyticsdata.googleapis.com/x', 'post', { a: 1 });
+    const call = gas.$fetchCalls[0];
+    assert.equal(call.params.headers.Authorization, 'Bearer test-token');
+    assert.equal(call.params.muteHttpExceptions, true);
+    assert.equal(call.params.contentType, 'application/json');
+    assert.equal(call.params.payload, '{"a":1}');
+    assert.deepEqual(plain(out), { rows: [] });
+  });
+
+  test('GET has no payload and an empty body becomes {}', () => {
+    const gas = loadProject({ fetch: () => ({ code: 200, text: '' }) });
+    const out = gas.ga4ApiRequest_('https://analyticsadmin.googleapis.com/x', 'get');
+    assert.equal('payload' in gas.$fetchCalls[0].params, false);
+    assert.deepEqual(plain(out), {});
+  });
+
+  test('non-2xx responses throw with the code and body', () => {
+    const gas = loadProject({ fetch: () => ({ code: 403, text: 'denied' }) });
+    assert.throws(() => gas.ga4ApiRequest_('https://analyticsadmin.googleapis.com/x', 'get'), /Google Analytics API HTTP 403:\ndenied/);
+  });
+});
+
+/**
+ * testGA4() end to end: lists properties and their web streams through the
+ * Admin API, writes them to E:H, auto-picks the property whose stream matches
+ * the site domain, then proves Data API access with a small report.
+ */
+describe('GA4.gs testGA4', () => {
+  const ADMIN = 'analyticsadmin.googleapis.com/v1beta/';
+  const accountSummaries = properties => ({
+    code: 200,
+    json: {
+      accountSummaries: [{
+        displayName: 'Acme account',
+        propertySummaries: properties.map(([id, name]) => ({ property: 'properties/' + id, displayName: name }))
+      }]
+    }
+  });
+  const streams = byProperty => (url) => {
+    const id = /properties\/(\d+)\/dataStreams/.exec(url)[1];
+    return {
+      code: 200,
+      json: {
+        dataStreams: (byProperty[id] || []).map(uri => ({
+          type: 'WEB_DATA_STREAM',
+          displayName: 'web',
+          webStreamData: { defaultUri: uri, measurementId: 'G-' + id }
+        }))
+      }
+    };
+  };
+  const report = { code: 200, json: { rows: [{ dimensionValues: [{ value: '20260904' }], metricValues: [{ value: '5' }] }], rowCount: 1 } };
+  const configSheet = () => ({ 'Konfiguracja GA4': [['Klucz', 'Wartość'], ['propertyId', ''], ['daysBack', 30]] });
+
+  function project({ properties, streamsByProperty, siteDomain }) {
+    return loadProject({
+      properties: siteDomain ? { SITE_DOMAIN: siteDomain } : {},
+      sheets: configSheet(),
+      fetch: fetchRouter([
+        [ADMIN + 'accountSummaries', accountSummaries(properties)],
+        ['/dataStreams', streams(streamsByProperty)],
+        [':runReport', report]
+      ])
+    });
+  }
+
+  test('auto-picks the single property whose web stream matches SITE_DOMAIN and confirms Data API access', () => {
+    const gas = project({
+      properties: [['111', 'Main site'], ['222', 'Other site']],
+      streamsByProperty: { 111: ['https://www.example.pl'], 222: ['https://other.pl'] },
+      siteDomain: 'example.pl'
+    });
+
+    gas.testGA4();
+
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B2'), '111', 'property id written to B2');
+    assert.deepEqual(gas.$sheet('Konfiguracja GA4')[0].slice(4, 8), ['Dostępne właściwości GA4', 'Property ID', 'Konto', 'URL strumienia']);
+    assert.deepEqual(gas.$sheet('Konfiguracja GA4')[1].slice(4, 8), ['Main site', '111', 'Acme account', 'https://www.example.pl']);
+    assert.match(gas.$cell('Konfiguracja GA4', 'B9'), /^POŁĄCZENIE OK – Main site \(111\) \| https:\/\/www\.example\.pl$/);
+    const reportCall = gas.$fetchCalls.find(c => c.url.includes(':runReport'));
+    assert.match(reportCall.url, /properties\/111:runReport$/);
+    assert.equal(JSON.parse(reportCall.params.payload).limit, 10000, 'report limit capped at 10000');
+  });
+
+  test('with no site domain and several properties it asks the user to choose', () => {
+    const gas = project({
+      properties: [['111', 'Main site'], ['222', 'Other site']],
+      streamsByProperty: { 111: ['https://www.example.pl'], 222: ['https://other.pl'] }
+    });
+
+    gas.testGA4();
+
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B2'), '');
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), 'WYBIERZ PROPERTY ID Z LISTY E:H I WPISZ DO B2');
+    assert.equal(gas.$fetchCalls.some(c => c.url.includes(':runReport')), false, 'no report without a property');
+  });
+
+  test('with no site domain but exactly one property it picks that property', () => {
+    const gas = project({ properties: [['333', 'Only']], streamsByProperty: { 333: ['https://only.pl'] } });
+    gas.testGA4();
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B2'), '333');
+    assert.match(gas.$cell('Konfiguracja GA4', 'B9'), /^POŁĄCZENIE OK – Only \(333\)/);
+  });
+
+  test('ambiguous match (two properties on the site domain) names the domain in the hint', () => {
+    const gas = project({
+      properties: [['111', 'Main'], ['222', 'Staging']],
+      streamsByProperty: { 111: ['https://www.example.pl'], 222: ['https://staging.example.pl'] },
+      siteDomain: 'example.pl'
+    });
+    gas.testGA4();
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B2'), '');
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), 'KILKA WŁAŚCIWOŚCI MA STRUMIEŃ EXAMPLE.PL – WYBIERZ PROPERTY ID Z LISTY E:H');
+  });
+
+  test('no accessible properties at all', () => {
+    const gas = project({ properties: [], streamsByProperty: {}, siteDomain: 'example.pl' });
+    gas.testGA4();
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), 'BRAK DOSTĘPNYCH WŁAŚCIWOŚCI GA4');
+  });
+
+  test('a preselected property is kept and reported even without a matching stream', () => {
+    const gas = loadProject({
+      sheets: { 'Konfiguracja GA4': [['Klucz', 'Wartość'], ['propertyId', 'properties/999']] },
+      fetch: fetchRouter([
+        [ADMIN + 'accountSummaries', accountSummaries([['111', 'Main']])],
+        ['/dataStreams', streams({ 111: ['https://www.example.pl'] })],
+        [':runReport', report]
+      ])
+    });
+    gas.testGA4();
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B2'), 'properties/999', 'B2 untouched');
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), 'POŁĄCZENIE OK – property 999 (999)');
+  });
+
+  test('missing config sheet fails before any API call', () => {
+    const gas = loadProject({ sheets: {}, fetch: () => { throw new Error('should not fetch'); } });
+    assert.throws(() => gas.testGA4(), /Brak zakładki: Konfiguracja GA4/);
+    assert.equal(gas.$fetchCalls.length, 0);
   });
 });

@@ -14,13 +14,13 @@
     },
     {
       "pattern": "GA4.gs",
-      "threshold": 20,
-      "rationale": "BASELINE 2026-09-05: report imports, key-event configuration and sheet formatting are untested; helpers and config parsing are. Raise as stubbed tests are added."
+      "threshold": 40,
+      "rationale": "RATCHET 2026-09-05 (#33): testGA4, Admin/Data API request layer, config parsing and helpers are covered (41%). Report imports, key-event configuration and sheet formatting are not yet. Raise as stubbed tests are added."
     },
     {
       "pattern": "WordPress.gs",
-      "threshold": 13,
-      "rationale": "BASELINE 2026-09-05: command processing, media and page operations run against WordPress and are untested; config, fetch and response helpers are. Raise as stubbed tests are added."
+      "threshold": 25,
+      "rationale": "RATCHET 2026-09-05 (#33): config, fetch, Rank Math test/read/write, page-layout get/copy and response helpers are covered (25%). Command processing, media and page create/publish/update are not yet. Raise as stubbed tests are added."
     }
   ]
 }
