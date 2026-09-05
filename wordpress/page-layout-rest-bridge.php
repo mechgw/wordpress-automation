@@ -58,7 +58,8 @@ function wpa_page_layout_rest_namespace() {
 		return '';
 	}
 
-	return (string) array_key_first( $matches );
+	$namespaces = array_keys( $matches );
+	return (string) $namespaces[0];
 }
 
 /**
@@ -123,31 +124,62 @@ function wpa_page_layout_page_payload( $post ) {
 }
 
 /**
- * GET permission: the authenticated WordPress user must be able to edit the
- * requested page. Application Password authentication is handled by WP core.
+ * GET permission: reject malformed input with 400, preserve the bridge's 404
+ * for nonexistent/non-page posts, then enforce edit access for a real page.
+ * Application Password authentication is handled by WordPress core.
  *
  * @param WP_REST_Request $request REST request.
- * @return bool
+ * @return bool|WP_Error
  */
 function wpa_page_layout_can_read( $request ) {
 	$post_id = absint( $request->get_param( 'post_id' ) );
-	return $post_id > 0 && current_user_can( 'edit_post', $post_id );
+
+	if ( $post_id <= 0 ) {
+		return new WP_Error(
+			'wp_automation_invalid_post_id',
+			'Valid post_id is required.',
+			array( 'status' => 400 )
+		);
+	}
+
+	$post = wpa_page_layout_get_page( $post_id );
+	if ( is_wp_error( $post ) ) {
+		return $post;
+	}
+
+	return current_user_can( 'edit_post', $post_id );
 }
 
 /**
- * POST permission: require edit access to both source and target pages.
+ * POST permission: validate source/target first, preserve page-not-found
+ * errors, then require edit access to both real pages.
  *
  * @param WP_REST_Request $request REST request.
- * @return bool
+ * @return bool|WP_Error
  */
 function wpa_page_layout_can_copy( $request ) {
 	$source_id = absint( $request->get_param( 'source_post_id' ) );
 	$target_id = absint( $request->get_param( 'target_post_id' ) );
 
-	return $source_id > 0
-		&& $target_id > 0
-		&& $source_id !== $target_id
-		&& current_user_can( 'edit_post', $source_id )
+	if ( $source_id <= 0 || $target_id <= 0 || $source_id === $target_id ) {
+		return new WP_Error(
+			'wp_automation_invalid_layout_copy',
+			'Valid, distinct source_post_id and target_post_id are required.',
+			array( 'status' => 400 )
+		);
+	}
+
+	$source = wpa_page_layout_get_page( $source_id );
+	if ( is_wp_error( $source ) ) {
+		return $source;
+	}
+
+	$target = wpa_page_layout_get_page( $target_id );
+	if ( is_wp_error( $target ) ) {
+		return $target;
+	}
+
+	return current_user_can( 'edit_post', $source_id )
 		&& current_user_can( 'edit_post', $target_id );
 }
 
