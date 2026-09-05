@@ -58,7 +58,18 @@ The Google account behind `CLASPRC_JSON` must also have the Apps Script API swit
 ```bash
 npm ci
 npm run lint
+npm test
 ```
+
+### Unit tests
+
+`test/` holds Node unit tests (`node --test`, no extra packages). `test/helpers/gas.js` loads the `.gs` files into a VM context with small stand-ins for the Google services (`SpreadsheetApp`, `PropertiesService`, `UrlFetchApp`, `Utilities`, `ScriptApp`), so the shared global scope of Apps Script is reproduced and the pure helpers plus the configuration layer can be exercised without Google:
+
+- date parsing and shifting, hostname/domain matching, GA4 row extraction, WordPress response helpers;
+- `getWpConfig_` / `wpBridgePath_` validation (missing or malformed Script Properties), `wpFetch_` request shape and response parsing;
+- `getGa4Config_` defaults, `Version.gs` presence/absence.
+
+Everything that talks to Sheets, GA4 or WordPress for real stays covered by the sheet's *Sprawdź połączenie* / *Test …* menu items and the drift check. Two VM gotchas when writing tests: create `Date` objects with `gas.$Date`, and compare objects returned from the sources through `plain()` (different realm, different prototypes).
 
 To work against the live Apps Script project, log in once (clasp is installed by `npm ci`):
 
