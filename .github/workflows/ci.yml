@@ -48,10 +48,12 @@ jobs:
 
           for file in "${files[@]}"; do
             tmp="$(mktemp --suffix=.js)"
+            trap 'rm -f "$tmp"' EXIT
             cp "$file" "$tmp"
             echo "Checking $file"
             node --check "$tmp"
             rm -f "$tmp"
+            trap - EXIT
           done
 
   secret-scan:
