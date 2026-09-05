@@ -28,12 +28,18 @@ function getWpConfig_() {
     allowWrites: props.getProperty('WP_ALLOW_WRITES') === 'TRUE',
     // Namespace dedykowanych endpointów snippetu WordPress (bez ukośników),
     // np. "mojafirma" dla /wp-json/mojafirma/v1/...
-    restNamespace: String(props.getProperty('WP_REST_NAMESPACE') || '').replace(/^\/+|\/+$/g, '')
+    restNamespace: String(props.getProperty('WP_REST_NAMESPACE') || '').trim().replace(/^\/+|\/+$/g, '')
   };
 
   if (!config.baseUrl) throw new Error('Brak Script Property: WP_BASE_URL');
   if (!config.username) throw new Error('Brak Script Property: WP_USERNAME');
   if (!config.appPassword) throw new Error('Brak Script Property: WP_APP_PASSWORD');
+  if (config.restNamespace && !/^[a-z0-9_-]+$/i.test(config.restNamespace)) {
+    throw new Error(
+      'Nieprawidłowa Script Property WP_REST_NAMESPACE: "' + config.restNamespace +
+      '". Dozwolone są tylko litery, cyfry, "-" i "_" (bez ukośników i wersji), np. "acme".'
+    );
+  }
 
   return config;
 }
@@ -131,10 +137,11 @@ function testRankMathBridge() {
     );
   }
 
-  const endpoint = wpFetch_(wpBridgePath_('seo-meta'));
+  const seoMetaPath = wpBridgePath_('seo-meta');
+  const endpoint = wpFetch_(seoMetaPath);
   if (endpoint.code < 200 || endpoint.code >= 300) {
     throw new Error(
-      'Odczyt Rank Math działa, ale dedykowany endpoint zapisu (' + wpBridgePath_('seo-meta') +
+      'Odczyt Rank Math działa, ale dedykowany endpoint zapisu (' + seoMetaPath +
       ') nie odpowiada. HTTP ' + endpoint.code + '\n\n' + endpoint.text.slice(0, 1000)
     );
   }
