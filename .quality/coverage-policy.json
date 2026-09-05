@@ -1,0 +1,26 @@
+{
+  "_comment": "Per-file line-coverage thresholds enforced by scripts/quality/coverage-gate.js. Rules are matched top-down; the first matching pattern wins, otherwise defaultThreshold applies. RATCHET: raise a threshold whenever tests push a file above it, never lower one without a rationale and a follow-up issue. Changed lines are always required to be 100% covered regardless of these thresholds.",
+  "defaultThreshold": 80,
+  "rules": [
+    {
+      "pattern": "Version.gs",
+      "threshold": 100,
+      "rationale": "Placeholder constant only; fully executed when the harness loads it."
+    },
+    {
+      "pattern": "Kod.gs",
+      "threshold": 23,
+      "rationale": "BASELINE 2026-09-05: GSC import, sheet writes and trigger management still call Google services directly and are covered only by the sheet's manual test menu. Raise as those paths get stubbed tests."
+    },
+    {
+      "pattern": "GA4.gs",
+      "threshold": 20,
+      "rationale": "BASELINE 2026-09-05: report imports, key-event configuration and sheet formatting are untested; helpers and config parsing are. Raise as stubbed tests are added."
+    },
+    {
+      "pattern": "WordPress.gs",
+      "threshold": 13,
+      "rationale": "BASELINE 2026-09-05: command processing, media and page operations run against WordPress and are untested; config, fetch and response helpers are. Raise as stubbed tests are added."
+    }
+  ]
+}
