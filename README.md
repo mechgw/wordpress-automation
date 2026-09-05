@@ -27,8 +27,15 @@ The WordPress bridge currently expects properties such as:
 - `WP_USERNAME`
 - `WP_APP_PASSWORD`
 - `WP_ALLOW_WRITES`
+- `WP_REST_NAMESPACE` — namespace of the site-specific REST bridge snippet, e.g. `acme` for `/wp-json/acme/v1/seo-meta`.
+
+Optional:
+
+- `SITE_DOMAIN` — domain used to auto-pick the GA4 property by its web stream URL. Falls back to the host of `WP_BASE_URL`; with neither set, the property has to be chosen by hand in the config sheet.
 
 `WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
+
+Nothing site-specific (domain, company name, REST namespace) is hardcoded in the sources; it all lives in Script Properties so the repository can stay public.
 
 ### GitHub repository secrets
 
