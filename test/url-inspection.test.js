@@ -203,8 +203,11 @@ describe('inspekcja URL: lista, limit, lock, konfiguracja', () => {
     const s = sheets(null);
     s[SHEET] = [['https://www.example.pl/a/']];
     const gas = loadProject({ sheets: s, fetch: fetchRouter([[INSPECT, byUrl({ 'https://www.example.pl/a/': indexed('https://www.example.pl/a/') })]]) });
-    gas.ensureUrlInspectionSheet_();
-    assert.deepEqual(plain(gas.$sheet(SHEET)[0]), HEADER);
+    const out = plain(gas.sprawdzIndeksowanie());
+    assert.deepEqual(plain(gas.$sheet(SHEET)[0]), HEADER, 'header inserted above the data');
+    assert.equal(gas.$sheet(SHEET)[1][0], 'https://www.example.pl/a/', 'the pasted URL moved to row 2, not overwritten');
+    assert.equal(gas.$sheet(SHEET)[1][1], 'ZAINDEKSOWANY (PASS)', 'and was inspected');
+    assert.equal(out.checked, 1);
 
     const race = project(null, {});
     const ss = race.SpreadsheetApp.getActive();
@@ -228,7 +231,31 @@ describe('inspekcja URL: lista, limit, lock, konfiguracja', () => {
     assert.equal(gas.$fetchCalls.length, 150);
     assert.equal(gas.$sheet(SHEET)[151][1] ?? '', '', 'row 151 untouched');
     assert.equal(gas.$sheet(SHEET)[150][1], 'ZAINDEKSOWANY (PASS)', 'row 150 processed');
-    assert.match(gas.$alerts[0][0], /Pominięto: 2 \(limit 150 adresów na przebieg/);
+    assert.match(gas.$alerts[0][0], /Pominięto: 2 \(limit 150 adresów na przebieg; kolejny przebieg zaczyna od najdawniej sprawdzonych\)/);
+
+    // Drugi przebieg: najpierw 2 nigdy niesprawdzone, potem 148 najdawniej sprawdzonych (wiersze 2..149).
+    gas.$fetchCalls.length = 0;
+    const second = plain(gas.sprawdzIndeksowanie());
+    assert.deepEqual(second, { checked: 150, errors: 0, changed: 0, skipped: 2, empty: false });
+    const inspected = gas.$fetchCalls.map(c => JSON.parse(c.params.payload).inspectionUrl);
+    assert.deepEqual(inspected.slice(0, 2), ['https://www.example.pl/p150/', 'https://www.example.pl/p151/'], 'tail first');
+    assert.equal(inspected[2], 'https://www.example.pl/p0/');
+    assert.equal(inspected[149], 'https://www.example.pl/p147/');
+    assert.ok(!inspected.includes('https://www.example.pl/p148/') && !inspected.includes('https://www.example.pl/p149/'), 'the two most recently checked wait for the next run');
+  });
+
+  test('kolejka: nigdy niesprawdzone przed najdawniej sprawdzonymi, błędne wiersze rotują jak inne, nieczytelna data = najpilniejsza', () => {
+    const rows = [
+      ['https://www.example.pl/recent/', 'ZAINDEKSOWANY (PASS)', '', '', '', '', '', '2026-09-05 10:00', '', ''],
+      ['https://www.example.pl/old/', 'ZAINDEKSOWANY (PASS)', '', '', '', '', '', '2026-08-01 10:00', '', ''],
+      ['https://www.example.pl/never/'],
+      ['https://www.example.pl/errored/', '', '', '', '', '', '', '2026-08-15 10:00', '', 'HTTP 429'],
+      ['https://www.example.pl/garbage/', '', '', '', '', '', '', 'kiedyś', '', '']
+    ];
+    const gas = loadProject({ sheets: sheets(rows) });
+    const queue = plain(gas.urlInspectionQueue_(gas.$sheet(SHEET).slice(1))).map(q => q.url.replace('https://www.example.pl/', ''));
+    assert.deepEqual(queue, ['never/', 'garbage/', 'old/', 'errored/', 'recent/']);
+    assert.equal(gas.urlInspectionCheckedAt_(new gas.$Date(2026, 0, 1)), new Date(2026, 0, 1).getTime(), 'Date cell');
   });
 
   test('brak siteUrl → jasny błąd przed jakimkolwiek zapytaniem', () => {

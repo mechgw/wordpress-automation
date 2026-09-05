@@ -43,10 +43,35 @@ function ensureUrlInspectionSheet_() {
     }
   }
   if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== URL_INSPECTION_HEADER[0]) {
+    // Arkusz z danymi, ale bez nagłówka (np. wklejona lista): nagłówek idzie
+    // NAD dane, żeby nie nadpisać pierwszego adresu.
+    if (sheet.getLastRow() >= 1 && !sheet.getRange(1, 1, 1, URL_INSPECTION_HEADER.length).isBlank()) {
+      sheet.insertRowBefore(1);
+    }
     sheet.getRange(1, 1, 1, URL_INSPECTION_HEADER.length).setValues([URL_INSPECTION_HEADER]);
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+/** Czas z kolumny „Sprawdzono” jako liczba; brak lub nieczytelny = 0 (najpilniejszy). */
+function urlInspectionCheckedAt_(value) {
+  if (!value) return 0;
+  const t = value instanceof Date ? value.getTime() : new Date(String(value).replace(' ', 'T')).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+/**
+ * Kolejność przetwarzania: adresy nigdy niesprawdzone najpierw, potem od
+ * najdawniej sprawdzonych; przy równym czasie kolejność wierszy. Dzięki temu
+ * lista dłuższa niż limit jest obsługiwana w kolejnych przebiegach, a nie
+ * zawsze od góry.
+ */
+function urlInspectionQueue_(values) {
+  return values
+    .map((line, i) => ({ rowNumber: i + 2, line, url: String(line[0] || '').trim(), checkedAt: urlInspectionCheckedAt_(line[7]) }))
+    .filter(item => item.url)
+    .sort((a, b) => (a.checkedAt - b.checkedAt) || (a.rowNumber - b.rowNumber));
 }
 
 /** Jedno zapytanie do API inspekcji; zwraca indexStatusResult (może być pusty). */
@@ -118,10 +143,8 @@ function runUrlInspection_() {
   const values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
   const now = new Date();
 
-  values.forEach((line, i) => {
-    const url = String(line[0] || '').trim();
-    if (!url) return;
-    const rowNumber = i + 2;
+  urlInspectionQueue_(values).forEach(item => {
+    const { url, line, rowNumber } = item;
     if (summary.checked + summary.errors >= URL_INSPECTION_MAX_PER_RUN) {
       summary.skipped++;
       return;
@@ -158,7 +181,7 @@ function urlInspectionSummaryText_(summary) {
     'Błędy (kolumna Błąd): ' + summary.errors
   ];
   if (summary.skipped) {
-    lines.push('Pominięto: ' + summary.skipped + ' (limit ' + URL_INSPECTION_MAX_PER_RUN + ' adresów na przebieg; uruchom ponownie dla reszty)');
+    lines.push('Pominięto: ' + summary.skipped + ' (limit ' + URL_INSPECTION_MAX_PER_RUN + ' adresów na przebieg; kolejny przebieg zaczyna od najdawniej sprawdzonych)');
   }
   return lines.join('\n');
 }

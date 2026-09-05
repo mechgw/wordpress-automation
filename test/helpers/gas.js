@@ -157,6 +157,7 @@ function makeSheet(name, initialRows) {
     getMaxRows: () => Math.max(grid.length, 1000),
     getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
     insertRowsAfter() { return this; },
+    insertRowBefore(row) { grid.splice(row - 1, 0, []); return this; },
     insertColumnsAfter() { return this; },
     deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
     setFrozenRows() { return this; },
