@@ -17,9 +17,17 @@ function onOpen() {
     addVersionMenu_();
 }
 
+/**
+ * Dane wdrożenia z Version.gs. Guard przez typeof: bez tego pliku (np. stare
+ * wdrożenie albo niepełny zestaw plików) menu i testy nadal mają działać.
+ */
+function deployedVersion_() {
+  return typeof DEPLOYED_VERSION === 'object' && DEPLOYED_VERSION ? DEPLOYED_VERSION : {};
+}
+
 /** Etykieta wdrożonej wersji, np. "v2.9.4" albo "dev" w edytorze. */
 function versionLabel_() {
-  return (DEPLOYED_VERSION && DEPLOYED_VERSION.tag) || 'dev';
+  return deployedVersion_().tag || 'dev';
 }
 
 /** Menu z numerem wersji w tytule, obok pozostałych menu projektu. */
@@ -32,7 +40,7 @@ function addVersionMenu_() {
 
 /** Pokazuje tag, commit i datę wdrożenia zapisane przez workflow deployu. */
 function showDeployedVersion() {
-  const v = DEPLOYED_VERSION || {};
+  const v = deployedVersion_();
   const lines = [
     'Wersja: ' + versionLabel_(),
     'Commit: ' + (v.commit || 'brak (kod z edytora, nie z wdrożenia)'),
