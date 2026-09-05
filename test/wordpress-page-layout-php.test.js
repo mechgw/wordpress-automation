@@ -30,13 +30,30 @@ test('page-layout bridge reuses the existing REST namespace instead of hardcodin
   assert.doesNotMatch(bridge, /citycouriers/i);
 });
 
-test('page-layout bridge requires edit permissions for reads and copies', () => {
+test('namespace discovery avoids the PHP 7.3-only array_key_first helper', () => {
+  assert.doesNotMatch(bridge, /array_key_first\s*\(/);
+  assert.match(bridge, /\$namespaces = array_keys\( \$matches \);/);
+  assert.match(bridge, /return \(string\) \$namespaces\[0\];/);
+});
+
+test('page-layout bridge requires edit permissions for valid pages', () => {
   assert.match(bridge, /function wpa_page_layout_can_read/);
   assert.match(bridge, /current_user_can\( 'edit_post', \$post_id \)/);
   assert.match(bridge, /function wpa_page_layout_can_copy/);
   assert.match(bridge, /current_user_can\( 'edit_post', \$source_id \)/);
   assert.match(bridge, /current_user_can\( 'edit_post', \$target_id \)/);
   assert.doesNotMatch(bridge, /__return_true/);
+});
+
+test('permission callbacks preserve 400 input errors and 404 page errors instead of masking them as 403', () => {
+  assert.match(
+    bridge,
+    /function wpa_page_layout_can_read[\s\S]*?wp_automation_invalid_post_id[\s\S]*?array\( 'status' => 400 \)[\s\S]*?wpa_page_layout_get_page\( \$post_id \)[\s\S]*?return \$post;[\s\S]*?current_user_can\( 'edit_post', \$post_id \)/
+  );
+  assert.match(
+    bridge,
+    /function wpa_page_layout_can_copy[\s\S]*?wp_automation_invalid_layout_copy[\s\S]*?array\( 'status' => 400 \)[\s\S]*?wpa_page_layout_get_page\( \$source_id \)[\s\S]*?return \$source;[\s\S]*?wpa_page_layout_get_page\( \$target_id \)[\s\S]*?return \$target;[\s\S]*?current_user_can\( 'edit_post', \$source_id \)/
+  );
 });
 
 test('layout copy mirrors missing meta and verifies the result after writing', () => {
