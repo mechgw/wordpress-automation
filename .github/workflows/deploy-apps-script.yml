@@ -4,10 +4,10 @@ name: Deploy to Apps Script
 #
 # Triggers:
 #   - release published  → deploys the released tag (pre-releases are skipped)
-#   - workflow_dispatch  → deploys the ref the run was started from: `main`
-#                          for a hotfix, or a `v*` tag for a rollback (pick it
-#                          in the "Use workflow from" dropdown). The production
-#                          environment only accepts `main` and `v*` tags.
+#   - workflow_dispatch  → deploys the `deploy_ref` input: `main` (default)
+#                          for a hotfix, or a `v*` tag for a rollback. Always
+#                          start the run from `main` so this workflow definition
+#                          is used; older tags carry older workflow files.
 #
 # Either way the `production` environment requires a reviewer to approve the
 # run before any secret is exposed or any file is pushed, and lint must pass
@@ -22,6 +22,10 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
+      deploy_ref:
+        description: "What to deploy: main, or a release tag such as v2.9.1 to roll back"
+        type: string
+        default: main
       create_version:
         description: "Also create an immutable Apps Script version after the push"
         type: boolean
@@ -36,18 +40,33 @@ concurrency:
 
 jobs:
   push:
-    name: clasp push (${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }})
+    name: clasp push (${{ github.event_name == 'release' && github.event.release.tag_name || inputs.deploy_ref }})
     if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
     env:
-      # Released tag for release events; for manual runs the ref chosen in the
-      # "Run workflow" dialog (main, or a v* tag to roll back).
-      DEPLOY_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+      # Released tag for release events; the deploy_ref input for manual runs.
+      DEPLOY_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.deploy_ref }}
       # Every release gets an immutable Apps Script version; manual runs opt in.
       CREATE_VERSION: ${{ github.event_name == 'release' || inputs.create_version == true }}
     steps:
+      - name: Validate deploy ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DEPLOY_REF" in
+            main) kind=heads ;;
+            v[0-9]*) kind=tags ;;
+            *) echo "::error::deploy_ref must be 'main' or a v* release tag, got '$DEPLOY_REF'"; exit 1 ;;
+          esac
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/$kind/$DEPLOY_REF" --jq '.object.sha' >/dev/null 2>&1; then
+            echo "::error::ref '$DEPLOY_REF' does not exist in $GITHUB_REPOSITORY"; exit 1
+          fi
+          echo "Deploying $DEPLOY_REF"
+
       - name: Checkout ${{ env.DEPLOY_REF }}
         uses: actions/checkout@v7
         with:
