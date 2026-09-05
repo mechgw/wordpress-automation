@@ -9,7 +9,6 @@ const { loadProject, plain } = require('./helpers/gas');
 
 const ROOT = path.resolve(__dirname, '..');
 const FOOTER_MIGRATION_CODE = fs.readFileSync(path.join(ROOT, 'GlobalFooterMigration.gs'), 'utf8');
-const B2B_CONTEXT_CODE = fs.readFileSync(path.join(ROOT, 'FormSourcePageContext.gs'), 'utf8');
 const RESULTS_HEADER = [
   'result_id', 'command_id', 'wp_id', 'slug', 'status', 'link', 'title',
   'modified', 'content', 'at', 'rm_title', 'rm_desc', 'kind'
@@ -29,7 +28,7 @@ const BASE_PROPS = {
 function makeSnippet(gas, overrides = {}) {
   return Object.assign({
     id: 301,
-    name: 'CC B2B Source Page Context',
+    name: 'B2B Source Page Context',
     desc: 'B2B source page',
     code: gas.buildB2BSourceContextCode_(),
     scope: 'head-content',
@@ -112,19 +111,123 @@ function project({ router, properties = {}, uiAnswer = 'YES', withResults = true
     fetch: router ? router.fetch : (() => ({ code: 200, json: [], headers: {} }))
   });
   vm.runInContext(FOOTER_MIGRATION_CODE, gas, { filename: path.join(ROOT, 'GlobalFooterMigration.gs') });
-  vm.runInContext(B2B_CONTEXT_CODE, gas, { filename: path.join(ROOT, 'FormSourcePageContext.gs') });
   gas.$ui.$answer = uiAnswer;
   return gas;
 }
 
-test('kod kontekstu zapisuje tylko bieżącą stronę formularza B2B bez danych marketingowych', () => {
+function makeBrowserForm(type, { withSourceField = true, attached = true } = {}) {
+  const events = [];
+  const field = withSourceField ? {
+    value: '',
+    dispatchEvent(event) { events.push(event.type); }
+  } : null;
+  const form = {
+    querySelector(selector) {
+      return selector === 'input[name="hidden-13"]' ? field : null;
+    }
+  };
+  const marker = {
+    value: type,
+    closest(selector) {
+      return attached && selector === 'form' ? form : null;
+    }
+  };
+  return { marker, field, events };
+}
+
+function executeBrowserSnippet(code, initialForms = [], location = {}) {
+  let forms = initialForms.slice();
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  const jqueryListeners = new Map();
+  const timers = [];
+
+  const document = {
+    readyState: 'complete',
+    querySelectorAll(selector) {
+      return selector === 'input[name="hidden-11"]' ? forms.map(item => item.marker) : [];
+    },
+    addEventListener(type, handler) { documentListeners.set(type, handler); }
+  };
+
+  function BrowserEvent(type, options = {}) {
+    this.type = type;
+    this.bubbles = Boolean(options.bubbles);
+  }
+
+  const window = {
+    location: {
+      origin: location.origin || 'https://www.example.pl',
+      pathname: location.pathname || '/business/',
+      search: location.search || '?utm_source=test'
+    },
+    addEventListener(type, handler) { windowListeners.set(type, handler); },
+    setInterval(handler) { timers.push(handler); return timers.length; },
+    clearInterval() {},
+    jQuery() {
+      return {
+        on(type, handler) { jqueryListeners.set(type, handler); }
+      };
+    }
+  };
+
+  const browser = vm.createContext({ document, window, Event: BrowserEvent });
+  const script = code.replace(/^<script>\n?/, '').replace(/\n?<\/script>$/, '');
+  vm.runInContext(script, browser, { filename: 'b2b-source-page-context.browser.js' });
+
+  return {
+    setForms(nextForms) { forms = nextForms.slice(); },
+    triggerJQuery(type) {
+      const handler = jqueryListeners.get(type);
+      if (handler) handler();
+    },
+    jqueryListeners,
+    documentListeners,
+    windowListeners,
+    timers
+  };
+}
+
+test('browser snippet zapisuje origin + pathname tylko w formularzu B2B i emituje zdarzenia pola', () => {
+  const gas = project();
+  const b2b = makeBrowserForm('b2b_lead');
+  const other = makeBrowserForm('operational_order');
+  const missing = makeBrowserForm('b2b_lead', { withSourceField: false });
+  const detached = makeBrowserForm('b2b_lead', { attached: false });
+
+  executeBrowserSnippet(
+    gas.buildB2BSourceContextCode_(),
+    [b2b, other, missing, detached],
+    { pathname: '/business/', search: '?utm_source=ignored' }
+  );
+
+  assert.equal(b2b.field.value, 'https://www.example.pl/business/');
+  assert.deepEqual(b2b.events, ['input', 'change']);
+  assert.equal(other.field.value, '');
+  assert.deepEqual(other.events, []);
+});
+
+test('browser snippet obsługuje właściwe zdarzenie AJAX Forminatora dla formularza doładowanego później', () => {
+  const gas = project();
+  const browser = executeBrowserSnippet(gas.buildB2BSourceContextCode_(), []);
+  const lateB2B = makeBrowserForm('b2b_lead');
+
+  browser.setForms([lateB2B]);
+  browser.triggerJQuery('after.load.forminator');
+
+  assert.equal(lateB2B.field.value, 'https://www.example.pl/business/');
+  assert.deepEqual(lateB2B.events, ['input', 'change']);
+  assert.equal(browser.jqueryListeners.has('after.load.forminator'), true);
+});
+
+test('kod kontekstu nie odczytuje ani nie zapisuje danych marketingowych', () => {
   const gas = project();
   const code = gas.buildB2BSourceContextCode_();
+
   assert.match(code, /hidden-11/);
   assert.match(code, /hidden-13/);
   assert.match(code, /b2b_lead/);
-  assert.match(code, /window\.location\.origin \+ window\.location\.pathname/);
-  assert.match(code, /forminator:form:loaded/);
+  assert.match(code, /after\.load\.forminator/);
   assert.doesNotMatch(code, /cmplz|consent/i);
   assert.doesNotMatch(code, /cookie|localStorage|gclid|gbraid|wbraid|utm_/i);
 });
@@ -159,6 +262,7 @@ test('prepare tworzy tylko nieaktywny snippet, zapisuje ID i drugi run go reuży
   assert.equal(first.active, false);
   assert.equal(router.state.snippet.active, false);
   assert.equal(router.state.snippet.scope, 'head-content');
+  assert.equal(router.state.snippet.name, 'B2B Source Page Context');
   assert.deepEqual(router.state.snippet.tags, ['b2b-source-page-context']);
   assert.equal(gas.$properties.WP_B2B_SOURCE_CONTEXT_SNIPPET_ID, '301');
   assert.match(String(gas.$alerts.at(-1)[0]), /NIEAKTYWNY/);
@@ -215,6 +319,7 @@ test('prepare obsługuje anulowanie i odrzuca niejednoznaczne lub uszkodzone sta
 
 test('audit wymaga konfiguracji i zwraca kontrolowany stan', () => {
   let gas = project();
+  assert.throws(() => gas.getB2BSourceContextConfiguredId_(), /brak zapisanego ID/);
   assert.throws(() => gas.getB2BSourceContextConfiguredSnippet_(), /brak zapisanego ID/);
 
   const seed = project();
@@ -294,6 +399,29 @@ test('rollback dezaktywuje tylko dodatkowy snippet i jest idempotentny', () => {
 
   const again = gas.rollbackB2BSourcePageContext();
   assert.deepEqual(plain(again), { alreadyRolledBack: true, snippetId: 301 });
+});
+
+test('rollback działa awaryjnie mimo driftu kodu lub błędu snippetu', () => {
+  const seed = project();
+  const damaged = makeSnippet(seed, {
+    active: true,
+    code: 'tampered code',
+    code_error: ['parse error']
+  });
+  const router = makeRouter({ snippet: damaged });
+  const gas = project({
+    router,
+    properties: {
+      WP_ALLOW_WRITES: 'TRUE',
+      WP_B2B_SOURCE_CONTEXT_SNIPPET_ID: '301'
+    }
+  });
+
+  const result = gas.rollbackB2BSourcePageContext();
+
+  assert.deepEqual(plain(result).active, false);
+  assert.equal(router.state.snippet.active, false);
+  assert.equal(gas.$sheet('WP SNAPSHOTS').length >= 2, true);
 });
 
 test('rollback można anulować i wykrywa brak faktycznej dezaktywacji', () => {
