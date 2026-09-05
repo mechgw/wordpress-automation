@@ -43,7 +43,8 @@ jobs:
           : "${APPS_SCRIPT_ID:?Missing APPS_SCRIPT_ID repository secret}"
           umask 077
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
-          printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > .clasp.json
+          # scriptExtensions keeps clasp 3 on .gs (its default is .js).
+          printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
       - name: Pull live project
         run: clasp pull
@@ -53,6 +54,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The Apps Script editor strips the trailing newline from every file.
+          # Add it back so the comparison only reports real content changes.
+          for f in *.gs appsscript.json; do
+            [ -f "$f" ] && sed -i -e '$a\' "$f"
+          done
           # .clasp.json is git-ignored, so only Apps Script sources show up here.
           changes="$(git status --porcelain)"
           if [ -z "$changes" ]; then

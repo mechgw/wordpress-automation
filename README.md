@@ -58,8 +58,10 @@ clasp login
 Then create a git-ignored `.clasp.json` with the project id:
 
 ```json
-{ "scriptId": "<script id>", "rootDir": "." }
+{ "scriptId": "<script id>", "rootDir": ".", "scriptExtensions": ["gs"] }
 ```
+
+`scriptExtensions` matters: clasp 3 defaults to `.js`, which would pull the sources as `Kod.js` next to `Kod.gs`.
 
 `clasp status` lists what would be pushed. Do not run `clasp push` locally; use the deploy workflow so every deployment is reviewed and logged.
 
