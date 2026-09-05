@@ -367,7 +367,7 @@ function importGa4Range_(startDate, endDate, cfg) {
 
   // 3) Główne zdarzenia biznesowe — zwykły eventCount, niezależnie od statusu key event.
   // Dzięki temu zachowujemy historię sprzed momentu oznaczenia zdarzeń jako key events.
-  let businessResp = [];
+  let businessResp;
   let businessDetailed = true;
   try {
     businessResp = runGa4ReportPaged_(cfg.propertyId, {
