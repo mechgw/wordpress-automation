@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'Status.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'Status.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -172,7 +172,11 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
     return instances.get(name);
   };
   const ui = {
-    alert: (...args) => { alerts.push(args); },
+    Button: { YES: 'YES', NO: 'NO', OK: 'OK', CANCEL: 'CANCEL' },
+    ButtonSet: { OK: 'OK', YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
+    // alert(text) or alert(title, text, buttons); the answer comes from ui.$answer (default OK).
+    alert: (...args) => { alerts.push(args); return ui.$answer; },
+    $answer: 'OK',
     createMenu: title => {
       const entry = { title, items: [] };
       const menu = {
@@ -188,7 +192,8 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
     getActive: () => ({ getSheetByName: sheetFor }),
     getUi: () => ui,
     flush() {},
-    $sheet: name => (sheetFor(name) || {}).$grid
+    $sheet: name => (sheetFor(name) || {}).$grid,
+    $ui: ui
   };
 }
 
@@ -198,6 +203,7 @@ function createStubs(opts) {
   const alerts = [];
   const triggers = (opts.triggers || []).map(handler => ({ getHandlerFunction: () => handler }));
   const menus = [];
+  const lockLog = [];
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
   const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus);
 
@@ -251,14 +257,24 @@ function createStubs(opts) {
       }
     },
     Session: { getScriptTimeZone: () => 'Europe/Warsaw' },
+    // Script lock: opts.lockHeld simulates another run holding it; $lock records calls.
+    LockService: {
+      getScriptLock: () => ({
+        tryLock(ms) { lockLog.push(['tryLock', ms]); if (opts.lockHeld) return false; lockLog.held = true; return true; },
+        releaseLock() { lockLog.push(['releaseLock']); lockLog.held = false; },
+        hasLock: () => Boolean(lockLog.held)
+      })
+    },
     Logger: { log() {} },
     console,
+    $lock: lockLog,
     $fetchCalls: fetchCalls,
     $alerts: alerts,
     $properties: properties,
     $triggers: triggers,
     $menus: menus,
     $sheet: name => spreadsheet.$sheet(name),
+    $ui: spreadsheet.$ui,
     $cell: (name, a1) => {
       const { row, col } = parseA1(a1);
       const grid = spreadsheet.$sheet(name) || [];
@@ -273,6 +289,7 @@ function createStubs(opts) {
  * @param {Record<string,any[][]>} [opts.sheets]      sheet name → rows (row 1 first)
  * @param {(url, params) => {code, text?, json?, headers?}} [opts.fetch]
  * @param {string[]} [opts.triggers]                  handler names of installed triggers
+ * @param {boolean}  [opts.lockHeld]                  another run holds the script lock
  * @param {string[]} [opts.skip]                      source files to omit
  * @param {Record<string,string>} [opts.override]     source file → replacement code
  */
