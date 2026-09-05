@@ -1,0 +1,5 @@
+# Only Apps Script sources go to script.google.com.
+# CI config, lint config, docs and node_modules stay local.
+**/**
+!appsscript.json
+!*.gs
