@@ -1,0 +1,81 @@
+name: Deploy to Apps Script
+
+# Manual, gated deployment of `main` to the Apps Script project.
+#
+# - Triggered only by hand (workflow_dispatch).
+# - The `production` environment requires a reviewer to approve the run before
+#   any secret is exposed or any file is pushed.
+# - Lint must pass before clasp push runs.
+#
+# Required repository secrets:
+#   CLASPRC_JSON    contents of ~/.clasprc.json after `clasp login`
+#   APPS_SCRIPT_ID  the Apps Script project id (Project settings → Script ID)
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_version:
+        description: "Also create an immutable Apps Script version after the push"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-script-deploy
+  cancel-in-progress: false
+
+jobs:
+  push:
+    name: clasp push (main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@3
+
+      - name: Configure clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CLASPRC_JSON:?Missing CLASPRC_JSON repository secret}"
+          : "${APPS_SCRIPT_ID:?Missing APPS_SCRIPT_ID repository secret}"
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > .clasp.json
+
+      - name: Files that will be pushed
+        run: clasp status
+
+      - name: Push to Apps Script
+        run: clasp push --force
+
+      - name: Create immutable version
+        if: ${{ inputs.create_version }}
+        run: clasp version "Deployed from GitHub ${GITHUB_SHA::7} by ${GITHUB_ACTOR}"
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$HOME/.clasprc.json" .clasp.json
