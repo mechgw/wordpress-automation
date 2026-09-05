@@ -1,0 +1,13 @@
+# Normalize line endings to LF regardless of local core.autocrlf.
+# Apps Script (clasp) and GitHub Actions expect LF; keeps diffs clean on Windows.
+* text=auto eol=lf
+
+*.gs   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+
+# Binary assets
+*.png  binary
+*.jpg  binary
+*.gif  binary
