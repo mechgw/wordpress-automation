@@ -85,6 +85,7 @@ function recordImportRun_(source, trigger, fn) {
     writeImportRecord_(source, record);
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
+    updateImportIncident_(source, record);
     throw e;
   }
 
@@ -112,6 +113,7 @@ function recordImportRun_(source, trigger, fn) {
   writeImportRecord_(source, record);
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
+  updateImportIncident_(source, record);
   return result;
 }
 
@@ -322,6 +324,9 @@ function addStatusMenu_() {
     .createMenu('Dane')
     .addItem('Status danych', 'showImportStatus')
     .addItem('Odśwież status w komórkach', 'refreshImportStatusCells')
+    .addSeparator()
+    .addItem('Sprawdź aktualność teraz (alerty)', 'sprawdzAktualnoscImportow')
+    .addItem('Włącz codzienne alerty e-mail', 'ustawCodzienneAlerty')
     .addToUi();
 }
 
@@ -343,9 +348,13 @@ function showImportStatus() {
         ' | ' + (lastRun.trigger ? 'trigger' : 'ręcznie') +
         ' | ' + Math.round((lastRun.durationMs || 0) / 1000) + ' s');
     }
+    lines.push('  ' + incidentSummary_(record));
     lines.push('');
   });
 
   lines.push('Dane uznajemy za nieaktualne po ' + IMPORT_STALE_AFTER_HOURS + ' h od ostatniego poprawnego importu.');
+  const alerts = alertConfig_();
+  lines.push('Alerty e-mail: ' + (alerts.email ? alerts.email : 'wyłączone (brak ALERT_EMAIL)') +
+    ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }

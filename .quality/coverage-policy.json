@@ -28,6 +28,11 @@
       "rationale": "RATCHET 2026-09-05 (#39): daily and range imports end to end (all four reports, business fallback, Ads degradation), testGA4, API layer and helpers are covered (80%). Event diagnostics and key-event configuration remain."
     },
     {
+      "pattern": "Alerts.gs",
+      "threshold": 95,
+      "rationale": "New in #42 with full coverage: incident open/silent/close, guard, trigger, dialog line."
+    },
+    {
       "pattern": "WordPress.gs",
       "threshold": 90,
       "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94%). Remaining lines are alert texts of the menu tests."

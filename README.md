@@ -14,7 +14,8 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `Kod.gs` — shared entry points and Google Search Console integration.
 - `GA4.gs` — Google Analytics 4 and Ads-related automation.
 - `WordPress.gs` — WordPress REST automation bridge.
-- `Status.gs` — import status: run records in Script Properties, one-line status in the config cells, the *Dane* menu.
+- `Status.gs` — import status: run records in Script Properties, one-line status in the config cells, the `IMPORT LOG` sheet, the *Dane* menu.
+- `Alerts.gs` — e-mail alerts on the incident model (open once, silent while open, close on recovery) and the daily freshness guard.
 - `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
@@ -34,6 +35,8 @@ The WordPress bridge currently expects properties such as:
 Optional:
 
 - `SITE_DOMAIN` — domain used to auto-pick the GA4 property by its web stream URL. Falls back to the host of `WP_BASE_URL`; with neither set, the property has to be chosen by hand in the config sheet.
+- `ALERT_EMAIL` — recipient of import alerts. Without it nothing is sent and nothing fails; incidents are still tracked and shown in *Status danych*.
+- `ALERT_RECOVERY` — `FALSE` disables the "import works again" e-mail; the incident is still closed. Default: enabled.
 
 `WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
 
@@ -65,6 +68,20 @@ Every GSC and GA4 import, manual or from the daily trigger, records its outcome 
 A failed trigger run therefore never masquerades as a fresh import, and the cells say whether the trigger is still installed.
 
 **History and anomalies** (`IMPORT LOG` sheet, created automatically): every run appends a row with time, source, run type (`trigger` / `ręczny`), days in the imported range (`0` on failed runs, where the range is unknown), result, row count, duration, details and error or warning. Rows older than 90 days are pruned wherever they sit, so sorting the sheet by hand is safe; the anomaly rule also ignores expired rows and orders history by time, not by row position. After each successful run the row count is compared with the median of the last 7 successful runs of the **same profile** (source + run type + days), so a daily 1-day trigger import is never compared with a manual 90-day backfill. Fewer than 7 runs in a profile means no alarm. Zero rows with a positive median, or fewer than half the median, adds `UWAGA: mało danych: <n> wierszy vs mediana <m>` to the status cell, the *Status danych* dialog and the log row. The import itself still counts as successful; the warning is a signal to look at the source.
+
+### E-mail alerts (incident model)
+
+Alerts are sent by `MailApp` (scope `script.send_mail`; the first deploy with this scope requires re-authorising the script once) to `ALERT_EMAIL`. They do not fire per event but per **incident**, one per source, stored in the same `LAST_IMPORT_*` record:
+
+| Transition | What happens |
+| --- | --- |
+| OK → problem | incident opens, **one** e-mail with source, time, manual/trigger, the error or the anomaly text and the last good import |
+| problem → problem | silence; the incident only updates its reason and details (an error after an anomaly, a new error message) |
+| problem → OK | incident closes; e-mail *Import ponownie działa* unless `ALERT_RECOVERY=FALSE` |
+
+A problem is a failed run (`BŁĄD`, including a refused lock) or a row-count anomaly (`UWAGA, mało danych`). Subjects start with `[wordpress-automation]`; every body ends with the sheet URL and the deployed version.
+
+**Stale data** has no run to react to, so a daily guard (`sprawdzAktualnoscImportow`, menu *Dane → Sprawdź aktualność importów*) checks both sources: a source that is `NIEAKTUALNE` or `BRAK IMPORTU` opens a `stale` incident and all such sources go into **one** aggregate e-mail; while the incident is open the guard stays quiet. When the source is fresh again the guard closes the incident (recovery e-mail, same switch). Incidents opened by a failed run are left to the import path. *Dane → Ustaw codzienne alerty* installs the guard trigger around 08:00, after the GSC and GA4 imports; the dialog says where alerts go, or warns that `ALERT_EMAIL` is missing. *Status danych* shows the open incident per source, the recipient and whether the guard trigger is installed.
 
 ### GitHub repository secrets
 
