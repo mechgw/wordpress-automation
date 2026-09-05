@@ -96,9 +96,9 @@ test('discovery paginuje, pobiera pełne rekordy i zapisuje wyniki', () => {
   assert.match(String(gas.$alerts[0][0]), /Pobrane snippety: 3/);
 });
 
-test('pusta lista kończy discovery bez wierszy', () => {
+test('pusta lista bez nagłówka paginacji kończy discovery bez wierszy', () => {
   const gas = project({
-    fetch: () => ({ code: 200, json: [], headers: { 'X-Wp-Totalpages': '1' } })
+    fetch: () => ({ code: 200, json: [], headers: {} })
   });
 
   const result = gas.discoverCodeSnippets();
