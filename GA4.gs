@@ -200,7 +200,7 @@ function konfigurujGlowneKeyEventsGA4() {
 
   SpreadsheetApp.getUi().alert(
     'GA4 – key events',
-    'Główne: operational_order_submit + phone_click + b2b_lead_submit.\n' +
+    'Główne: ' + desired.join(' + ') + '.\n' +
     'Usunięte mikrozdarzenia: ' + (removed.length ? removed.join(', ') : 'brak do usunięcia') + '.\n\n' +
     'Uwaga: zmiana key events nie jest retroaktywna. Historyczne dane głównych akcji pobieramy osobno do GA4 BUSINESS EVENTS.',
     SpreadsheetApp.getUi().ButtonSet.OK
