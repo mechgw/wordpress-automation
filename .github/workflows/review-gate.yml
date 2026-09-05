@@ -41,7 +41,6 @@ on:
         type: number
 
 permissions:
-  actions: write
   contents: read
   issues: read
   pull-requests: read
@@ -65,6 +64,9 @@ jobs:
       # returned by the API, so it is deliberately not listed here.
       COPILOT_LOGINS: "copilot-pull-request-reviewer copilot-pull-request-reviewer[bot]"
       BOT_LOGINS: "copilot-pull-request-reviewer[bot] chatgpt-codex-connector[bot]"
+      # Who may acknowledge: repository owner/members/collaborators, plus the
+      # Claude app. Drive-by commenters cannot unblock a merge.
+      ACK_ASSOCIATIONS: "OWNER MEMBER COLLABORATOR"
       ACK_AUTHORS_EXTRA: "claude[bot]"
     steps:
       - name: Evaluate
@@ -88,7 +90,8 @@ jobs:
 
           # jq predicates built from the login lists above.
           bot_sel="$(for b in $BOT_LOGINS; do printf '.user.login == "%s" or ' "$b"; done; printf 'false')"
-          extra_sel="$(for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
+          ack_sel="$(for a in $ACK_ASSOCIATIONS; do printf '.author_association == "%s" or ' "$a"; done
+                     for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
 
           # --- 1. Copilot state -------------------------------------------------
           copilot_state="done"
@@ -109,7 +112,7 @@ jobs:
           ack="$(gh api --paginate "$api/issues/$PR/comments" --jq "
               .[]
               | select(.created_at > \"$threshold\")
-              | select(.user.type == \"User\" or $extra_sel)
+              | select($ack_sel)
               | select(.body | test(\"^\\\\s*/reviewed\\\\b\"))
               | \"\(.user.login) at \(.created_at): \(.html_url)\"" | tail -n1)"
 
@@ -137,11 +140,20 @@ jobs:
           fi
 
   reevaluate:
+    # Comments re-run the evaluation only when they come from people who can
+    # acknowledge (owner/members/collaborators), the Claude app, or the review
+    # bots (a new bot comment must invalidate an earlier acknowledgment).
+    # Anyone else cannot burn Actions minutes by commenting.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+        contains(fromJSON('["claude[bot]","copilot-pull-request-reviewer[bot]","chatgpt-codex-connector[bot]"]'), github.event.comment.user.login)))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write
+      pull-requests: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
@@ -153,8 +165,11 @@ jobs:
         run: |
           set -euo pipefail
           head_sha="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')"
-          run_id="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?event=pull_request_target&head_sha=$head_sha&per_page=1" \
-                    --jq '.workflow_runs[0].id // empty')"
+          # head_sha is a supported filter on this endpoint; the jq guard makes
+          # sure we never re-run a run for a different commit even if it were
+          # ignored.
+          run_id="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?event=pull_request_target&head_sha=$head_sha&per_page=20" \
+                    --jq "[.workflow_runs[] | select(.head_sha == \"$head_sha\")] | sort_by(.run_number) | last | .id // empty")"
           if [ -z "$run_id" ]; then
             echo "::warning::No pull_request_target run found for PR #$PR head ${head_sha:0:7}; push a commit or re-request review to create one."
             exit 0
