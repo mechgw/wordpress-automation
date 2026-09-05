@@ -30,6 +30,25 @@ module.exports = [
   {
     ignores: ["node_modules/**"],
   },
+  // Node-side files: unit tests and this config.
+  {
+    files: ["test/**/*.js", "eslint.config.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "commonjs",
+      globals: {
+        require: "readonly",
+        module: "writable",
+        process: "readonly",
+        __dirname: "readonly",
+        console: "readonly",
+        Buffer: "readonly",
+      },
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+    },
+  },
   {
     files: ["**/*.gs"],
     languageOptions: {

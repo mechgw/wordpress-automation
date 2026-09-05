@@ -4,7 +4,8 @@
   "description": "Google Apps Script automation for WordPress, Google Search Console and GA4",
   "scripts": {
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "repository": {
     "type": "git",

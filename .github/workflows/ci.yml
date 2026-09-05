@@ -57,6 +57,11 @@ jobs:
       - name: Lint Apps Script sources
         run: npm run lint
 
+      # Unit tests load the .gs files into a VM with stubbed Google services
+      # (see test/helpers/gas.js) and cover the pure helpers and config layer.
+      - name: Unit tests
+        run: npm test
+
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
