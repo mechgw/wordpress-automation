@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "repo": "mechgw/wordpress-automation",
+  "prune": false,
+  "color_rules": {
+    "priority": "warm colors = urgency",
+    "tier": "cool colors = operational risk",
+    "blocked": "near-black = blocked, not urgent",
+    "area": "one green color for the whole area:* family",
+    "policy": "one purple color for the whole policy:* family"
+  },
+  "families": {
+    "priority": {
+      "prefix": null,
+      "cardinality": "exactly 1 per open Issue"
+    },
+    "tier": {
+      "prefix": null,
+      "cardinality": "exactly 1 for work that can change production behaviour"
+    },
+    "state": {
+      "prefix": null,
+      "cardinality": "0 or more"
+    },
+    "change-type": {
+      "prefix": null,
+      "cardinality": "0 or more",
+      "note": "Names stay compatible with Release Drafter and Conventional Commits."
+    },
+    "area": {
+      "prefix": "area:",
+      "color": "0E8A16",
+      "cardinality": "1 or more"
+    },
+    "policy": {
+      "prefix": "policy:",
+      "color": "8B5CF6",
+      "cardinality": "0 or more"
+    }
+  },
+  "labels": [
+    {
+      "name": "P0",
+      "color": "B60205",
+      "description": "Natychmiast — blokuje wdrożenie, produkcję albo krytyczną ścieżkę.",
+      "family": "priority"
+    },
+    {
+      "name": "P1",
+      "color": "F97316",
+      "description": "Wysoka — następne zadanie po bieżącym P0 / do zrobienia w tym cyklu.",
+      "family": "priority"
+    },
+    {
+      "name": "P2",
+      "color": "EAB308",
+      "description": "Średnia — zaplanowane, wartościowe, ale nie blokuje bieżącej pracy.",
+      "family": "priority"
+    },
+    {
+      "name": "P3",
+      "color": "B8C0CC",
+      "description": "Niska — backlog oportunistyczny; realizować gdy koszt jest uzasadniony.",
+      "family": "priority"
+    },
+    {
+      "name": "P4",
+      "color": "D4D4D8",
+      "description": "Kosmetyka — tylko przy okazji innej pracy, nie jako osobne zadanie.",
+      "family": "priority"
+    },
+    {
+      "name": "T1",
+      "color": "93C5FD",
+      "description": "Niskie ryzyko — lokalny scope, łatwy rollback, brak krytycznych kontraktów.",
+      "family": "tier"
+    },
+    {
+      "name": "T2",
+      "color": "3B82F6",
+      "description": "Średnie ryzyko — cross-file/workflow albo zmiana zachowania produkcyjnego.",
+      "family": "tier"
+    },
+    {
+      "name": "T3",
+      "color": "4338CA",
+      "description": "Wysokie ryzyko — auth/security, deploy boundary lub wysoki koszt błędu.",
+      "family": "tier"
+    },
+    {
+      "name": "blocked",
+      "color": "111827",
+      "description": "Wstrzymane do spełnienia warunku: zależność, decyzja, dane albo inne Issue/PR.",
+      "family": "state"
+    },
+    {
+      "name": "needs-triage",
+      "color": "FEF2C0",
+      "description": "Czeka na triage — nie ma jeszcze kompletnego priorytetu/zakresu/ryzyka.",
+      "family": "state"
+    },
+    {
+      "name": "monitoring",
+      "color": "6B7280",
+      "description": "Zmiana wdrożona lub zamrożona; czekamy na dane/okno pomiarowe przed decyzją.",
+      "family": "state"
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something isn't working.",
+      "family": "change-type"
+    },
+    {
+      "name": "chore",
+      "color": "ededed",
+      "description": "Maintenance task without user-facing functionality.",
+      "family": "change-type"
+    },
+    {
+      "name": "documentation",
+      "color": "0075ca",
+      "description": "Documentation improvement or correction.",
+      "family": "change-type"
+    },
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "New feature, capability or meaningful behaviour improvement.",
+      "family": "change-type"
+    },
+    {
+      "name": "fix",
+      "color": "E99695",
+      "description": "Naprawa defektu; patch-level change compatible with Release Drafter.",
+      "family": "change-type"
+    },
+    {
+      "name": "refactor",
+      "color": "C2E0C6",
+      "description": "Refaktoryzacja bez zamierzonej zmiany zachowania produkcyjnego.",
+      "family": "change-type"
+    },
+    {
+      "name": "area:wordpress",
+      "color": "0E8A16",
+      "description": "WordPress REST bridge, pages, media, Rank Math and site-side behaviour.",
+      "family": "area"
+    },
+    {
+      "name": "area:seo",
+      "color": "0E8A16",
+      "description": "SEO architecture, metadata, internal linking, landing pages and indexing.",
+      "family": "area"
+    },
+    {
+      "name": "area:analytics",
+      "color": "0E8A16",
+      "description": "Analytics model, KPI interpretation and attribution logic.",
+      "family": "area"
+    },
+    {
+      "name": "area:gsc",
+      "color": "0E8A16",
+      "description": "Google Search Console import, queries, pages and search-performance data.",
+      "family": "area"
+    },
+    {
+      "name": "area:ga4",
+      "color": "0E8A16",
+      "description": "Google Analytics 4 import, key events, Admin API and Data API.",
+      "family": "area"
+    },
+    {
+      "name": "area:forminator",
+      "color": "0E8A16",
+      "description": "Forminator submission truth, lead fields and conversion-source validation.",
+      "family": "area"
+    },
+    {
+      "name": "area:apps-script",
+      "color": "0E8A16",
+      "description": "Google Apps Script runtime, manifest, Script Properties and clasp sync.",
+      "family": "area"
+    },
+    {
+      "name": "area:github",
+      "color": "0E8A16",
+      "description": "GitHub Issues, PR governance, Actions, releases and repository automation.",
+      "family": "area"
+    },
+    {
+      "name": "area:tests",
+      "color": "0E8A16",
+      "description": "Unit/integration tests, fixtures, mocks and regression coverage.",
+      "family": "area"
+    },
+    {
+      "name": "area:security",
+      "color": "0E8A16",
+      "description": "Authentication, secrets, permissions and security-sensitive boundaries.",
+      "family": "area"
+    },
+    {
+      "name": "policy:data-integrity",
+      "color": "8B5CF6",
+      "description": "Integralność danych i zgodność źródeł prawdy / read-after-write.",
+      "family": "policy"
+    },
+    {
+      "name": "policy:security",
+      "color": "8B5CF6",
+      "description": "Bezpieczeństwo: auth, sekrety, permissions, input i publiczne endpointy.",
+      "family": "policy"
+    },
+    {
+      "name": "policy:fail-fast",
+      "color": "8B5CF6",
+      "description": "Błąd ma być głośny; nie ukrywaj błędu przez cichy fallback.",
+      "family": "policy"
+    },
+    {
+      "name": "policy:resilience",
+      "color": "8B5CF6",
+      "description": "Degraduj się łagodnie i działaj dalej, gdy taki fallback jest zamierzony.",
+      "family": "policy"
+    }
+  ],
+  "migrations": {
+    "delete": [
+      "__label-capability-test__"
+    ]
+  }
+}
