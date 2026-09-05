@@ -1,0 +1,58 @@
+name: Bootstrap v2.8.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-v2.8.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish baseline release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view v2.8.0 >/dev/null 2>&1; then
+            echo "v2.8.0 already exists; nothing to do."
+            exit 0
+          fi
+
+          draft_ids="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq '.[] | select(.draft == true and .tag_name == "v0.0.1") | .id')"
+          if [ -n "$draft_ids" ]; then
+            while IFS= read -r release_id; do
+              [ -n "$release_id" ] || continue
+              echo "Removing bootstrap draft release id=${release_id}"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+            done <<< "$draft_ids"
+          fi
+
+          cat > /tmp/release-notes.md <<'EOF'
+          ## v2.8.0 — baseline
+
+          Initial versioned baseline of the existing Google Apps Script project.
+
+          - Apps Script manifest and existing GSC, GA4 and WordPress source files.
+          - Repository documentation and changelog.
+          - CI validation for manifest and `.gs` syntax.
+          - Gitleaks secret scanning.
+          - Release Drafter for future automated release notes and Semantic Versioning.
+
+          This baseline does not intentionally change the runtime behaviour of the existing Apps Script project. Deployment to Google Apps Script remains manual.
+          EOF
+
+          gh release create v2.8.0 \
+            --target "$GITHUB_SHA" \
+            --title "v2.8.0" \
+            --notes-file /tmp/release-notes.md
