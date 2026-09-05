@@ -1,0 +1,80 @@
+name: Apps Script drift check
+
+# Detects edits made directly in the Apps Script editor that never went
+# through this repository. Pulls the live project and compares it with `main`.
+# Fails (and attaches the diff) when the two differ.
+#
+# Uses the same repository secrets as the deploy workflow.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@3
+
+      - name: Configure clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CLASPRC_JSON:?Missing CLASPRC_JSON repository secret}"
+          : "${APPS_SCRIPT_ID:?Missing APPS_SCRIPT_ID repository secret}"
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > .clasp.json
+
+      - name: Pull live project
+        run: clasp pull
+
+      - name: Compare with main
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          # .clasp.json is git-ignored, so only Apps Script sources show up here.
+          changes="$(git status --porcelain)"
+          if [ -z "$changes" ]; then
+            echo "No drift: Apps Script matches main."
+            exit 0
+          fi
+          echo "::error::Apps Script project differs from main. Someone edited it outside GitHub."
+          echo "$changes"
+          git add -A
+          git --no-pager diff --cached --stat
+          git --no-pager diff --cached > apps-script-drift.patch
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Upload drift patch
+        if: failure() && steps.diff.outputs.drift == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apps-script-drift
+          path: apps-script-drift.patch
+          retention-days: 30
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$HOME/.clasprc.json" .clasp.json

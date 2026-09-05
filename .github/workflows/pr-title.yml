@@ -1,0 +1,43 @@
+name: PR title
+
+# Release Drafter resolves the next SemVer version from the Conventional
+# Commit prefix of each merged PR title, so a malformed title silently produces
+# the wrong version. This check rejects titles that would not be classified.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Keep in sync with the categories in .github/release-drafter.yml.
+          types: |
+            feat
+            new
+            fix
+            bug
+            hotfix
+            docs
+            chore
+            refactor
+            style
+            test
+            ci
+            perf
+            build
+            revert
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject "{subject}" must start with a lowercase letter,
+            e.g. "feat: add GA4 event export".
