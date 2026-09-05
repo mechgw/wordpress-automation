@@ -5,7 +5,7 @@
 // the current page URL (origin + pathname) to hidden-13. No cookies, ad identifiers,
 // referrer or UTM values are read or written here.
 const B2B_SOURCE_CONTEXT_TAG = 'b2b-source-page-context';
-const B2B_SOURCE_CONTEXT_NAME = 'CC B2B Source Page Context';
+const B2B_SOURCE_CONTEXT_NAME = 'B2B Source Page Context';
 const B2B_SOURCE_CONTEXT_SNIPPET_ID_PROP = 'WP_B2B_SOURCE_CONTEXT_SNIPPET_ID';
 
 /** Explicit approval for this narrow Code Snippets write flow. */
@@ -46,7 +46,9 @@ function buildB2BSourceContextCode_() {
     '    document.addEventListener("DOMContentLoaded", fillB2BSourcePage);',
     '  }',
     '  window.addEventListener("load", fillB2BSourcePage);',
-    '  document.addEventListener("forminator:form:loaded", fillB2BSourcePage);',
+    '  if (window.jQuery) {',
+    '    window.jQuery(document).on("after.load.forminator", fillB2BSourcePage);',
+    '  }',
     '',
     '  var attempts = 0;',
     '  var timer = window.setInterval(function () {',
@@ -136,20 +138,23 @@ function prepareB2BSourcePageContext() {
       'B2B source_page przygotowany.\n\n' +
       'Snippet ID: ' + snippet.id +
       '\nStan: NIEAKTYWNY' +
-      '\n\nIstniejący tracking działa bez zmian. Po audycie uruchom activateB2BSourcePageContext().' 
+      '\n\nIstniejący tracking działa bez zmian. Po audycie uruchom activateB2BSourcePageContext().'
     );
 
     return { snippetId: Number(snippet.id), created, active: false, resultRef: saved.resultRef };
   });
 }
 
-function getB2BSourceContextConfiguredSnippet_() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty(B2B_SOURCE_CONTEXT_SNIPPET_ID_PROP);
+function getB2BSourceContextConfiguredId_() {
+  const id = PropertiesService.getScriptProperties().getProperty(B2B_SOURCE_CONTEXT_SNIPPET_ID_PROP);
   if (!/^\d+$/.test(String(id || ''))) {
     throw new Error('B2B source_page: brak zapisanego ID snippetu. Najpierw uruchom prepareB2BSourcePageContext().');
   }
-  return getCodeSnippetRaw_(id);
+  return Number(id);
+}
+
+function getB2BSourceContextConfiguredSnippet_() {
+  return getCodeSnippetRaw_(getB2BSourceContextConfiguredId_());
 }
 
 /** Read-only preflight/audit. */
@@ -212,7 +217,7 @@ function activateB2BSourcePageContext() {
   });
 }
 
-/** Emergency rollback: deactivate only this additive snippet. */
+/** Emergency rollback: deactivate by the stored ID even if code drifted or is invalid. */
 function rollbackB2BSourcePageContext() {
   return withScriptLock_('rollback B2B source_page', () => {
     if (!requireB2BSourceContextWriteApproval_(
@@ -222,20 +227,17 @@ function rollbackB2BSourcePageContext() {
       return { cancelled: true };
     }
 
-    const expectedCode = buildB2BSourceContextCode_();
-    let snippet = validateB2BSourceContextSnippet_(
-      getB2BSourceContextConfiguredSnippet_(),
-      expectedCode
-    );
-    if (!snippet.active) return { alreadyRolledBack: true, snippetId: Number(snippet.id) };
+    const snippetId = getB2BSourceContextConfiguredId_();
+    let snippet = getCodeSnippetRaw_(snippetId);
+    if (!snippet.active) return { alreadyRolledBack: true, snippetId };
 
     saveCodeSnippetSnapshot_(snippet, 'B2B-SOURCE-CONTEXT-ROLLBACK');
-    setCodeSnippetActive_(snippet.id, false);
-    snippet = validateB2BSourceContextSnippet_(getCodeSnippetRaw_(snippet.id), expectedCode);
+    setCodeSnippetActive_(snippetId, false);
+    snippet = getCodeSnippetRaw_(snippetId);
     if (snippet.active) {
       throw new Error('B2B source_page: dezaktywacja nie została potwierdzona w odczycie kontrolnym.');
     }
     const saved = saveCodeSnippetResult_(snippet, 'B2B-SOURCE-CONTEXT-ROLLBACK');
-    return { snippetId: Number(snippet.id), active: false, resultRef: saved.resultRef };
+    return { snippetId, active: false, resultRef: saved.resultRef };
   });
 }
