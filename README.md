@@ -41,6 +41,10 @@ The deploy and drift-check workflows need two repository secrets (Settings → S
 
 Rotate `CLASPRC_JSON` by running `clasp login` again and updating the secret.
 
+The approval gate is a repository setting, not something the workflow creates. Settings → Environments → `production` must have **Required reviewers** enabled and deployment branches limited to `main` and `v*` tags. Without that, the deploy workflow would push as soon as it is triggered.
+
+The Google account behind `CLASPRC_JSON` must also have the Apps Script API switched on at <https://script.google.com/home/usersettings>, otherwise `clasp push` fails with "User has not enabled the Apps Script API".
+
 ## Local development
 
 ```bash
@@ -81,6 +85,17 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 - **validate** — manifest is valid JSON, no duplicated `.gs.gs` files, ESLint passes on all `.gs` sources.
 - **secret-scan** — Gitleaks scans the full history for committed secrets.
 - **pr-title** — title follows the Conventional Commits format above.
+- **review-ack** — the bot reviews (Copilot, Codex) were read. The check stays red until the PR carries the `reviews-acknowledged` label, and every new push removes the label again. The job summary shows which bots have already reviewed the current commit.
+
+### Acknowledging bot reviews
+
+1. Wait for Copilot and Codex to post their review (the *review-ack* summary shows who is done). A bot that hits its usage limit or errors out will not block you.
+2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
+3. Add the label, ideally with a short comment summarising what was accepted and what was rejected:
+
+```bash
+gh pr edit <number> --add-label reviews-acknowledged
+```
 
 Dependabot opens weekly PRs for GitHub Actions and npm dev dependencies.
 

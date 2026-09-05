@@ -1,0 +1,94 @@
+name: Review gate
+
+# Blocks merging until someone confirms the bot reviews (Copilot, Codex) were
+# read. The confirmation is the `reviews-acknowledged` label:
+#
+#   - the check fails while the label is missing;
+#   - every new push (synchronize) removes the label, so the acknowledgment
+#     has to be repeated for the new commits;
+#   - the job summary lists which bots have already reviewed the current head,
+#     so you can see whether it is worth waiting for the rest.
+#
+# Uses pull_request_target so the token can edit labels on Dependabot PRs too.
+# No code from the PR is checked out or executed here.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review-ack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      ACTION: ${{ github.event.action }}
+      LABEL: reviews-acknowledged
+      # Bots expected to review every PR. Their reviews are informational;
+      # the label is what unblocks the merge.
+      BOTS: "copilot-pull-request-reviewer[bot] chatgpt-codex-connector[bot]"
+    steps:
+      - name: Reset acknowledgment after new commits
+        if: env.ACTION == 'synchronize'
+        shell: bash
+        run: |
+          set -euo pipefail
+          has_label="$(gh api "repos/$REPO/issues/$PR/labels" --jq "map(select(.name == \"$LABEL\")) | length")"
+          if [ "$has_label" != "0" ]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/$LABEL" >/dev/null
+            echo "New commits pushed: removed '$LABEL', bot reviews must be re-read."
+          else
+            echo "New commits pushed, no acknowledgment to reset."
+          fi
+
+      - name: Report bot review status
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_date="$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.committer.date')"
+          reviews="$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" --jq ".[] | select(.commit_id == \"$HEAD_SHA\") | .user.login")"
+          comments="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq ".[] | select(.created_at > \"$head_date\") | .user.login")"
+          {
+            echo "## Bot reviews for \`${HEAD_SHA:0:7}\`"
+            echo
+            for bot in $BOTS; do
+              if printf '%s\n' "$reviews" "$comments" | grep -qxF "$bot"; then
+                echo "- ✅ $bot has reviewed this head"
+              else
+                echo "- ⏳ $bot has not reviewed this head yet"
+              fi
+            done
+            echo
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Require the acknowledgment label
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Re-read labels: the synchronize step may have just removed one.
+          has_label="$(gh api "repos/$REPO/issues/$PR/labels" --jq "map(select(.name == \"$LABEL\")) | length")"
+          if [ "$has_label" != "0" ]; then
+            echo "Label '$LABEL' present: bot reviews were read. Merge allowed." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Merge blocked"
+            echo
+            echo "Read the bot review comments, reply to or resolve them, then add the \`$LABEL\` label:"
+            echo
+            echo '```bash'
+            echo "gh pr edit $PR --add-label $LABEL"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::error::Label '$LABEL' missing. Read the bot reviews, then add the label to unblock the merge."
+          exit 1
