@@ -121,7 +121,7 @@ Only `main` and `v*` tags are allowed to deploy to `production`.
 
 ## Releases
 
-Release notes are prepared automatically by **Release Drafter**.
+Release notes live on the [Releases page](https://github.com/mechgw/wordpress-automation/releases) and are prepared automatically by **Release Drafter**. There is no `CHANGELOG.md`; the published releases are the changelog.
 
 - PRs are labelled from their title where possible.
 - Merging a PR into `main` refreshes the draft release.
