@@ -22,6 +22,17 @@
 
 const IMPORT_STALE_AFTER_HOURS = 36;
 
+/**
+ * Historia runów (#43): zakładka IMPORT LOG dopisywana przy każdym uruchomieniu.
+ * Anomalia liczby wierszy jest oceniana wyłącznie w obrębie tego samego
+ * profilu: źródło + typ runu (trigger / ręczny) + liczba dni zakresu. Import
+ * dzienny (1 dzień) nigdy nie jest porównywany z ręcznym importem 90 dni.
+ */
+const IMPORT_LOG_SHEET = 'IMPORT LOG';
+const IMPORT_LOG_HEADER = ['Czas', 'Źródło', 'Typ', 'Dni', 'Wynik', 'Wiersze', 'Czas [s]', 'Szczegóły', 'Błąd / uwaga'];
+const IMPORT_LOG_RETENTION_DAYS = 90;
+const IMPORT_ANOMALY_MIN_RUNS = 7;
+
 /** Definicje źródeł; funkcja (nie stała), bo stałe innych plików mogą nie być jeszcze załadowane. */
 function importSources_() {
   return {
@@ -72,6 +83,7 @@ function recordImportRun_(source, trigger, fn) {
       durationMs: Date.now() - startedAt
     };
     writeImportRecord_(source, record);
+    appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
     throw e;
   }
@@ -81,16 +93,164 @@ function recordImportRun_(source, trigger, fn) {
     finishedAt: new Date().toISOString(),
     ok: true,
     trigger: Boolean(trigger),
+    days: Number(summary.days) || 0,
     rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
     warning: String(summary.warning || ''),
     durationMs: Date.now() - startedAt
   };
+
+  // Anomalia liczona z historii TEGO profilu, zanim bieżący run do niej trafi.
+  const anomaly = importAnomaly_(source, run, importLogHistory_());
+  if (anomaly) {
+    run.anomaly = anomaly;
+    run.warning = [run.warning, anomaly].filter(Boolean).join(' | ');
+  }
+
   record.lastRun = run;
   record.lastOk = run;
   writeImportRecord_(source, record);
+  appendImportLog_(source, run);
   writeImportStatusCell_(source);
   return result;
+}
+
+// --- IMPORT LOG ---------------------------------------------------------------
+
+/**
+ * Zwraca arkusz IMPORT LOG, tworząc go z nagłówkiem, gdy go nie ma.
+ * Odporne na wyścig: gdy dwa wykonania równocześnie nie widzą arkusza, drugie
+ * insertSheet rzuca błąd o duplikacie, a wtedy bierzemy arkusz utworzony przez
+ * pierwsze. Logowanie nie może zamienić udanego importu w błąd.
+ */
+function ensureImportLogSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(IMPORT_LOG_SHEET);
+
+  if (!sheet) {
+    try {
+      sheet = ss.insertSheet(IMPORT_LOG_SHEET);
+    } catch (e) {
+      // Duplikat z równoległego wykonania: bierzemy arkusz, który już istnieje.
+      // Jeśli go nadal nie ma, insertSheet zawiódł z innego powodu i to jest błąd.
+      sheet = ss.getSheetByName(IMPORT_LOG_SHEET);
+      if (!sheet) throw e;
+    }
+  }
+
+  // Nagłówek dopisuje ten, kto zastanie arkusz pusty: także przegrany wyścigu,
+  // żeby appendRow nigdy nie trafił do wiersza 1 zanim zwycięzca zapisze nagłówek.
+  if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== IMPORT_LOG_HEADER[0]) {
+    sheet.getRange(1, 1, 1, IMPORT_LOG_HEADER.length).setValues([IMPORT_LOG_HEADER]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function importRunType_(run) {
+  return run.trigger ? 'trigger' : 'ręczny';
+}
+
+/** Dopisuje wiersz historii i usuwa wpisy starsze niż IMPORT_LOG_RETENTION_DAYS. */
+function appendImportLog_(source, run) {
+  const sheet = ensureImportLogSheet_();
+  sheet.appendRow([
+    new Date(run.finishedAt),
+    source,
+    importRunType_(run),
+    Number(run.days) || 0,
+    run.ok ? 'OK' : 'BŁĄD',
+    run.ok ? Number(run.rows) || 0 : '',
+    Math.round((run.durationMs || 0) / 1000),
+    run.ok ? String(run.detail || '') : '',
+    run.ok ? String(run.warning || '') : String(run.error || '')
+  ]);
+  pruneImportLog_(sheet, new Date(run.finishedAt));
+}
+
+function importLogCutoff_(now) {
+  return (now || new Date()).getTime() - IMPORT_LOG_RETENTION_DAYS * 86400 * 1000;
+}
+
+/**
+ * Usuwa wszystkie wiersze spoza okna retencji, niezależnie od ich położenia
+ * (arkusz mógł zostać ręcznie posortowany). Ciągłe bloki wygasłych wierszy
+ * są usuwane jednym wywołaniem, od dołu, żeby numery wierszy nie przesuwały
+ * się w trakcie i żeby nie mnożyć wywołań usługi Spreadsheet.
+ */
+function pruneImportLog_(sheet, now) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const cutoff = importLogCutoff_(now);
+  const dates = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const stale = dates.map(r => {
+    const d = new Date(r[0]);
+    return !isNaN(d.getTime()) && d.getTime() < cutoff;
+  });
+
+  let removed = 0;
+  let i = stale.length - 1;
+  while (i >= 0) {
+    if (!stale[i]) { i--; continue; }
+    let start = i;
+    while (start > 0 && stale[start - 1]) start--;
+    const count = i - start + 1;
+    sheet.deleteRows(start + 2, count);
+    removed += count;
+    i = start - 1;
+  }
+  return removed;
+}
+
+/** Historia jako tablica obiektów { at, source, trigger, days, ok, rows }. */
+function importLogHistory_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(IMPORT_LOG_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues().map(r => ({
+    at: new Date(r[0]),
+    source: String(r[1] || ''),
+    trigger: String(r[2] || '') === 'trigger',
+    days: Number(r[3]) || 0,
+    ok: String(r[4] || '') === 'OK',
+    rows: Number(r[5]) || 0
+  }));
+}
+
+function medianOf_(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Tekst ostrzeżenia, gdy liczba wierszy odstaje od mediany ostatnich
+ * IMPORT_ANOMALY_MIN_RUNS udanych runów tego samego profilu; '' gdy w normie
+ * albo historia zbyt krótka (bez fałszywych alarmów na starcie).
+ */
+function importAnomaly_(source, run, history, now) {
+  const cutoff = importLogCutoff_(now || new Date(run.finishedAt));
+  // Tylko udane runy tego profilu z okna retencji, posortowane po czasie:
+  // kolejność wierszy w arkuszu nie ma znaczenia (mógł być posortowany ręcznie),
+  // a wpisy starsze niż retencja nie liczą się, nawet jeśli jeszcze nie zostały usunięte.
+  const same = history
+    .filter(h =>
+      h.ok && h.source === source && h.trigger === Boolean(run.trigger) && h.days === (Number(run.days) || 0) &&
+      !isNaN(h.at.getTime()) && h.at.getTime() >= cutoff
+    )
+    .sort((a, b) => a.at - b.at);
+  if (same.length < IMPORT_ANOMALY_MIN_RUNS) return '';
+
+  const recent = same.slice(-IMPORT_ANOMALY_MIN_RUNS).map(h => h.rows);
+  const median = medianOf_(recent);
+  const rows = Number(run.rows) || 0;
+
+  if (median > 0 && rows === 0) {
+    return 'mało danych: 0 wierszy vs mediana ' + median;
+  }
+  if (median > 0 && rows < median / 2) {
+    return 'mało danych: ' + rows + ' wierszy vs mediana ' + median;
+  }
+  return '';
 }
 
 function hasImportTrigger_(source) {

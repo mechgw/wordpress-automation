@@ -158,6 +158,9 @@ function makeSheet(name, initialRows) {
     getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
     insertRowsAfter() { return this; },
     insertColumnsAfter() { return this; },
+    deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
+    setFrozenRows() { return this; },
+    setColumnWidth() { return this; },
     appendRow(row) { grid.push(row.slice()); return this; },
     $grid: grid
   };
@@ -188,8 +191,18 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
       return menu;
     }
   };
+  const insertSheet = name => {
+    // Like Apps Script: a duplicate name is an error, not a silent no-op.
+    if (Object.prototype.hasOwnProperty.call(sheets, name)) {
+      throw new Error(`A sheet with the name "${name}" already exists. Please enter another name.`);
+    }
+    sheets[name] = [];
+    return sheetFor(name);
+  };
+  // One stable spreadsheet object, like Apps Script: tests may patch its methods.
+  const active = { getSheetByName: sheetFor, insertSheet };
   return {
-    getActive: () => ({ getSheetByName: sheetFor }),
+    getActive: () => active,
     getUi: () => ui,
     flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid,
