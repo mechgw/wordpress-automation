@@ -2,11 +2,13 @@
 //
 // Marketing attribution stays in the existing consent-gated tracking snippet. This
 // module adds only first-party form context: for forms marked as b2b_lead it writes
-// the current page URL (origin + pathname) to hidden-13. No cookies, ad identifiers,
-// referrer or UTM values are read or written here.
+// the current page URL (origin + pathname) to a configured source-page field. No
+// cookies, ad identifiers, referrer or UTM values are read or written here.
 const B2B_SOURCE_CONTEXT_TAG = 'b2b-source-page-context';
 const B2B_SOURCE_CONTEXT_NAME = 'B2B Source Page Context';
 const B2B_SOURCE_CONTEXT_SNIPPET_ID_PROP = 'WP_B2B_SOURCE_CONTEXT_SNIPPET_ID';
+const B2B_SOURCE_CONTEXT_FORM_TYPE_FIELD_PROP = 'WP_B2B_FORM_TYPE_FIELD';
+const B2B_SOURCE_CONTEXT_SOURCE_PAGE_FIELD_PROP = 'WP_B2B_SOURCE_PAGE_FIELD';
 
 /** Explicit approval for this narrow Code Snippets write flow. */
 function requireB2BSourceContextWriteApproval_(title, message) {
@@ -17,15 +19,57 @@ function requireB2BSourceContextWriteApproval_(title, message) {
   return true;
 }
 
-/** Build a small head-content snippet that fills hidden-13 only for b2b_lead forms. */
-function buildB2BSourceContextCode_() {
+function validateB2BSourceContextFieldName_(value, propertyName) {
+  const fieldName = String(value || '').trim();
+  if (!fieldName) {
+    throw new Error('B2B source_page: brak Script Property ' + propertyName + '.');
+  }
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(fieldName)) {
+    throw new Error('B2B source_page: nieprawidłowa nazwa pola w ' + propertyName + '.');
+  }
+  return fieldName;
+}
+
+function getB2BSourceContextFieldConfig_() {
+  const props = PropertiesService.getScriptProperties();
+  const formTypeField = validateB2BSourceContextFieldName_(
+    props.getProperty(B2B_SOURCE_CONTEXT_FORM_TYPE_FIELD_PROP),
+    B2B_SOURCE_CONTEXT_FORM_TYPE_FIELD_PROP
+  );
+  const sourcePageField = validateB2BSourceContextFieldName_(
+    props.getProperty(B2B_SOURCE_CONTEXT_SOURCE_PAGE_FIELD_PROP),
+    B2B_SOURCE_CONTEXT_SOURCE_PAGE_FIELD_PROP
+  );
+  if (formTypeField === sourcePageField) {
+    throw new Error('B2B source_page: pola typu formularza i source_page muszą być różne.');
+  }
+  return { formTypeField, sourcePageField };
+}
+
+/** Build a small head-content snippet that fills the configured B2B source-page field. */
+function buildB2BSourceContextCode_(fieldConfig) {
+  const config = fieldConfig || getB2BSourceContextFieldConfig_();
+  const formTypeField = validateB2BSourceContextFieldName_(
+    config.formTypeField,
+    B2B_SOURCE_CONTEXT_FORM_TYPE_FIELD_PROP
+  );
+  const sourcePageField = validateB2BSourceContextFieldName_(
+    config.sourcePageField,
+    B2B_SOURCE_CONTEXT_SOURCE_PAGE_FIELD_PROP
+  );
+  if (formTypeField === sourcePageField) {
+    throw new Error('B2B source_page: pola typu formularza i source_page muszą być różne.');
+  }
+
+  const markerSelector = 'input[name="' + formTypeField + '"]';
+  const sourceSelector = 'input[name="' + sourcePageField + '"]';
   return [
     '<script>',
     '(function () {',
     '  "use strict";',
     '',
     '  function fillB2BSourcePage() {',
-    '    var markers = document.querySelectorAll(\'input[name="hidden-11"]\');',
+    '    var markers = document.querySelectorAll(' + JSON.stringify(markerSelector) + ');',
     '    if (!markers.length) { return; }',
     '    var sourcePage = window.location.origin + window.location.pathname;',
     '',
@@ -33,7 +77,7 @@ function buildB2BSourceContextCode_() {
     '      if (marker.value !== "b2b_lead") { return; }',
     '      var form = marker.closest("form");',
     '      if (!form) { return; }',
-    '      var field = form.querySelector(\'input[name="hidden-13"]\');',
+    '      var field = form.querySelector(' + JSON.stringify(sourceSelector) + ');',
     '      if (!field || field.value === sourcePage) { return; }',
     '      field.value = sourcePage;',
     '      field.dispatchEvent(new Event("input", { bubbles: true }));',
@@ -91,7 +135,7 @@ function prepareB2BSourcePageContext() {
   return withScriptLock_('przygotowanie B2B source_page', () => {
     if (!requireB2BSourceContextWriteApproval_(
       'Przygotować B2B source_page?',
-      'Zostanie utworzony wyłącznie NIEAKTYWNY snippet, który zapisuje bieżącą stronę do hidden-13 formularza B2B. Istniejący tracking marketingowy nie zostanie zmieniony.'
+      'Zostanie utworzony wyłącznie NIEAKTYWNY snippet, który zapisuje bieżącą stronę do skonfigurowanego pola formularza B2B. Istniejący tracking marketingowy nie zostanie zmieniony.'
     )) {
       return { cancelled: true };
     }
@@ -110,7 +154,7 @@ function prepareB2BSourcePageContext() {
     } else {
       snippet = createInactiveCodeSnippet_({
         name: B2B_SOURCE_CONTEXT_NAME,
-        desc: 'Consent-independent current page context for B2B Forminator hidden-13.',
+        desc: 'Consent-independent current page context for a configured B2B Forminator source field.',
         code: expectedCode,
         scope: 'head-content',
         priority: 5,
@@ -189,7 +233,7 @@ function activateB2BSourcePageContext() {
   return withScriptLock_('aktywacja B2B source_page', () => {
     if (!requireB2BSourceContextWriteApproval_(
       'Aktywować B2B source_page?',
-      'Nowy snippet zacznie wypełniać hidden-13 bieżącym URL-em tylko w formularzach form_type=b2b_lead. Nie zmienia cookie ani danych marketingowych.'
+      'Nowy snippet zacznie wypełniać skonfigurowane pole bieżącym URL-em tylko w formularzach form_type=b2b_lead. Nie zmienia cookie ani danych marketingowych.'
     )) {
       return { cancelled: true };
     }
@@ -211,7 +255,7 @@ function activateB2BSourcePageContext() {
 
     SpreadsheetApp.getUi().alert(
       'B2B source_page aktywny.\n\nSnippet ID: ' + snippet.id +
-      '\nNastępny krok: test formularza bez zgody marketingowej i kontrola kolumny source_page w RAW.'
+      '\nNastępny krok: test formularza bez zgody marketingowej i kontrola pola source_page w RAW.'
     );
     return { snippetId: Number(snippet.id), active: true, resultRef: saved.resultRef };
   });
