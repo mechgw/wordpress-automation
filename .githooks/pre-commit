@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Pre-commit quality gate (staged-first, fail-fast).
+#
+# Installed by `npm ci` / `npm run prepare` via `git config core.hooksPath .githooks`.
+# Skip once with `git commit --no-verify` only for WIP commits on a branch;
+# the same gates run in CI and block the merge anyway.
+#
+# Gates, in order:
+#   1. forbidden artifacts   – credentials and build output never enter the index
+#   2. ESLint (staged)       – *.gs, test/**/*.js, scripts/**/*.js, eslint.config.js
+#   3. unit tests + coverage – per-file thresholds and 100% of staged *.gs lines
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -n "$staged" ] || exit 0
+
+step() { printf '\n[pre-commit] %s\n' "$1"; }
+
+# --- 1. forbidden artifacts ---------------------------------------------------
+step "Forbidden artifacts"
+if bad="$(printf '%s\n' "$staged" | grep -E '^(\.clasp\.json|\.clasprc\.json|coverage/|node_modules/)' || true)"; [ -n "$bad" ]; then
+  echo "These files must never be committed:"
+  printf '  %s\n' $bad
+  exit 1
+fi
+echo "OK"
+
+# --- 2. lint staged JS/GS ------------------------------------------------------
+lintable="$(printf '%s\n' "$staged" | grep -E '\.(gs|js)$' || true)"
+if [ -n "$lintable" ]; then
+  step "ESLint (staged)"
+  # shellcheck disable=SC2086
+  npx eslint $lintable
+fi
+
+# --- 3. tests + coverage gate --------------------------------------------------
+sources_or_tests="$(printf '%s\n' "$staged" | grep -E '(^[^/]+\.gs$|^test/|^eslint\.config\.js$|^package(-lock)?\.json$|^\.quality/)' || true)"
+if [ -n "$sources_or_tests" ]; then
+  step "Unit tests + coverage gate (staged lines must be 100% covered)"
+  partial="$(git diff --name-only -- $(printf '%s\n' "$staged" | grep -E '^[^/]+\.gs$' || true) 2>/dev/null || true)"
+  if [ -n "$partial" ]; then
+    echo "WARNING: partially staged sources ($partial) – coverage is measured on the working tree."
+  fi
+  node scripts/quality/coverage-gate.js --changed=staged
+fi
+
+printf '\n[pre-commit] All gates passed.\n'

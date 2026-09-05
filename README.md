@@ -71,6 +71,13 @@ npm test
 
 Everything that talks to Sheets, GA4 or WordPress for real stays covered by the sheet's *Sprawdź połączenie* / *Test …* menu items and the drift check. Two VM gotchas when writing tests: create `Date` objects with `gas.$Date`, and compare objects returned from the sources through `plain()` (different realm, different prototypes).
 
+### Quality gates and standards
+
+- **Standard:** [docs/quality/testing-standard.md](docs/quality/testing-standard.md) (layers, ten rules, gold standard, forbidden patterns). Plan tests with [docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md) and record evidence in the PR template.
+- **Coverage gate:** `npm run quality:gate -- --changed=base:origin/main` runs the tests with V8 coverage and enforces two rules: per-file thresholds from `.quality/coverage-policy.json` (a ratchet, thresholds only go up) and **100% coverage of changed `*.gs` lines**. Justified exceptions live in `.quality/changed-lines-ignore.json`.
+- **Pre-commit hook:** `npm ci` points git at `.githooks/` (`core.hooksPath`). On every commit the hook blocks credentials and build artifacts, lints the staged files, and runs the tests plus the coverage gate on the staged `*.gs` lines. `git commit --no-verify` skips it locally; CI runs the same gate against `main` and blocks the merge.
+- **CI:** the `validate` job runs lint, tests and the gate (`--changed=base:origin/<base>` on pull requests).
+
 To work against the live Apps Script project, log in once (clasp is installed by `npm ci`):
 
 ```bash
