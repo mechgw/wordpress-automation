@@ -1,0 +1,16 @@
+# Google Apps Script / clasp — scriptId i tokeny OAuth nie trafiają do publicznego repo
+.clasp.json
+.clasprc.json
+
+# Node
+node_modules/
+
+# Lokalne ustawienia narzędzi
+.claude/settings.local.json
+.claude/worktrees/
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db
