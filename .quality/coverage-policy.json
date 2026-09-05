@@ -8,6 +8,11 @@
       "rationale": "Placeholder constant only; fully executed when the harness loads it."
     },
     {
+      "pattern": "Lock.gs",
+      "threshold": 100,
+      "rationale": "Tiny, fully covered (#52): acquire, release on success and on error, refusal."
+    },
+    {
       "pattern": "Status.gs",
       "threshold": 95,
       "rationale": "New in #39 with full coverage (100%); keep it near-complete."

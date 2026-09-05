@@ -37,6 +37,12 @@ Optional:
 
 `WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
 
+### Concurrency and idempotency
+
+- **One script lock** (`Lock.gs`, `LockService.getScriptLock`) wraps every GSC/GA4 import and the whole *Wykonaj polecenia* loop. It is a short `tryLock` (5 s) with no queueing: a second run that finds the lock held stops with `Inne uruchomienie jeszcze trwa (…)`. For imports that refusal is recorded as a failed run in the status cell, so a lost run is visible instead of two runs writing the same sheet or the same WordPress page.
+- **Command statuses in `WP COMMANDS`:** `PENDING` is picked up; `RUNNING` means a run was interrupted after the row was claimed (Apps Script time limit, crash). Such a row is never re-executed automatically: check the page in WordPress, then set `ERROR`, or `PENDING` with a new `command_id`. `SKIPPED` means a write command was refused because it has no `command_id` or a result for that `command_id` already exists in `WP RESULTS`; to run it again, give it a new id. Read commands may be repeated freely.
+- **Menu *WordPress → Wykonaj wiersze DRY_RUN naprawdę*** asks for confirmation, flips `DRY_RUN` rows to `PENDING` and runs them; it refuses while `WP_DRY_RUN` is still `TRUE`.
+
 `WP_DRY_RUN=TRUE` turns *Wykonaj polecenia* into a rehearsal: every write command runs its validations, reads and snapshot exactly as for real, but the write request is stopped right before `UrlFetchApp.fetch` and the command row gets status `DRY_RUN` with the method, URL and payload that would have been sent. Reads still execute. Dry run and the real write share one request builder (`buildWpRequest_`), so the preview cannot differ from production. Dry run works without `WP_ALLOW_WRITES`; without `WP_DRY_RUN` the write guard stays as it is.
 
 Nothing site-specific (domain, company name, REST namespace) is hardcoded in the sources; it all lives in Script Properties so the repository can stay public.

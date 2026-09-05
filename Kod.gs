@@ -87,7 +87,7 @@ function testPolaczenia() {
 
 /** Ręczny import z menu: ostatnie daysBack dni z opóźnieniem dailyLagDays. */
 function importOstatniZakres() {
-  return recordImportRun_('GSC', false, () => {
+  return recordImportRun_('GSC', false, () => withScriptLock_('import GSC', () => {
     const cfg = getConfig_();
 
     const end = przesunDate_(new Date(), -cfg.dailyLagDays);
@@ -97,12 +97,12 @@ function importOstatniZakres() {
       formatujDate_(start),
       formatujDate_(end)
     );
-  });
+  }));
 }
 
 /** Import jednego dnia; uruchamiany przez codzienny trigger. */
 function importDzienny() {
-  return recordImportRun_('GSC', true, () => {
+  return recordImportRun_('GSC', true, () => withScriptLock_('import GSC', () => {
     const cfg = getConfig_();
 
     const targetDate = przesunDate_(
@@ -113,7 +113,7 @@ function importDzienny() {
     const date = formatujDate_(targetDate);
 
     return importRange_(date, date);
-  });
+  }));
 }
 
 function importRange_(startDate, endDate) {

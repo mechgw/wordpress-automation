@@ -16,8 +16,15 @@ function addWpMenu_() {
     .addItem('Test Rank Math bridge', 'testRankMathBridge')
     .addItem('Test biblioteki mediów', 'testWpMediaAccess')
     .addItem('Wykonaj polecenia', 'processWpCommands')
+    .addItem('Wykonaj wiersze DRY_RUN naprawdę', 'executeDryRunCommands')
     .addToUi();
 }
+
+/** Akcje, które zmieniają WordPress; tylko one podlegają idempotencji po command_id. */
+const WP_WRITE_ACTIONS = [
+  'CREATE_PAGE_DRAFT', 'PUBLISH_PAGE', 'UPDATE_MEDIA_FIELD', 'UPDATE_RANK_MATH_FIELD',
+  'UPDATE_PAGE_FIELD', 'REPLACE_PAGE_CONTENT_TEXT', 'COPY_PAGE_LAYOUT', 'RESTORE_SNAPSHOT'
+];
 
 function getWpConfig_() {
   const props = PropertiesService.getScriptProperties();
@@ -229,34 +236,128 @@ function testWpMediaAccess() {
   );
 }
 
+/**
+ * Wykonuje wiersze PENDING z arkusza WP COMMANDS pod blokadą projektu.
+ *
+ * Wiersze RUNNING to uruchomienia przerwane (np. limit czasu Apps Script po
+ * wysłaniu zapisu): nie są powtarzane automatycznie. Sprawdź stan w WordPressie,
+ * potem ustaw ERROR albo PENDING z nowym command_id.
+ */
 function processWpCommands() {
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName(WP_COMMANDS_SHEET);
+  return withScriptLock_('komendy WordPress', () => {
+    const ss = SpreadsheetApp.getActive();
+    const sheet = ss.getSheetByName(WP_COMMANDS_SHEET);
 
+    if (!sheet) throw new Error('Brak arkusza ' + WP_COMMANDS_SHEET);
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { processed: 0, skipped: 0 };
+
+    const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+    const stats = { processed: 0, skipped: 0 };
+
+    rows.forEach((row, index) => {
+      const sheetRow = index + 2;
+
+      const command = {
+        id: String(row[0] || '').trim(),
+        createdAt: row[1],
+        action: String(row[2] || '').trim(),
+        target: String(row[3] || '').trim(),
+        field: String(row[4] || '').trim(),
+        value: row[5],
+        confirm: String(row[6] || '').trim().toUpperCase(),
+        status: String(row[7] || '').trim()
+      };
+
+      if (command.status !== 'PENDING') return;
+
+      if (WP_WRITE_ACTIONS.includes(command.action)) {
+        const skipReason = wpWriteAlreadyDone_(command);
+        if (skipReason) {
+          sheet.getRange(sheetRow, 8).setValue('SKIPPED');
+          sheet.getRange(sheetRow, 10).setValue(skipReason);
+          sheet.getRange(sheetRow, 12).setValue(new Date());
+          stats.skipped++;
+          return;
+        }
+      }
+
+      processOneWpCommand_(sheet, sheetRow, command);
+      stats.processed++;
+    });
+
+    return stats;
+  });
+}
+
+/**
+ * Idempotencja komend zapisu: komenda bez command_id nie może być bezpiecznie
+ * powtórzona, a komenda, której wynik już jest w WP RESULTS, nie jest wykonywana
+ * drugi raz. Zwraca powód pominięcia albo '' gdy można wykonać.
+ */
+function wpWriteAlreadyDone_(command) {
+  if (!command.id) {
+    return 'Pominięto: komenda zapisu wymaga command_id (kolumna A), żeby nie wykonać jej dwa razy.';
+  }
+
+  const results = SpreadsheetApp.getActive().getSheetByName(WP_RESULTS_SHEET);
+  if (!results || results.getLastRow() < 2) return '';
+
+  const hit = results
+    .getRange(2, 2, results.getLastRow() - 1, 1)
+    .createTextFinder(command.id)
+    .matchEntireCell(true)
+    .findNext();
+
+  if (!hit) return '';
+  return 'Pominięto: wynik dla command_id ' + command.id + ' już istnieje w ' + WP_RESULTS_SHEET +
+    ' (wiersz ' + hit.getRow() + '). Aby wykonać ponownie, nadaj nowe command_id.';
+}
+
+/**
+ * Zamienia wiersze DRY_RUN na PENDING po potwierdzeniu i wykonuje je naprawdę.
+ * Wymaga wyłączonego WP_DRY_RUN, inaczej wynik znów byłby tylko próbą.
+ */
+function executeDryRunCommands() {
+  const ui = SpreadsheetApp.getUi();
+  const config = getWpConfig_();
+
+  if (config.dryRun) {
+    ui.alert('WP_DRY_RUN jest nadal TRUE. Ustaw FALSE w Script Properties, żeby wykonać polecenia naprawdę.');
+    return { converted: 0 };
+  }
+
+  const sheet = SpreadsheetApp.getActive().getSheetByName(WP_COMMANDS_SHEET);
   if (!sheet) throw new Error('Brak arkusza ' + WP_COMMANDS_SHEET);
 
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
+  const rows = lastRow < 2 ? [] : sheet.getRange(2, 8, lastRow - 1, 1).getValues();
+  const dryRows = [];
+  rows.forEach((r, i) => { if (String(r[0] || '').trim() === 'DRY_RUN') dryRows.push(i + 2); });
 
-  const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+  if (!dryRows.length) {
+    ui.alert('Brak wierszy ze statusem DRY_RUN.');
+    return { converted: 0 };
+  }
 
-  rows.forEach((row, index) => {
-    const sheetRow = index + 2;
+  const answer = ui.alert(
+    'Wykonać naprawdę?',
+    'Wiersze DRY_RUN: ' + dryRows.length + '. Zostaną ustawione na PENDING i wykonane ' +
+    'z prawdziwym zapisem do WordPressa (WP_ALLOW_WRITES musi być TRUE).',
+    ui.ButtonSet.YES_NO
+  );
+  if (answer !== ui.Button.YES) {
+    return { converted: 0 };
+  }
 
-    const command = {
-      id: String(row[0] || '').trim(),
-      createdAt: row[1],
-      action: String(row[2] || '').trim(),
-      target: String(row[3] || '').trim(),
-      field: String(row[4] || '').trim(),
-      value: row[5],
-      confirm: String(row[6] || '').trim().toUpperCase(),
-      status: String(row[7] || '').trim()
-    };
-
-    if (command.status !== 'PENDING') return;
-
-    processOneWpCommand_(sheet, sheetRow, command);
+  // Konwersja i wykonanie pod jedną blokadą: gdy inne uruchomienie trwa,
+  // wiersze zostają DRY_RUN zamiast czekać jako PENDING bez potwierdzenia.
+  return withScriptLock_('komendy WordPress', () => {
+    dryRows.forEach(r => sheet.getRange(r, 8).setValue('PENDING'));
+    SpreadsheetApp.flush();
+    const stats = processWpCommands();
+    return Object.assign({ converted: dryRows.length }, stats);
   });
 }
 
