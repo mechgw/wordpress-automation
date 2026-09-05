@@ -1,4 +1,5 @@
-// WordPress Bridge v2.8 — Rank Math SEO + Media + page layout copy
+// WordPress Bridge — Rank Math SEO + Media + page layout copy
+// Wersja: patrz GitHub Releases; kod nie przechowuje numeru wersji.
 //
 // Dedykowane endpointy (seo-meta, page-layout) udostępnia snippet po stronie
 // WordPressa pod namespace z Script Property WP_REST_NAMESPACE,
@@ -147,7 +148,7 @@ function testRankMathBridge() {
   }
 
   SpreadsheetApp.getUi().alert(
-    'Rank Math bridge v2.7 działa.\n\n' +
+    'Rank Math bridge działa.\n\n' +
     'Strona testowa: ' + (page.slug || page.id) +
     '\nOdczyt surowego SEO title/meta: OK' +
     '\nDedykowany endpoint zapisu: OK'

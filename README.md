@@ -59,11 +59,10 @@ npm ci
 npm run lint
 ```
 
-To work against the live Apps Script project, install clasp and log in once:
+To work against the live Apps Script project, log in once (clasp is installed by `npm ci`):
 
 ```bash
-npm install -g @google/clasp
-clasp login
+npx clasp login
 ```
 
 Then create a git-ignored `.clasp.json` with the project id:
@@ -118,9 +117,15 @@ The normal path is a release:
 
 The workflow checks out the released tag, runs lint, prints the files clasp will push, runs `clasp push --force`, and records an immutable Apps Script version named after the tag. Pre-releases are ignored.
 
-For an ad-hoc deploy of `main` without a release: Actions → *Deploy to Apps Script* → *Run workflow*, optionally ticking *create_version*, then approve it the same way.
+For an ad-hoc deploy without a release: Actions → *Deploy to Apps Script* → *Run workflow*, leave *Use workflow from* on `main`, keep *deploy_ref* as `main`, optionally tick *create_version*, then approve it the same way.
 
-Only `main` and `v*` tags are allowed to deploy to `production`.
+**Rollback**: same dialog, still run from `main`, but set *deploy_ref* to the previous release tag (for example `v2.9.1`). The workflow verifies the tag exists, checks it out, lints it, and after approval pushes those sources to Apps Script. Always keep *Use workflow from* on `main`: that dropdown selects the workflow definition, and older tags carry older definitions.
+
+```bash
+gh workflow run deploy-apps-script.yml --ref main -f deploy_ref=v2.9.1
+```
+
+clasp is a pinned dev dependency (`package-lock.json`), so local runs and both workflows use the same version; Dependabot proposes upgrades.
 
 ## Drift check
 
