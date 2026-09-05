@@ -1,0 +1,117 @@
+name: Review gate
+
+# Publishes a `review-ack` check on the PR head that is green only when:
+#
+#   1. Copilot code review is not in progress. GitHub lists Copilot under
+#      "requested reviewers" from the moment it is asked until it submits its
+#      review, so "in progress" == still requested. Finished, errored or never
+#      requested all count as done: a broken bot must not block merging.
+#   2. Someone confirmed the bot comments were read: a PR comment starting
+#      with `/reviewed`, written by a human (or the Claude app), and posted
+#      after the current head commit and after the last bot review/comment.
+#      New commits or new bot comments therefore need a fresh `/reviewed`.
+#
+# Codex (chatgpt-codex-connector) only posts comments, so it is reported for
+# information and does not block.
+#
+# The check is created via the Checks API so that runs triggered by comments
+# (which run on the default branch) still attach their result to the PR head.
+# No PR code is checked out or executed here.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, review_requested, review_request_removed]
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
+
+permissions:
+  checks: write
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    # For issue_comment only react to comments on pull requests.
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+      CHECK_NAME: review-ack
+      COPILOT_LOGINS: "Copilot copilot-pull-request-reviewer[bot]"
+      BOT_LOGINS: "copilot-pull-request-reviewer[bot] chatgpt-codex-connector[bot]"
+      ACK_AUTHORS_EXTRA: "claude[bot]"
+    steps:
+      - name: Evaluate and publish review-ack
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$REPO"
+
+          head_sha="$(gh api "$api/pulls/$PR" --jq '.head.sha')"
+          requested="$(gh api "$api/pulls/$PR" --jq '[.requested_reviewers[].login] | join(" ")')"
+          head_date="$(gh api "$api/commits/$head_sha" --jq '.commit.committer.date')"
+
+          # jq predicates built from the login lists above.
+          bot_sel="$(for b in $BOT_LOGINS; do printf '.user.login == "%s" or ' "$b"; done; printf 'false')"
+          extra_sel="$(for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
+
+          # --- 1. Copilot state -------------------------------------------------
+          copilot_state="done"
+          for login in $COPILOT_LOGINS; do
+            if grep -qwF -- "$login" <<<"$requested"; then copilot_state="in_progress"; fi
+          done
+          copilot_reviews="$(gh api --paginate "$api/pulls/$PR/reviews" --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | .id' | wc -l | tr -d ' ')"
+
+          # --- 2. Latest bot activity (reviews, PR comments, inline comments) --
+          last_bot_activity="$( {
+              gh api --paginate "$api/pulls/$PR/reviews"  --jq ".[] | select($bot_sel) | (.submitted_at // .created_at)"
+              gh api --paginate "$api/issues/$PR/comments" --jq ".[] | select($bot_sel) | .created_at"
+              gh api --paginate "$api/pulls/$PR/comments"  --jq ".[] | select($bot_sel) | .created_at"
+            } | sort | tail -n1 )"
+          threshold="$(printf '%s\n%s\n' "$head_date" "$last_bot_activity" | sort | tail -n1)"
+
+          # --- 3. Acknowledgment comment ---------------------------------------
+          ack="$(gh api --paginate "$api/issues/$PR/comments" --jq "
+              .[]
+              | select(.created_at > \"$threshold\")
+              | select(.user.type == \"User\" or $extra_sel)
+              | select(.body | test(\"^\\\\s*/reviewed\\\\b\"))
+              | \"\(.user.login) at \(.created_at): \(.html_url)\"" | tail -n1)"
+
+          # --- Verdict ---------------------------------------------------------
+          conclusion="success"
+          summary=""
+          if [ "$copilot_state" = "in_progress" ]; then
+            conclusion="failure"
+            summary+="⏳ Copilot code review is still in progress (listed as requested reviewer)."$'\n'
+          else
+            summary+="✅ Copilot code review is not running ($copilot_reviews review(s) posted so far)."$'\n'
+          fi
+          if [ -n "$ack" ]; then
+            summary+="✅ Acknowledged by $ack"$'\n'
+          else
+            conclusion="failure"
+            summary+="❌ No \`/reviewed\` comment newer than the head commit (${head_sha:0:7}, $head_date) and the last bot activity (${last_bot_activity:-none})."$'\n'
+          fi
+          summary+=$'\n'"To unblock: read the bot comments, then post a PR comment starting with \`/reviewed\` (optionally followed by what was accepted or rejected)."
+
+          printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          title="Bot reviews acknowledged"
+          [ "$conclusion" = "success" ] || title="Waiting for review acknowledgment"
+
+          gh api -X POST "$api/check-runs" \
+            -f name="$CHECK_NAME" -f head_sha="$head_sha" \
+            -f status=completed -f conclusion="$conclusion" \
+            -f "output[title]=$title" -f "output[summary]=$summary" \
+            --jq '"check-run \(.name) → \(.conclusion) on \(.head_sha[0:7])"'
