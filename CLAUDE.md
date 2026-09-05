@@ -16,7 +16,8 @@ identity lives in Script Properties (`WP_REST_NAMESPACE`, `SITE_DOMAIN`, `WP_*`)
    ([docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md)).
 3. Wait for Copilot's review. Read every comment; apply or answer in-thread and resolve the thread.
 4. Post a comment starting with `/reviewed` (only owner/collaborators count). This turns the
-   `review-ack` check green; a new push or a new bot comment requires a fresh `/reviewed`.
+   `review-ack` check green; a new push or a new bot **review** (review object or inline comment)
+   requires a fresh `/reviewed`. Plain bot comments to the PR, such as a usage-limit notice, do not.
 5. Merge when `validate`, `secret-scan`, `pr-title`, `review-ack` are green and threads resolved.
 6. Publishing the Release Drafter draft deploys the tag to Apps Script after the owner approves the
    `production` environment. Rollback: run *Deploy to Apps Script* with `deploy_ref=<tag>`.
