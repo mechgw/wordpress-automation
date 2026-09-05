@@ -113,8 +113,10 @@ function isImportStale_(lastOk, now) {
 /** Jedna linia statusu dla komórki konfiguracji. */
 function importStatusText_(source, now) {
   const record = readImportRecord_(source);
-  const lastOk = record.lastOk;
   const lastRun = record.lastRun;
+  // Rekord częściowy (np. ręcznie edytowany albo z wcześniejszej wersji): udany
+  // lastRun bez lastOk traktujemy jako ostatni poprawny import.
+  const lastOk = record.lastOk || (lastRun && lastRun.ok ? lastRun : null);
   const triggerPart = ' | trigger: ' + (hasImportTrigger_(source) ? 'TAK' : 'NIE');
 
   if (!lastOk && !lastRun) {

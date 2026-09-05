@@ -96,6 +96,12 @@ describe('Status.gs importStatusText_', () => {
     assert.match(gas.importStatusText_('GSC'), /\| landing: 4 \| ads: 5 \| UWAGA: ADS: HTTP 400 \| trigger: NIE$/);
   });
 
+  test('a partial record with a successful lastRun but no lastOk still renders', () => {
+    const gas = withRecord({ lastRun: { finishedAt: hoursAgo(2), ok: true, rows: 11 } });
+    assert.match(gas.importStatusText_('GSC'), /^AKTYWNE – ostatni import: .* \| 11 wierszy \| trigger: NIE$/);
+    assert.doesNotThrow(() => gas.showImportStatus());
+  });
+
   test('older than the staleness window is flagged NIEAKTUALNE', () => {
     const gas = withRecord({ lastOk: { finishedAt: hoursAgo(40), ok: true, rows: 5, detail: '', warning: '' }, lastRun: { ok: true } }, ['importDzienny']);
     assert.match(gas.importStatusText_('GSC'), /^NIEAKTUALNE – ostatni import: .* \| 5 wierszy \| trigger: TAK$/);
