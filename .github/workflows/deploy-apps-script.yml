@@ -64,7 +64,8 @@ jobs:
           : "${APPS_SCRIPT_ID:?Missing APPS_SCRIPT_ID repository secret}"
           umask 077
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
-          printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > .clasp.json
+          # scriptExtensions keeps clasp 3 on .gs (its default is .js).
+          printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
       - name: Files that will be pushed
         run: clasp status
