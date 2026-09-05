@@ -141,16 +141,28 @@ jobs:
           npx eslint Version.gs
 
       - name: Files that will be pushed
-        run: npx clasp status
+        shell: bash
+        run: |
+          set -euo pipefail
+          { echo "## Deploy ${DEPLOY_REF} ($(git rev-parse --short HEAD))"; echo; echo '```'; npx clasp status; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Push to Apps Script
         run: npx clasp push --force
 
       - name: Create immutable version
         if: env.CREATE_VERSION == 'true'
+        shell: bash
         # Use the checked-out commit, not GITHUB_SHA: a manual run dispatched
         # from another ref would otherwise label the version with the wrong SHA.
-        run: npx clasp version "${DEPLOY_REF} ($(git rev-parse --short HEAD)) deployed from GitHub by ${GITHUB_ACTOR}"
+        run: |
+          set -euo pipefail
+          npx clasp version "${DEPLOY_REF} ($(git rev-parse --short HEAD)) deployed from GitHub by ${GITHUB_ACTOR}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # #44: prove the live project is exactly what we pushed, right now, not
+      # at the next weekly drift check. The push already happened: a red step
+      # here means "investigate or roll back with deploy_ref", not "retry".
+      - name: Verify the live project matches ${{ env.DEPLOY_REF }}
+        run: node scripts/quality/apps-script-compare.js --label "$DEPLOY_REF"
 
       - name: Remove credentials
         if: always()
