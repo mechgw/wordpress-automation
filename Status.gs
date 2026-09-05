@@ -272,6 +272,14 @@ function effectiveLastOk_(record) {
   return (record && record.lastOk) || (lastRun && lastRun.ok ? lastRun : null);
 }
 
+/**
+ * true, gdy funkcję wywołał trigger czasowy: Apps Script przekazuje wtedy obiekt
+ * zdarzenia z triggerUid. Wywołanie z menu lub edytora nie ma argumentu → ręczne.
+ */
+function isTriggerRun_(e) {
+  return !!(e && typeof e === 'object' && (e.triggerUid || e['trigger-uid']));
+}
+
 function isImportStale_(lastOk, now) {
   if (!lastOk || !lastOk.finishedAt) return true;
   const age = (now || new Date()).getTime() - new Date(lastOk.finishedAt).getTime();
@@ -330,7 +338,7 @@ function addStatusMenu_() {
     .addItem('Status danych', 'showImportStatus')
     .addItem('Odśwież status w komórkach', 'refreshImportStatusCells')
     .addSeparator()
-    .addItem('Sprawdź aktualność teraz (alerty)', 'sprawdzAktualnoscImportow')
+    .addItem('Sprawdź aktualność teraz (alerty)', 'sprawdzAktualnoscImportowZMenu')
     .addItem('Włącz codzienne alerty e-mail', 'ustawCodzienneAlerty')
     .addToUi();
 }
@@ -358,8 +366,6 @@ function showImportStatus() {
   });
 
   lines.push('Dane uznajemy za nieaktualne po ' + IMPORT_STALE_AFTER_HOURS + ' h od ostatniego poprawnego importu.');
-  const alerts = alertConfig_();
-  lines.push('Alerty e-mail: ' + (alerts.email ? alerts.email : 'wyłączone (brak ALERT_EMAIL)') +
-    ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
+  lines.push('Alerty e-mail: ' + alertRecipientText_() + ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }
