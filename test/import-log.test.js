@@ -64,6 +64,37 @@ describe('IMPORT LOG: zapis historii', () => {
     assert.equal(rows.length, 2, 'two old rows pruned, recent one and the new one kept');
   });
 
+  test('retencja usuwa stare wiersze także wtedy, gdy arkusz jest posortowany inaczej niż chronologicznie', () => {
+    const sheets = baseSheets();
+    sheets[LOG] = [HEADER, logRow(10, 'GSC', 'trigger', 1, 5), logRow(120, 'GSC', 'trigger', 1, 5), logRow(3, 'GSC', 'trigger', 1, 5), logRow(100, 'GA4', 'trigger', 1, 5)];
+    const gas = loadProject({ sheets });
+    gas.recordImportRun_('GSC', true, () => ({ rows: 5, days: 1 }));
+    const rows = gas.$sheet(LOG).slice(1);
+    assert.equal(rows.length, 3, 'both expired rows removed regardless of position');
+    assert.ok(rows.every(r => Date.now() - new Date(r[0]).getTime() < 91 * 86400000));
+  });
+
+  test('tworzenie arkusza jest odporne na wyścig: duplikat przy insertSheet kończy się użyciem istniejącego', () => {
+    const gas = loadProject({ sheets: baseSheets() });
+    const ss = gas.SpreadsheetApp.getActive();
+    const realGet = ss.getSheetByName;
+    let calls = 0;
+    // Pierwsze sprawdzenie nie widzi arkusza (inne wykonanie właśnie go tworzy),
+    // insertSheet rzuca o duplikacie, drugie sprawdzenie już go zwraca.
+    ss.getSheetByName = name => (name === LOG && calls++ === 0 ? null : realGet(name));
+    ss.insertSheet(LOG);
+    gas.$sheet(LOG).push(HEADER);
+    assert.doesNotThrow(() => gas.recordImportRun_('GSC', true, () => ({ rows: 1, days: 1 })));
+    assert.equal(calls, 2, 'second lookup happened after the duplicate error');
+    assert.equal(gas.$sheet(LOG).length, 2, 'header + the new row, no second sheet');
+  });
+
+  test('inny błąd insertSheet (nie duplikat) jest zgłaszany, nie ukrywany', () => {
+    const gas = loadProject({ sheets: baseSheets() });
+    gas.SpreadsheetApp.getActive().insertSheet = () => { throw new Error('quota exceeded'); };
+    assert.throws(() => gas.recordImportRun_('GSC', true, () => ({ rows: 1, days: 1 })), /quota exceeded/);
+  });
+
   test('importy przekazują liczbę dni zakresu do historii', () => {
     const sheets = baseSheets();
     sheets['GSC RAW'] = [['date']];
@@ -116,6 +147,24 @@ describe('IMPORT LOG: anomalie', () => {
     const gas = loadProject({ sheets });
     gas.recordImportRun_('GSC', true, () => ({ rows: 100, days: 1 }));
     assert.match(gas.$cell(GSC_SHEET, 'B8'), /vs mediana 300/, 'older 1000-row runs fall outside the last 7');
+  });
+
+  test('wpisy starsze niż retencja nie liczą się do mediany, nawet gdy jeszcze nie zostały usunięte', () => {
+    const sheets = baseSheets();
+    sheets[LOG] = [HEADER, ...Array.from({ length: 7 }, (_, i) => logRow(100 + i, 'GSC', 'trigger', 1, 300))];
+    const gas = loadProject({ sheets });
+    gas.recordImportRun_('GSC', true, () => ({ rows: 0, days: 1 }));
+    assert.doesNotMatch(gas.$cell(GSC_SHEET, 'B8'), /UWAGA/, 'resumed profile starts with a clean history');
+  });
+
+  test('mediana bierze 7 najnowszych runów po czasie, nie po kolejności wierszy', () => {
+    const sheets = baseSheets();
+    const recent = history(7, 300);
+    const older = Array.from({ length: 3 }, (_, i) => logRow(20 + i, 'GSC', 'trigger', 1, 1000));
+    sheets[LOG] = [HEADER, ...recent, ...older]; // older rows appended AFTER newer ones (sorted sheet)
+    const gas = loadProject({ sheets });
+    gas.recordImportRun_('GSC', true, () => ({ rows: 100, days: 1 }));
+    assert.match(gas.$cell(GSC_SHEET, 'B8'), /vs mediana 300/, '1000-row runs are older and fall outside the last 7 by time');
   });
 
   test('profile są rozłączne: ręczny import 90 dni nie zaburza mediany triggera 1 dnia i odwrotnie', () => {
