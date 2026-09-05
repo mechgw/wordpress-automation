@@ -28,9 +28,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: npm
 
-      - name: Install clasp
-        run: npm install -g @google/clasp@3
+      # clasp comes from devDependencies, pinned by package-lock.json.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Configure clasp credentials
         env:
@@ -47,7 +49,7 @@ jobs:
           printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
       - name: Pull live project
-        run: clasp pull
+        run: npx clasp pull
 
       - name: Compare with main
         id: diff

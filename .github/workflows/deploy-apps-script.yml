@@ -4,7 +4,10 @@ name: Deploy to Apps Script
 #
 # Triggers:
 #   - release published  → deploys the released tag (pre-releases are skipped)
-#   - workflow_dispatch  → deploys `main` on demand
+#   - workflow_dispatch  → deploys the ref the run was started from: `main`
+#                          for a hotfix, or a `v*` tag for a rollback (pick it
+#                          in the "Use workflow from" dropdown). The production
+#                          environment only accepts `main` and `v*` tags.
 #
 # Either way the `production` environment requires a reviewer to approve the
 # run before any secret is exposed or any file is pushed, and lint must pass
@@ -33,14 +36,15 @@ concurrency:
 
 jobs:
   push:
-    name: clasp push (${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }})
+    name: clasp push (${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }})
     if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
     env:
-      # Released tag for release events, main for manual runs.
-      DEPLOY_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+      # Released tag for release events; for manual runs the ref chosen in the
+      # "Run workflow" dialog (main, or a v* tag to roll back).
+      DEPLOY_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
       # Every release gets an immutable Apps Script version; manual runs opt in.
       CREATE_VERSION: ${{ github.event_name == 'release' || inputs.create_version == true }}
     steps:
@@ -61,8 +65,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Install clasp
-        run: npm install -g @google/clasp@3
+      # clasp comes from devDependencies (pinned by package-lock.json, bumped
+      # by Dependabot), so every deploy uses the same version.
+      - name: clasp version
+        run: npx clasp --version
 
       - name: Configure clasp credentials
         env:
@@ -79,16 +85,16 @@ jobs:
           printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
       - name: Files that will be pushed
-        run: clasp status
+        run: npx clasp status
 
       - name: Push to Apps Script
-        run: clasp push --force
+        run: npx clasp push --force
 
       - name: Create immutable version
         if: env.CREATE_VERSION == 'true'
         # Use the checked-out commit, not GITHUB_SHA: a manual run dispatched
         # from another ref would otherwise label the version with the wrong SHA.
-        run: clasp version "${DEPLOY_REF} ($(git rev-parse --short HEAD)) deployed from GitHub by ${GITHUB_ACTOR}"
+        run: npx clasp version "${DEPLOY_REF} ($(git rev-parse --short HEAD)) deployed from GitHub by ${GITHUB_ACTOR}"
 
       - name: Remove credentials
         if: always()
