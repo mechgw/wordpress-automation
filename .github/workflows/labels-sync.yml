@@ -1,0 +1,141 @@
+name: Sync GitHub labels
+
+# Reconciles the declarative label manifest with the repository.
+#
+# The manifest is the source of truth for names, colors and descriptions of
+# labels managed by this project. Unmanaged labels are deliberately left alone;
+# removals must be listed explicitly under migrations.delete.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.json
+      - .github/workflows/labels-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: labels-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Reconcile labels
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('.github/labels.json', 'utf8'));
+            const repoFullName = `${context.repo.owner}/${context.repo.repo}`;
+
+            if (manifest.repo !== repoFullName) {
+              core.setFailed(`labels.json targets ${manifest.repo}, current repo is ${repoFullName}`);
+              return;
+            }
+            if (manifest.prune !== false) {
+              core.setFailed('This repository intentionally requires prune=false; removals must be explicit migrations.');
+              return;
+            }
+            if (!Array.isArray(manifest.labels) || manifest.labels.length === 0) {
+              core.setFailed('labels.json must contain a non-empty labels array.');
+              return;
+            }
+
+            const desired = new Map();
+            for (const label of manifest.labels) {
+              if (!label.name || !/^[0-9a-f]{6}$/i.test(label.color || '')) {
+                core.setFailed(`Invalid label definition: ${JSON.stringify(label)}`);
+                return;
+              }
+              if ((label.description || '').length > 100) {
+                core.setFailed(`Description exceeds GitHub's 100 character limit: ${label.name}`);
+                return;
+              }
+              const key = label.name.toLowerCase();
+              if (desired.has(key)) {
+                core.setFailed(`Duplicate label name (case-insensitive): ${label.name}`);
+                return;
+              }
+              desired.set(key, label);
+            }
+
+            const current = await github.paginate(github.rest.issues.listLabelsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            const existing = new Map(current.map(label => [label.name.toLowerCase(), label]));
+
+            const result = { created: [], updated: [], unchanged: [], deleted: [] };
+
+            for (const label of manifest.labels) {
+              const key = label.name.toLowerCase();
+              const found = existing.get(key);
+              const description = label.description || '';
+
+              if (!found) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description
+                });
+                result.created.push(label.name);
+                continue;
+              }
+
+              const changed =
+                found.name !== label.name ||
+                found.color.toLowerCase() !== label.color.toLowerCase() ||
+                (found.description || '') !== description;
+
+              if (!changed) {
+                result.unchanged.push(label.name);
+                continue;
+              }
+
+              await github.rest.issues.updateLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: found.name,
+                new_name: label.name,
+                color: label.color,
+                description
+              });
+              result.updated.push(label.name);
+            }
+
+            for (const name of manifest.migrations?.delete || []) {
+              const found = existing.get(String(name).toLowerCase());
+              if (!found || desired.has(found.name.toLowerCase())) continue;
+              await github.rest.issues.deleteLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: found.name
+              });
+              result.deleted.push(found.name);
+            }
+
+            const line = values => values.length ? values.join(', ') : '—';
+            await core.summary
+              .addHeading('GitHub label reconciliation')
+              .addTable([
+                [{ data: 'Operation', header: true }, { data: 'Labels', header: true }],
+                ['Created', line(result.created)],
+                ['Updated', line(result.updated)],
+                ['Deleted', line(result.deleted)],
+                ['Unchanged', line(result.unchanged)]
+              ])
+              .addRaw(`\nManaged labels: ${manifest.labels.length}. Unmanaged labels are not pruned.`)
+              .write();
