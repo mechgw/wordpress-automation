@@ -132,7 +132,7 @@ function getGlobalFooterSourcePageBySlug_() {
   return pages[0];
 }
 
-/** Validate source identity and the two structural markers used by the loader. */
+/** Validate source identity and the complete style/footer elements used by the loader. */
 function validateGlobalFooterSourcePage_(page) {
   if (!page || !/^\d+$/.test(String(page.id || ''))) {
     throw new Error('Źródło stopki nie ma prawidłowego ID WordPressa.');
@@ -142,11 +142,11 @@ function validateGlobalFooterSourcePage_(page) {
   }
 
   const content = getRawValue_(page.content);
-  const styleHits = (content.match(/<style\b[^>]*id=["']cc-global-footer-styles["'][^>]*>/gi) || []).length;
-  const footerHits = (content.match(/<footer\b[^>]*class=["'][^"']*\bcc-site-footer\b[^"']*["'][^>]*>/gi) || []).length;
+  const styleHits = (content.match(/<style\b[^>]*id=["']cc-global-footer-styles["'][^>]*>[\s\S]*?<\/style>/gi) || []).length;
+  const footerHits = (content.match(/<footer\b[^>]*class=["'][^"']*\bcc-site-footer\b[^"']*["'][^>]*>[\s\S]*?<\/footer>/gi) || []).length;
   if (styleHits !== 1 || footerHits !== 1) {
     throw new Error(
-      'Źródło stopki musi zawierać dokładnie jeden #cc-global-footer-styles i jeden .cc-site-footer.'
+      'Źródło stopki musi zawierać dokładnie jeden kompletny #cc-global-footer-styles i jeden kompletny .cc-site-footer.'
     );
   }
   return content;
@@ -194,7 +194,9 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "if ( ! function_exists( 'wpauto_global_footer_source_valid' ) ) {",
     "\tfunction wpauto_global_footer_source_valid() {",
     "\t\t$content = wpauto_global_footer_source_content();",
-    "\t\treturn (bool) preg_match( '/<style\\b[^>]*id=[\"\\x27]cc-global-footer-styles[\"\\x27][^>]*>/i', $content ) && false !== stripos( $content, 'cc-site-footer' );",
+    "\t\t$style_ok = (bool) preg_match( '/<style\\b[^>]*id=[\"\\x27]cc-global-footer-styles[\"\\x27][^>]*>.*?<\\/style>/is', $content );",
+    "\t\t$footer_ok = (bool) preg_match( '/<footer\\b[^>]*class=[\"\\x27][^\"\\x27]*\\bcc-site-footer\\b[^\"\\x27]*[\"\\x27][^>]*>.*?<\\/footer>/is', $content );",
+    "\t\treturn $style_ok && $footer_ok;",
     "\t}",
     "}",
     "",
@@ -435,18 +437,23 @@ function switchGlobalFooterToLoader() {
 /** Symmetric rollback: restore legacy first; only then deactivate loader. */
 function rollbackGlobalFooterToLegacy() {
   return withScriptLock_('rollback globalnej stopki', () => {
-    const before = getGlobalFooterMigrationState_();
+    const config = getGlobalFooterMigrationConfig_();
+    const before = {
+      config,
+      legacy: getCodeSnippetRaw_(config.legacyId),
+      loader: getCodeSnippetRaw_(config.loaderId)
+    };
 
     if (before.legacy.active && !before.loader.active) {
       return { alreadyRolledBack: true };
     }
-    if (!before.loader.active || before.legacy.active) {
-      throw new Error('Rollback wymaga stanu: loader aktywny, stary snippet nieaktywny.');
+    if (!before.loader.active) {
+      throw new Error('Rollback wymaga aktywnego loadera albo już aktywnego starego snippetu.');
     }
 
     if (!requireGlobalFooterWriteApproval_(
       'Cofnąć migrację stopki?',
-      'Stary snippet zostanie aktywowany jako pierwszy, a loader wyłączony dopiero po potwierdzeniu.'
+      'Stary snippet zostanie potwierdzony jako aktywny, a loader wyłączony dopiero po potwierdzeniu.'
     )) {
       return { cancelled: true };
     }
@@ -454,8 +461,11 @@ function rollbackGlobalFooterToLegacy() {
     saveCodeSnippetSnapshot_(before.legacy, 'GLOBAL-FOOTER-ROLLBACK');
     saveCodeSnippetSnapshot_(before.loader, 'GLOBAL-FOOTER-ROLLBACK');
 
-    setCodeSnippetActive_(before.config.legacyId, true);
-    const legacyAfterActivation = getCodeSnippetRaw_(before.config.legacyId);
+    let legacyAfterActivation = before.legacy;
+    if (!legacyAfterActivation.active) {
+      setCodeSnippetActive_(before.config.legacyId, true);
+      legacyAfterActivation = getCodeSnippetRaw_(before.config.legacyId);
+    }
     if (!legacyAfterActivation.active) {
       throw new Error('Nie potwierdzono aktywacji starego snippetu. Loader pozostaje aktywny.');
     }
@@ -468,7 +478,12 @@ function rollbackGlobalFooterToLegacy() {
 
     saveCodeSnippetResult_(legacyAfterActivation, 'GLOBAL-FOOTER-ROLLBACK');
     SpreadsheetApp.getUi().alert('Rollback stopki zakończony: stary snippet aktywny, loader nieaktywny.');
-    return { rolledBack: true, legacyId: before.config.legacyId, loaderId: before.config.loaderId };
+    return {
+      rolledBack: true,
+      recoveredDoubleActive: Boolean(before.legacy.active),
+      legacyId: before.config.legacyId,
+      loaderId: before.config.loaderId
+    };
   });
 }
 
