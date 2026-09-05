@@ -103,6 +103,28 @@ jobs:
           # scriptExtensions keeps clasp 3 on .gs (its default is .js).
           printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
+      # Version.gs in the repo holds placeholders; the deployed copy carries the
+      # tag, commit, time and actor so the sheet menu can show what is live.
+      - name: Stamp deployed version into Version.gs
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --short HEAD)"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > Version.gs <<EOF
+          /**
+           * Wygenerowane przez workflow "Deploy to Apps Script". Nie edytuj ręcznie.
+           * Źródło: https://github.com/${GITHUB_REPOSITORY}/releases
+           */
+          const DEPLOYED_VERSION = {
+            tag: '${DEPLOY_REF}',
+            commit: '${commit}',
+            deployedAt: '${now}',
+            deployedBy: '${GITHUB_ACTOR}'
+          };
+          EOF
+          cat Version.gs
+
       - name: Files that will be pushed
         run: npx clasp status
 

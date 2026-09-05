@@ -11,9 +11,37 @@ function onOpen() {
     .addSeparator()
     .addItem('Włącz codzienny import', 'ustawAutomatycznyImport')
     .addToUi();
-    
+
     addGa4Menu_();
     addWpMenu_();
+    addVersionMenu_();
+}
+
+/** Etykieta wdrożonej wersji, np. "v2.9.4" albo "dev" w edytorze. */
+function versionLabel_() {
+  return (DEPLOYED_VERSION && DEPLOYED_VERSION.tag) || 'dev';
+}
+
+/** Menu z numerem wersji w tytule, obok pozostałych menu projektu. */
+function addVersionMenu_() {
+  SpreadsheetApp.getUi()
+    .createMenu(versionLabel_())
+    .addItem('Szczegóły wdrożenia', 'showDeployedVersion')
+    .addToUi();
+}
+
+/** Pokazuje tag, commit i datę wdrożenia zapisane przez workflow deployu. */
+function showDeployedVersion() {
+  const v = DEPLOYED_VERSION || {};
+  const lines = [
+    'Wersja: ' + versionLabel_(),
+    'Commit: ' + (v.commit || 'brak (kod z edytora, nie z wdrożenia)'),
+    'Wdrożono: ' + (v.deployedAt || '-'),
+    'Przez: ' + (v.deployedBy || '-'),
+    '',
+    'Lista wydań: https://github.com/mechgw/wordpress-automation/releases'
+  ];
+  SpreadsheetApp.getUi().alert(lines.join('\n'));
 }
 
 function testPolaczenia() {
