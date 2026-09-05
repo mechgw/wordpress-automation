@@ -24,8 +24,8 @@
     },
     {
       "pattern": "WordPress.gs",
-      "threshold": 25,
-      "rationale": "RATCHET 2026-09-05 (#33): config, fetch, Rank Math test/read/write, page-layout get/copy and response helpers are covered (25%). Command processing, media and page create/publish/update are not yet. Raise as stubbed tests are added."
+      "threshold": 90,
+      "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94%). Remaining lines are alert texts of the menu tests."
     }
   ]
 }

@@ -43,6 +43,7 @@ module.exports = [
         __dirname: "readonly",
         console: "readonly",
         Buffer: "readonly",
+        URL: "readonly",
       },
     },
     rules: {
