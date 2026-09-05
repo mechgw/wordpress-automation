@@ -81,7 +81,7 @@ test('discovery pod lockiem paginuje, używa context=edit i zapisuje kod w osobn
 
   assert.deepEqual(plain(result), { count: 3, resultRef: 'WP RESULTS!A2:M7' });
   assert.equal(calls.length, 5);
-  assert.deepEqual(gas.$lock.slice(), [['tryLock', 3000], ['releaseLock']]);
+  assert.deepEqual(gas.$lock.slice(), [['tryLock', 5000], ['releaseLock']]);
 
   assert.equal(rows[1][4], 'active');
   assert.equal(rows[1][12], 'CODE_SNIPPET');
