@@ -148,7 +148,7 @@ function testRankMathBridge() {
   }
 
   SpreadsheetApp.getUi().alert(
-    'Rank Math bridge działa.\n\n' +
+    'Rank Math bridge działa (wersja ' + versionLabel_() + ').\n\n' +
     'Strona testowa: ' + (page.slug || page.id) +
     '\nOdczyt surowego SEO title/meta: OK' +
     '\nDedykowany endpoint zapisu: OK'

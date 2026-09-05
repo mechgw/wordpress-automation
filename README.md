@@ -14,6 +14,7 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `Kod.gs` — shared entry points and Google Search Console integration.
 - `GA4.gs` — Google Analytics 4 and Ads-related automation.
 - `WordPress.gs` — WordPress REST automation bridge.
+- `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
 

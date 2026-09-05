@@ -61,6 +61,9 @@ jobs:
           for f in *.gs appsscript.json; do
             [ -f "$f" ] && sed -i -e '$a\' "$f"
           done
+          # Version.gs is generated at deploy time (tag, commit, date); the
+          # repo keeps placeholders, so it must not count as drift.
+          git checkout -- Version.gs
           # .clasp.json is git-ignored, so only Apps Script sources show up here.
           changes="$(git status --porcelain)"
           if [ -z "$changes" ]; then

@@ -103,6 +103,37 @@ jobs:
           # scriptExtensions keeps clasp 3 on .gs (its default is .js).
           printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
 
+      # Version.gs in the repo holds placeholders; the deployed copy carries the
+      # tag, commit, time and actor so the sheet menu can show what is live.
+      - name: Stamp deployed version into Version.gs
+        shell: bash
+        # Values go through JSON.stringify, so a quote or backslash in a tag
+        # name can never break or inject into the generated JavaScript.
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          const v = {
+            tag: process.env.DEPLOY_REF,
+            commit: execSync('git rev-parse --short HEAD').toString().trim(),
+            deployedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+            deployedBy: process.env.GITHUB_ACTOR
+          };
+          const body = Object.entries(v)
+            .map(([k, val]) => `  ${k}: ${JSON.stringify(String(val))}`)
+            .join(',\n');
+          fs.writeFileSync('Version.gs',
+            '/**\n' +
+            ' * Wygenerowane przez workflow "Deploy to Apps Script". Nie edytuj ręcznie.\n' +
+            ` * Źródło: https://github.com/${process.env.GITHUB_REPOSITORY}/releases\n` +
+            ' */\n' +
+            `const DEPLOYED_VERSION = {\n${body}\n};\n`);
+          EOF
+          cat Version.gs
+          # Syntax check with the project's ESLint config (node --check rejects .gs).
+          npx eslint Version.gs
+
       - name: Files that will be pushed
         run: npx clasp status
 
