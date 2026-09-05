@@ -35,13 +35,38 @@ function spreadsheetUrl_() {
   return ss && typeof ss.getUrl === 'function' ? String(ss.getUrl() || '') : '';
 }
 
-/** Wysyła e-mail, jeśli skonfigurowano adresata. Zwraca true, gdy wysłano. */
+/**
+ * Wysyła e-mail, jeśli skonfigurowano adresata. Zwraca true, gdy wysłano.
+ * Wysyłka jest best-effort: błąd MailApp (limit dzienny, zły adres) jest
+ * logowany i zwracany jako false, nigdy nie zmienia wyniku importu ani strażnika.
+ */
 function sendImportAlert_(subject, lines) {
   const cfg = alertConfig_();
   if (!cfg.email) return false;
   const body = lines.concat(['', 'Arkusz: ' + spreadsheetUrl_(), 'Wersja skryptu: ' + versionLabel_()]).join('\n');
-  MailApp.sendEmail(cfg.email, '[wordpress-automation] ' + subject, body);
-  return true;
+  try {
+    MailApp.sendEmail(cfg.email, '[wordpress-automation] ' + subject, body);
+    return true;
+  } catch (e) {
+    Logger.log('Alert e-mail nie został wysłany (' + subject + '): ' + (e && e.message ? e.message : e));
+    return false;
+  }
+}
+
+/** E-mail otwierający incydent (błąd lub anomalia). Zwraca true, gdy wysłano. */
+function sendIncidentOpenedAlert_(label, run, record, problem, now) {
+  return sendImportAlert_(
+    (problem.reason === 'error' ? 'BŁĄD importu: ' : 'UWAGA, mało danych: ') + label,
+    [
+      'Źródło: ' + label,
+      'Czas: ' + formatImportTime_(run.finishedAt || now),
+      'Uruchomienie: ' + (run.trigger ? 'trigger' : 'ręczne'),
+      (problem.reason === 'error' ? 'Błąd: ' : 'Szczegóły: ') + problem.detail,
+      record.lastOk && record.lastOk.finishedAt ? 'Ostatni poprawny import: ' + formatImportTime_(record.lastOk.finishedAt) : 'Brak poprawnego importu.',
+      '',
+      'Kolejne wystąpienia tego problemu nie będą zgłaszane, dopóki import nie wróci do normy.'
+    ]
+  );
 }
 
 /**
@@ -63,27 +88,23 @@ function updateImportIncident_(source, record) {
   }
 
   if (problem && !incident) {
+    // Najpierw zapis incydentu, potem e-mail: awaria wysyłki nie gubi stanu.
     record.incident = { open: true, reason: problem.reason, detail: problem.detail, openedAt: now, notifiedAt: '' };
-    const sent = sendImportAlert_(
-      (problem.reason === 'error' ? 'BŁĄD importu: ' : 'UWAGA, mało danych: ') + label,
-      [
-        'Źródło: ' + label,
-        'Czas: ' + formatImportTime_(run.finishedAt || now),
-        'Uruchomienie: ' + (run.trigger ? 'trigger' : 'ręczne'),
-        (problem.reason === 'error' ? 'Błąd: ' : 'Szczegóły: ') + problem.detail,
-        record.lastOk && record.lastOk.finishedAt ? 'Ostatni poprawny import: ' + formatImportTime_(record.lastOk.finishedAt) : 'Brak poprawnego importu.',
-        '',
-        'Kolejne wystąpienia tego problemu nie będą zgłaszane, dopóki import nie wróci do normy.'
-      ]
-    );
-    if (sent) record.incident.notifiedAt = now;
     writeImportRecord_(source, record);
+    if (sendIncidentOpenedAlert_(label, run, record, problem, now)) {
+      record.incident.notifiedAt = now;
+      writeImportRecord_(source, record);
+    }
     return 'opened';
   }
 
   if (problem && incident) {
-    // Incydent trwa: aktualizujemy powód/szczegóły bez kolejnego maila.
+    // Incydent trwa: aktualizujemy powód/szczegóły. Cisza, chyba że e-mail
+    // otwierający nigdy nie wyszedł (brak adresu, limit) – wtedy próbujemy ponownie.
     record.incident = Object.assign({}, incident, { reason: problem.reason, detail: problem.detail });
+    if (!incident.notifiedAt && sendIncidentOpenedAlert_(label, run, record, problem, now)) {
+      record.incident.notifiedAt = now;
+    }
     writeImportRecord_(source, record);
     return '';
   }
@@ -114,17 +135,21 @@ function sprawdzAktualnoscImportow() {
   const now = new Date();
   const opened = [];
   const closed = [];
+  const toNotify = []; // incydenty 'stale' bez wysłanego e-maila: nowe i te z dni bez ALERT_EMAIL
 
   Object.keys(importSources_()).forEach(source => {
     const record = readImportRecord_(source);
-    const stale = isImportStale_(record.lastOk, now);
+    const stale = isImportStale_(effectiveLastOk_(record), now);
     const incident = record.incident && record.incident.open ? record.incident : null;
     const label = importSource_(source).label;
 
     if (stale && !incident) {
-      record.incident = { open: true, reason: 'stale', detail: importStatusText_(source, now), openedAt: now.toISOString(), notifiedAt: now.toISOString() };
+      record.incident = { open: true, reason: 'stale', detail: importStatusText_(source, now), openedAt: now.toISOString(), notifiedAt: '' };
       writeImportRecord_(source, record);
-      opened.push(label + ': ' + record.incident.detail);
+      opened.push(label);
+      toNotify.push({ source, record, line: label + ': ' + record.incident.detail });
+    } else if (stale && incident && incident.reason === 'stale' && !incident.notifiedAt) {
+      toNotify.push({ source, record, line: label + ': ' + incident.detail });
     } else if (!stale && incident && incident.reason === 'stale') {
       record.incident = Object.assign({}, incident, { open: false, closedAt: now.toISOString() });
       writeImportRecord_(source, record);
@@ -132,11 +157,17 @@ function sprawdzAktualnoscImportow() {
     }
   });
 
-  if (opened.length) {
-    sendImportAlert_('NIEAKTUALNE dane: ' + opened.length + ' źródło(a)', [
+  if (toNotify.length) {
+    const sent = sendImportAlert_('NIEAKTUALNE dane: ' + toNotify.length + ' źródło(a)', [
       'Codzienny strażnik wykrył nieaktualne dane (starsze niż ' + IMPORT_STALE_AFTER_HOURS + ' h):',
       ''
-    ].concat(opened.map(o => '- ' + o)).concat(['', 'Kolejne dni nie będą zgłaszane, dopóki import nie wróci do normy.']));
+    ].concat(toNotify.map(n => '- ' + n.line)).concat(['', 'Kolejne dni nie będą zgłaszane, dopóki import nie wróci do normy.']));
+    if (sent) {
+      toNotify.forEach(n => {
+        n.record.incident = Object.assign({}, n.record.incident, { notifiedAt: now.toISOString() });
+        writeImportRecord_(n.source, n.record);
+      });
+    }
   }
   if (closed.length && alertConfig_().recovery) {
     sendImportAlert_('Dane znowu aktualne: ' + closed.length + ' źródło(a)', closed.map(c => '- ' + c));
@@ -173,5 +204,5 @@ function incidentSummary_(record) {
   const inc = record && record.incident;
   if (!inc || !inc.open) return 'Incydent: brak';
   return 'Incydent: OTWARTY od ' + formatImportTime_(inc.openedAt) + ' (' + inc.reason + ')' +
-    (inc.notifiedAt ? ', e-mail wysłany' : ', bez e-maila (brak ALERT_EMAIL)');
+    (inc.notifiedAt ? ', e-mail wysłany' : ', bez e-maila');
 }

@@ -95,6 +95,31 @@ describe('incydent: błąd importu', () => {
     assert.equal(record(gas).incident.open, false);
   });
 
+  test('awaria MailApp nie zmienia wyniku importu: błąd importu nadal rzuca, sukces nadal wraca, incydent zapisany', () => {
+    const gas = loadProject({ sheets: sheets(), properties: MAIL });
+    gas.MailApp.sendEmail = () => { throw new Error('Service invoked too many times: email'); };
+    fail(gas, 'HTTP 500 boom');
+    assert.equal(record(gas).incident.open, true);
+    assert.equal(record(gas).incident.notifiedAt, '', 'not marked as notified');
+    const out = gas.recordImportRun_('GSC', true, () => ({ rows: 5, days: 1 }));
+    assert.equal(plain(out).rows, 5, 'recovery mail failure does not fail the import');
+    assert.equal(record(gas).incident.open, false);
+    assert.equal(gas.$mails.length, 0);
+  });
+
+  test('incydent otwarty bez ALERT_EMAIL dostaje e-mail przy kolejnym błędzie, gdy adres się pojawi; potem cisza', () => {
+    const gas = loadProject({ sheets: sheets() });
+    fail(gas, 'HTTP 500 pierwszy');
+    assert.equal(gas.$mails.length, 0);
+    gas.$properties.ALERT_EMAIL = 'alerty@example.pl';
+    fail(gas, 'HTTP 503 drugi');
+    assert.equal(gas.$mails.length, 1);
+    assert.match(gas.$mails[0].body, /Błąd: HTTP 503 drugi/);
+    assert.ok(record(gas).incident.notifiedAt);
+    fail(gas, 'HTTP 504 trzeci');
+    assert.equal(gas.$mails.length, 1, 'silent once notified');
+  });
+
   test('incydenty są niezależne per źródło', () => {
     const gas = loadProject({ sheets: sheets(), properties: MAIL });
     fail(gas, 'HTTP 500', 'GSC');
@@ -168,6 +193,15 @@ describe('strażnik nieaktualnych danych', () => {
     assert.match(gas.$mails[0].body, /- Google Analytics 4 \(GA4\): BRAK IMPORTU/);
     assert.equal(record(gas, 'GSC').incident.reason, 'stale');
     assert.equal(record(gas, 'GA4').incident.reason, 'stale');
+    assert.ok(record(gas, 'GSC').incident.notifiedAt, 'notifiedAt set only after the mail went out');
+    assert.ok(record(gas, 'GA4').incident.notifiedAt);
+  });
+
+  test('częściowy rekord z udanym lastRun bez lastOk jest świeży, tak jak w komórce statusu', () => {
+    const gas = withRecords({ lastRun: { finishedAt: hoursAgo(3), ok: true, rows: 5 } }, fresh);
+    const out = gas.sprawdzAktualnoscImportow();
+    assert.deepEqual(plain(out), { opened: 0, closed: 0 });
+    assert.equal(gas.$mails.length, 0);
   });
 
   test('otwarty incydent → strażnik milczy następnego dnia', () => {
@@ -190,11 +224,31 @@ describe('strażnik nieaktualnych danych', () => {
     assert.equal(record(gas, 'GA4').incident.open, true, 'error incident belongs to the import path');
   });
 
-  test('bez ALERT_EMAIL strażnik działa bez maili', () => {
+  test('bez ALERT_EMAIL strażnik działa bez maili; incydent bez e-maila dostaje go, gdy adres się pojawi', () => {
     const gas = withRecords(stale, fresh, {});
     const out = gas.sprawdzAktualnoscImportow();
     assert.deepEqual(plain(out), { opened: 1, closed: 0 });
     assert.equal(gas.$mails.length, 0);
+    assert.equal(record(gas, 'GSC').incident.notifiedAt, '');
+
+    gas.$properties.ALERT_EMAIL = 'alerty@example.pl';
+    const again = gas.sprawdzAktualnoscImportow();
+    assert.deepEqual(plain(again), { opened: 0, closed: 0 }, 'no new incident');
+    assert.equal(gas.$mails.length, 1);
+    assert.match(gas.$mails[0].subject, /NIEAKTUALNE dane: 1 źródło\(a\)/);
+    assert.ok(record(gas, 'GSC').incident.notifiedAt);
+
+    gas.sprawdzAktualnoscImportow();
+    assert.equal(gas.$mails.length, 1, 'silent once notified');
+  });
+
+  test('gdy MailApp zawiedzie, incydent stale zostaje otwarty bez notifiedAt i strażnik nie rzuca', () => {
+    const gas = withRecords(stale, fresh);
+    gas.MailApp.sendEmail = () => { throw new Error('quota'); };
+    const out = gas.sprawdzAktualnoscImportow();
+    assert.deepEqual(plain(out), { opened: 1, closed: 0 });
+    assert.equal(record(gas, 'GSC').incident.open, true);
+    assert.equal(record(gas, 'GSC').incident.notifiedAt, '');
   });
 });
 
@@ -220,6 +274,10 @@ describe('menu, trigger i okno statusu', () => {
     gas.showImportStatus();
     const text = gas.$alerts[0][0];
     assert.match(text, /Incydent: OTWARTY od .* \(error\), e-mail wysłany/);
+    const silent = loadProject({ sheets: sheets() });
+    fail(silent);
+    silent.showImportStatus();
+    assert.match(silent.$alerts[0][0], /Incydent: OTWARTY od .* \(error\), bez e-maila\n/);
     assert.match(text, /Google Analytics 4 \(GA4\)\n[^\n]*\n[^\n]*\n {2}Incydent: brak/);
     assert.match(text, /Alerty e-mail: alerty@example\.pl \| strażnik: TAK/);
   });
