@@ -129,7 +129,7 @@ function loadProject(opts = {}) {
     const code = opts.override && Object.prototype.hasOwnProperty.call(opts.override, file)
       ? opts.override[file]
       : fs.readFileSync(path.join(ROOT, file), 'utf8');
-    vm.runInContext(code, ctx, { filename: file });
+    vm.runInContext(code, ctx, { filename: path.join(ROOT, file) });
   }
   ctx.$get = name => vm.runInContext(name, ctx);
   // Dates must be created inside the VM: an `instanceof Date` check in the

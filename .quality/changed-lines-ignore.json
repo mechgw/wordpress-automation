@@ -1,0 +1,5 @@
+{
+  "_comment": "Registry of justified exceptions from the 100% changed-lines coverage rule (scripts/quality/coverage-gate.js). Every entry needs path, lines and a reason that explains why the lines cannot be exercised in the Node harness (e.g. Apps Script UI dialogs, trigger installation) and what covers them instead (sheet test menu, drift check). Entries are temporary: remove them when a stubbed test lands.",
+  "_lastUpdated": "2026-09-05",
+  "entries": []
+}

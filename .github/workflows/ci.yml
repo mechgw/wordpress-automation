@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history so the coverage gate can diff against the base branch.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -58,9 +61,19 @@ jobs:
         run: npm run lint
 
       # Unit tests load the .gs files into a VM with stubbed Google services
-      # (see test/helpers/gas.js) and cover the pure helpers and config layer.
-      - name: Unit tests
-        run: npm test
+      # (see test/helpers/gas.js). The gate then enforces per-file thresholds
+      # (.quality/coverage-policy.json) and 100% coverage of the *.gs lines
+      # changed in this PR (.quality/changed-lines-ignore.json for exceptions).
+      - name: Unit tests + coverage gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The base SHA needs no origin/<branch> ref, only the full history.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run quality:gate -- --changed="base:${{ github.event.pull_request.base.sha }}"
+          else
+            npm run quality:gate -- --changed=none
+          fi
 
   secret-scan:
     runs-on: ubuntu-latest
