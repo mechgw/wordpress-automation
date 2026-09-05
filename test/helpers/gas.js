@@ -48,9 +48,19 @@ function colIndex(letters) {
   return n; // 1-based
 }
 
-/** Parses "B9", "A2:B11", "E1:H120" into { row, col, rows, cols } (1-based). */
-function parseA1(a1) {
-  const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i.exec(String(a1).trim());
+/**
+ * Parses "B9", "A2:B11", "E1:H120" and whole columns "A:A" / "E:H" into
+ * { row, col, rows, cols } (1-based). Whole columns span the current grid
+ * height (at least one row), mirroring how the sources iterate them.
+ */
+function parseA1(a1, gridRows = 1) {
+  const s = String(a1).trim();
+  const cols = /^([A-Z]+):([A-Z]+)$/i.exec(s);
+  if (cols) {
+    const col = colIndex(cols[1]);
+    return { row: 1, col, rows: Math.max(gridRows, 1), cols: colIndex(cols[2]) - col + 1 };
+  }
+  const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i.exec(s);
   if (!m) throw new Error(`Sheet stub: unsupported A1 range "${a1}"`);
   const row = Number(m[2]);
   const col = colIndex(m[1]);
@@ -81,6 +91,15 @@ function makeSheet(name, initialRows) {
       return out;
     },
     getValue: () => (grid[row - 1] || [])[col - 1] ?? '',
+    isBlank() {
+      for (let r = row; r < row + rows; r++) {
+        for (let c = col; c < col + cols; c++) {
+          const v = (grid[r - 1] || [])[c - 1];
+          if (v !== undefined && v !== null && v !== '') return false;
+        }
+      }
+      return true;
+    },
     setValue(value) {
       ensure(row, col);
       grid[row - 1][col - 1] = value;
@@ -110,7 +129,7 @@ function makeSheet(name, initialRows) {
     getName: () => name,
     getRange: (...args) => {
       if (typeof args[0] === 'string') {
-        const { row, col, rows, cols } = parseA1(args[0]);
+        const { row, col, rows, cols } = parseA1(args[0], grid.length);
         return rangeOf(row, col, rows, cols);
       }
       return rangeOf(args[0], args[1], args[2] ?? 1, args[3] ?? 1);
