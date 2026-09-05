@@ -6,10 +6,12 @@ name: Review gate
 #      "requested reviewers" (GraphQL only, REST hides bots) from the moment
 #      it is asked until it submits its review. Finished, errored or never
 #      requested all count as done: a broken bot must not block merging.
-#   2. Someone confirmed the bot comments were read: a PR comment starting
+#   2. Someone confirmed the bot reviews were read: a PR comment starting
 #      with `/reviewed`, written by a human (or the Claude app), and posted
-#      after the current head commit and after the last bot review/comment.
-#      New commits or new bot comments therefore need a fresh `/reviewed`.
+#      after the current head commit and after the last bot REVIEW (a review
+#      object or an inline comment). Plain bot comments to the PR, such as a
+#      usage-limit notice, do not reset the acknowledgment (#50). New commits
+#      or new bot reviews do.
 #
 # Codex (chatgpt-codex-connector) only posts comments, so it is reported for
 # information and does not block.
@@ -57,87 +59,27 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
-      # GraphQL reports the bot as `copilot-pull-request-reviewer`, REST as
-      # `copilot-pull-request-reviewer[bot]`. The UI name "Copilot" is never
-      # returned by the API, so it is deliberately not listed here.
-      COPILOT_LOGINS: "copilot-pull-request-reviewer copilot-pull-request-reviewer[bot]"
-      BOT_LOGINS: "copilot-pull-request-reviewer[bot] chatgpt-codex-connector[bot]"
-      # Who may acknowledge: repository owner/members/collaborators, plus the
-      # Claude app. Drive-by commenters cannot unblock a merge.
-      ACK_ASSOCIATIONS: "OWNER MEMBER COLLABORATOR"
-      ACK_AUTHORS_EXTRA: "claude[bot]"
     steps:
+      # pull_request_target checks out the BASE branch by default, so this is
+      # main's script, never code from the PR.
+      - name: Checkout gate script (base branch)
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            scripts/quality/review-ack.js
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Logic and its unit tests live in scripts/quality/review-ack.js
+      # (test/review-ack.test.js). Only bot REVIEWS and inline comments reset
+      # an acknowledgment; plain bot comments such as usage-limit notices don't.
       - name: Evaluate
-        shell: bash
-        run: |
-          set -euo pipefail
-          api="repos/$REPO"
-
-          head_sha="$(gh api "$api/pulls/$PR" --jq '.head.sha')"
-          head_date="$(gh api "$api/commits/$head_sha" --jq '.commit.committer.date')"
-
-          # Pending review requests. REST's requested_reviewers omits bots such
-          # as Copilot, so this has to go through GraphQL. A failed query must
-          # not abort the gate (a broken lookup would otherwise block merges),
-          # so it degrades to "nothing pending".
-          requested="$(gh api graphql \
-            -f query='query($o:String!,$r:String!,$n:Int!){ repository(owner:$o,name:$r){ pullRequest(number:$n){ reviewRequests(first:50){ nodes{ requestedReviewer{ ... on Bot{login} ... on User{login} ... on Mannequin{login} ... on Team{name} } } } } } }' \
-            -F o="${REPO%/*}" -F r="${REPO#*/}" -F n="$PR" \
-            --jq '[.data.repository.pullRequest.reviewRequests.nodes[].requestedReviewer | (.login // .name) | select(. != null)] | join(" ")' \
-            2>/dev/null || true)"
-
-          # jq predicates built from the login lists above.
-          bot_sel="$(for b in $BOT_LOGINS; do printf '.user.login == "%s" or ' "$b"; done; printf 'false')"
-          ack_sel="$(for a in $ACK_ASSOCIATIONS; do printf '.author_association == "%s" or ' "$a"; done
-                     for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
-
-          # --- 1. Copilot state -------------------------------------------------
-          copilot_state="done"
-          for login in $COPILOT_LOGINS; do
-            if grep -qwF -- "$login" <<<"$requested"; then copilot_state="in_progress"; fi
-          done
-          copilot_reviews="$(gh api --paginate "$api/pulls/$PR/reviews" --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | .id' | wc -l | tr -d ' ')"
-
-          # --- 2. Latest bot activity (reviews, PR comments, inline comments) --
-          last_bot_activity="$( {
-              gh api --paginate "$api/pulls/$PR/reviews"  --jq ".[] | select($bot_sel) | (.submitted_at // .created_at)"
-              gh api --paginate "$api/issues/$PR/comments" --jq ".[] | select($bot_sel) | .created_at"
-              gh api --paginate "$api/pulls/$PR/comments"  --jq ".[] | select($bot_sel) | .created_at"
-            } | sort | tail -n1 )"
-          threshold="$(printf '%s\n%s\n' "$head_date" "$last_bot_activity" | sort | tail -n1)"
-
-          # --- 3. Acknowledgment comment ---------------------------------------
-          ack="$(gh api --paginate "$api/issues/$PR/comments" --jq "
-              .[]
-              | select(.created_at > \"$threshold\")
-              | select($ack_sel)
-              | select(.body | test(\"^\\\\s*/reviewed\\\\b\"))
-              | \"\(.user.login) at \(.created_at): \(.html_url)\"" | tail -n1)"
-
-          # --- Verdict ---------------------------------------------------------
-          ok=true
-          summary=""
-          if [ "$copilot_state" = "in_progress" ]; then
-            ok=false
-            summary+="⏳ Copilot code review is still in progress (listed as requested reviewer)."$'\n'
-          else
-            summary+="✅ Copilot code review is not running ($copilot_reviews review(s) posted so far)."$'\n'
-          fi
-          if [ -n "$ack" ]; then
-            summary+="✅ Acknowledged by $ack"$'\n'
-          else
-            ok=false
-            summary+="❌ No \`/reviewed\` comment newer than the head commit (${head_sha:0:7}, $head_date) and the last bot activity (${last_bot_activity:-none})."$'\n'
-          fi
-          summary+=$'\n'"To unblock: read the bot comments, then post a PR comment starting with \`/reviewed\` (optionally followed by what was accepted or rejected). Posting it re-runs this check."
-
-          printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ "$ok" != "true" ]; then
-            echo "::error::review-ack not satisfied; see the job summary."
-            exit 1
-          fi
+        run: node scripts/quality/review-ack.js --pr "$PR"
 
   reevaluate:
     # Comments re-run the evaluation only when they come from people who can
