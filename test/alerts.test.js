@@ -314,6 +314,23 @@ describe('#69: walidacja ALERT_EMAIL', () => {
     assert.equal(gas.isValidEmailList_('a@example.pl, TRUE'), false);
     assert.equal(gas.isValidEmailList_('bez-malpy.pl'), false);
     assert.equal(gas.isValidEmailList_(''), false);
+    assert.equal(gas.isValidEmailList_('a@example.pl,'), false, 'trailing comma');
+    assert.equal(gas.isValidEmailList_('a@example.pl,,b@example.pl'), false, 'double comma');
+    assert.equal(gas.isValidEmailList_(',a@example.pl'), false, 'leading comma');
+    assert.equal(gas.isValidEmailList_(' , '), false);
+  });
+
+  test('lista z przecinkiem na końcu jest traktowana jak zły adres, poprawna lista trafia do MailApp bez spacji', () => {
+    const bad = loadProject({ sheets: sheets(), properties: { ALERT_EMAIL: 'a@example.pl,' } });
+    bad.showImportStatus();
+    assert.match(bad.$alerts[0][0], /NIEPRAWIDŁOWY ADRES \(„a@example\.pl,”\)/);
+    fail(bad);
+    assert.equal(bad.$mails.length, 0);
+
+    const good = loadProject({ sheets: sheets(), properties: { ALERT_EMAIL: ' a@example.pl , b@example.pl ' } });
+    fail(good);
+    assert.equal(good.$mails.length, 1);
+    assert.equal(good.$mails[0].to, 'a@example.pl,b@example.pl');
   });
 });
 
@@ -367,6 +384,18 @@ describe('#69: strażnik z menu pokazuje wynik', () => {
     gas.MailApp.sendEmail = () => { throw new Error('Service invoked too many times: email'); };
     gas.sprawdzAktualnoscImportowZMenu();
     assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE dane: 1 źródło\(a\)”\): Service invoked too many times: email/);
+  });
+
+  test('zamknięcie incydentu stale przy ALERT_RECOVERY=FALSE → okno mówi, że mail o powrocie został pominięty', () => {
+    const gas = withRecords(
+      { ...fresh, incident: { open: true, reason: 'stale', openedAt: hoursAgo(20), detail: 'x', notifiedAt: hoursAgo(20) } },
+      fresh,
+      { ...MAIL, ALERT_RECOVERY: 'FALSE' }
+    );
+    gas.sprawdzAktualnoscImportowZMenu();
+    assert.match(gas.$alerts[0][0], /Zamknięte incydenty \(dane znowu aktualne\): 1\nE-mail: pominięty \(„Dane znowu aktualne: 1 źródło\(a\)”\): ALERT_RECOVERY=FALSE\n/);
+    assert.equal(gas.$mails.length, 0);
+    assert.equal(record(gas).incident.open, false);
   });
 
   test('zamknięcie incydentu stale → okno mówi o mailu o powrocie; oba maile w jednym przebiegu są wymienione', () => {

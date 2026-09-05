@@ -25,10 +25,14 @@ const ALERT_GUARD_HOUR = 8;
 /** Ostatni powód niewysłania e-maila w tym uruchomieniu (dla okna strażnika). */
 const ALERT_STATE_ = { lastError: '' };
 
-/** Adres lub lista adresów rozdzielona przecinkami, każdy w postaci nazwa@domena.tld. */
+/**
+ * Adres lub lista adresów rozdzielona przecinkami, każdy w postaci nazwa@domena.tld.
+ * Pusty element (przecinek na końcu, podwójny przecinek) unieważnia całość,
+ * żeby do MailApp nigdy nie trafiła lista, której sam by nie przyjął.
+ */
 function isValidEmailList_(value) {
-  const parts = String(value || '').split(',').map(p => p.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every(p => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(p));
+  const parts = String(value || '').split(',').map(p => p.trim());
+  return parts.every(p => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(p));
 }
 
 /**
@@ -43,7 +47,7 @@ function alertConfig_() {
   return {
     raw,
     valid,
-    email: valid ? raw : '',
+    email: valid ? raw.split(',').map(p => p.trim()).join(',') : '',
     recovery: String(props.getProperty('ALERT_RECOVERY') || 'TRUE').toUpperCase() !== 'FALSE'
   };
 }
@@ -211,9 +215,13 @@ function sprawdzAktualnoscImportow() {
       });
     }
   }
-  if (closed.length && alertConfig_().recovery) {
+  if (closed.length) {
     const subject = 'Dane znowu aktualne: ' + closed.length + ' źródło(a)';
-    describeSend(subject, sendImportAlert_(subject, closed.map(c => '- ' + c)));
+    if (alertConfig_().recovery) {
+      describeSend(subject, sendImportAlert_(subject, closed.map(c => '- ' + c)));
+    } else {
+      mail.push('pominięty („' + subject + '”): ALERT_RECOVERY=FALSE');
+    }
   }
 
   return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
