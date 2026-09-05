@@ -166,6 +166,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf coverage  # test artefact from the gate step; ignored by clasp, but keeps the list readable
           { echo "## Deploy ${DEPLOY_REF} ($(git rev-parse --short HEAD))"; echo; echo '```'; npx clasp status; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Push to Apps Script

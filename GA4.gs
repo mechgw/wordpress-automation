@@ -548,6 +548,7 @@ function importGa4Range_(startDate, endDate, cfg) {
   // Status komórki B9 zapisuje recordImportRun_() na podstawie tego wyniku.
   return {
     rows: landingRows.length + eventRows.length + businessRows.length + adsRows.length,
+    days: Math.round((endDate - startDate) / 86400000) + 1,
     detail: 'landing: ' + landingRows.length +
       ' | key events: ' + eventRows.length +
       ' | business: ' + businessRows.length +

@@ -24,7 +24,7 @@
     },
     {
       "pattern": "GA4.gs",
-      "threshold": 78,
+      "threshold": 85,
       "rationale": "RATCHET 2026-09-05 (#39): daily and range imports end to end (all four reports, business fallback, Ads degradation), testGA4, API layer and helpers are covered (80%). Event diagnostics and key-event configuration remain."
     },
     {
