@@ -5,16 +5,42 @@ commitish: main
 
 categories:
   - title: "🚀 Features"
-    labels:
-      - "enhancement"
-  - title: "🐛 Bug Fixes"
-    labels:
-      - "bug"
-  - title: "📝 Documentation"
-    labels:
-      - "documentation"
+    semver-increment: minor
+    exclusive: true
+    when:
+      - conventional:
+          types: [feat, new]
+      - label: enhancement
 
-# PR titles such as "feat: ..." or "fix: ..." are labelled automatically.
+  - title: "🐛 Bug Fixes"
+    semver-increment: patch
+    exclusive: true
+    when:
+      - conventional:
+          types: [fix, bug, hotfix]
+      - label: bug
+
+  - title: "📝 Documentation"
+    semver-increment: patch
+    exclusive: true
+    when:
+      - conventional:
+          type: docs
+      - label: documentation
+
+  - title: "🧹 Maintenance"
+    semver-increment: patch
+    exclusive: true
+    when:
+      conventional:
+        types: [chore, refactor, style, test, ci]
+
+  - title: "📦 Other Changes"
+    semver-increment: patch
+
+# Keep familiar GitHub labels for quick visual triage. SemVer resolution above also
+# understands Conventional Commit-style PR titles directly, so maintenance PRs do
+# not require extra custom labels.
 autolabeler:
   - label: "enhancement"
     regex:
@@ -33,16 +59,6 @@ autolabeler:
       - '/^docs\//'
 
 change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
-
-version-resolver:
-  minor:
-    labels:
-      - "enhancement"
-  patch:
-    labels:
-      - "bug"
-      - "documentation"
-  default: patch
 
 template: |
   ## What's changed in $RESOLVED_VERSION
