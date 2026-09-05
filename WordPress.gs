@@ -1,4 +1,8 @@
-// ExampleSite WordPress Bridge v2.8 — Rank Math SEO + Media + page layout copy
+// WordPress Bridge v2.8 — Rank Math SEO + Media + page layout copy
+//
+// Dedykowane endpointy (seo-meta, page-layout) udostępnia snippet po stronie
+// WordPressa pod namespace z Script Property WP_REST_NAMESPACE,
+// np. /wp-json/<WP_REST_NAMESPACE>/v1/seo-meta.
 const WP_COMMANDS_SHEET = 'WP COMMANDS';
 const WP_RESULTS_SHEET = 'WP RESULTS';
 const WP_SNAPSHOTS_SHEET = 'WP SNAPSHOTS';
@@ -21,14 +25,33 @@ function getWpConfig_() {
     baseUrl: (props.getProperty('WP_BASE_URL') || '').replace(/\/+$/, ''),
     username: props.getProperty('WP_USERNAME') || '',
     appPassword: props.getProperty('WP_APP_PASSWORD') || '',
-    allowWrites: props.getProperty('WP_ALLOW_WRITES') === 'TRUE'
+    allowWrites: props.getProperty('WP_ALLOW_WRITES') === 'TRUE',
+    // Namespace dedykowanych endpointów snippetu WordPress (bez ukośników),
+    // np. "mojafirma" dla /wp-json/mojafirma/v1/...
+    restNamespace: String(props.getProperty('WP_REST_NAMESPACE') || '').trim().replace(/^\/+|\/+$/g, '')
   };
 
   if (!config.baseUrl) throw new Error('Brak Script Property: WP_BASE_URL');
   if (!config.username) throw new Error('Brak Script Property: WP_USERNAME');
   if (!config.appPassword) throw new Error('Brak Script Property: WP_APP_PASSWORD');
+  if (config.restNamespace && !/^[a-z0-9_-]+$/i.test(config.restNamespace)) {
+    throw new Error(
+      'Nieprawidłowa Script Property WP_REST_NAMESPACE: "' + config.restNamespace +
+      '". Dozwolone są tylko litery, cyfry, "-" i "_" (bez ukośników i wersji), np. "acme".'
+    );
+  }
 
   return config;
+}
+
+/**
+ * Ścieżka dedykowanego endpointu REST bridge, np. wpBridgePath_('seo-meta')
+ * → /wp-json/<WP_REST_NAMESPACE>/v1/seo-meta.
+ */
+function wpBridgePath_(endpoint) {
+  const ns = getWpConfig_().restNamespace;
+  if (!ns) throw new Error('Brak Script Property: WP_REST_NAMESPACE');
+  return '/wp-json/' + ns + '/v1/' + String(endpoint || '').replace(/^\/+/, '');
 }
 
 function getWpHeaders_(config) {
@@ -110,15 +133,16 @@ function testRankMathBridge() {
   const page = pages[0];
   if (!Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „ExampleSite – Rank Math REST bridge”.'
+      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST bridge” po stronie WordPressa.'
     );
   }
 
-  const endpoint = wpFetch_('/wp-json/example-site/v1/seo-meta');
+  const seoMetaPath = wpBridgePath_('seo-meta');
+  const endpoint = wpFetch_(seoMetaPath);
   if (endpoint.code < 200 || endpoint.code >= 300) {
     throw new Error(
-      'Odczyt Rank Math działa, ale dedykowany endpoint zapisu ExampleSite nie odpowiada. HTTP ' +
-      endpoint.code + '\n\n' + endpoint.text.slice(0, 1000)
+      'Odczyt Rank Math działa, ale dedykowany endpoint zapisu (' + seoMetaPath +
+      ') nie odpowiada. HTTP ' + endpoint.code + '\n\n' + endpoint.text.slice(0, 1000)
     );
   }
 
@@ -126,7 +150,7 @@ function testRankMathBridge() {
     'Rank Math bridge v2.7 działa.\n\n' +
     'Strona testowa: ' + (page.slug || page.id) +
     '\nOdczyt surowego SEO title/meta: OK' +
-    '\nDedykowany endpoint zapisu ExampleSite: OK'
+    '\nDedykowany endpoint zapisu: OK'
   );
 }
 
@@ -329,7 +353,7 @@ function getPageRawById_(id, requireRankMath = false) {
     !Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')
   ) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „ExampleSite – Rank Math REST read”.'
+      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST read” po stronie WordPressa.'
     );
   }
 
@@ -780,7 +804,7 @@ function writeRankMathField_(postId, field, value) {
     throw new Error('Niedozwolone pole Rank Math: ' + field);
   }
 
-  const response = wpFetch_('/wp-json/example-site/v1/seo-meta', {
+  const response = wpFetch_(wpBridgePath_('seo-meta'), {
     method: 'post',
     payload: {
       post_id: Number(postId),
@@ -1215,7 +1239,7 @@ function saveSnapshot_(page, commandId) {
 
 /**
  * Odczytuje bezpieczny, whitelisted zestaw ustawień układu strony
- * z dedykowanego endpointu ExampleSite REST bridge.
+ * z dedykowanego endpointu REST bridge.
  */
 function getPageLayout_(postId, commandId) {
   if (!/^\d+$/.test(String(postId || ''))) {
@@ -1223,7 +1247,7 @@ function getPageLayout_(postId, commandId) {
   }
 
   const response = wpFetch_(
-    '/wp-json/example-site/v1/page-layout?post_id=' + encodeURIComponent(postId)
+    wpBridgePath_('page-layout') + '?post_id=' + encodeURIComponent(postId)
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -1261,7 +1285,7 @@ function copyPageLayout_(command) {
     throw new Error('Strona docelowa i wzorcowa nie mogą mieć tego samego ID.');
   }
 
-  const response = wpFetch_('/wp-json/example-site/v1/page-layout', {
+  const response = wpFetch_(wpBridgePath_('page-layout'), {
     method: 'post',
     payload: {
       target_post_id: Number(command.target),

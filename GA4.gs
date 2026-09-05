@@ -58,11 +58,14 @@ function testGA4() {
   let cfg = getGa4Config_();
 
   // Jeśli propertyId nie jest jeszcze wybrane, spróbuj jednoznacznie dopasować
-  // produkcyjną właściwość po URL strumienia WWW.
+  // produkcyjną właściwość po URL strumienia WWW. Domena pochodzi ze Script
+  // Property SITE_DOMAIN albo z hosta WP_BASE_URL; bez niej pomijamy dopasowanie.
+  const siteDomain = getSiteDomain_();
+  const matchesSite = p => Boolean(siteDomain) &&
+    p.streamUrls.some(url => hostnameMatchesDomain_(extractHostname_(url), siteDomain));
+
   if (!cfg.propertyId) {
-    const matching = enriched.filter(p =>
-      p.streamUrls.some(url => /(^|\.)example-site\.pl/i.test(extractHostname_(url)))
-    );
+    const matching = enriched.filter(matchesSite);
 
     if (matching.length === 1) {
       cfgSheet.getRange('B2').setValue(matching[0].propertyId);
@@ -74,14 +77,12 @@ function testGA4() {
   }
 
   if (!cfg.propertyId) {
-    const cityMatches = enriched.filter(p =>
-      p.streamUrls.some(url => /(^|\.)example-site\.pl/i.test(extractHostname_(url)))
-    );
+    const siteMatches = enriched.filter(matchesSite);
     cfgSheet.getRange('B9').setValue(
       !properties.length
         ? 'BRAK DOSTĘPNYCH WŁAŚCIWOŚCI GA4'
-        : cityMatches.length > 1
-          ? 'KILKA WŁAŚCIWOŚCI MA STRUMIEŃ EXAMPLE-SITE.PL – WYBIERZ PROPERTY ID Z LISTY E:H'
+        : siteMatches.length > 1
+          ? 'KILKA WŁAŚCIWOŚCI MA STRUMIEŃ ' + siteDomain.toUpperCase() + ' – WYBIERZ PROPERTY ID Z LISTY E:H'
           : 'WYBIERZ PROPERTY ID Z LISTY E:H I WPISZ DO B2'
     );
     return;
@@ -148,7 +149,7 @@ function diagnozujZdarzeniaGA4() {
 
 
 /**
- * Ustawia właściwe key events dla ExampleSite:
+ * Ustawia właściwe key events dla serwisu:
  * - dodaje operational_order_submit i phone_click,
  * - usuwa mikrozdarzenia pricing_pdf_click, dedicated_calculator_use i regulamin_pdf_click.
  *
@@ -255,6 +256,25 @@ function extractHostname_(value) {
   const s = String(value || '').trim();
   if (!s) return '';
   return s.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./i, '');
+}
+
+/**
+ * Domena serwisu używana do dopasowania strumienia GA4.
+ * Źródło: Script Property SITE_DOMAIN, a w razie jej braku host z WP_BASE_URL.
+ * Zwraca '' gdy nic nie jest skonfigurowane.
+ */
+function getSiteDomain_() {
+  const props = PropertiesService.getScriptProperties();
+  const explicit = String(props.getProperty('SITE_DOMAIN') || '').trim();
+  const source = explicit || props.getProperty('WP_BASE_URL') || '';
+  return extractHostname_(source).toLowerCase();
+}
+
+/** Czy hostname to dokładnie domena albo jej subdomena. */
+function hostnameMatchesDomain_(hostname, domain) {
+  const h = String(hostname || '').toLowerCase();
+  const d = String(domain || '').toLowerCase();
+  return Boolean(d) && (h === d || h.endsWith('.' + d));
 }
 
 /** Pierwszy/ręczny import: domyślnie 90 dni z opóźnieniem z konfiguracji. */
