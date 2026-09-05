@@ -1,10 +1,10 @@
 name: Review gate
 
-# Publishes a `review-ack` check on the PR head that is green only when:
+# `review-ack` is green only when:
 #
 #   1. Copilot code review is not in progress. GitHub lists Copilot under
-#      "requested reviewers" from the moment it is asked until it submits its
-#      review, so "in progress" == still requested. Finished, errored or never
+#      "requested reviewers" (GraphQL only, REST hides bots) from the moment
+#      it is asked until it submits its review. Finished, errored or never
 #      requested all count as done: a broken bot must not block merging.
 #   2. Someone confirmed the bot comments were read: a PR comment starting
 #      with `/reviewed`, written by a human (or the Claude app), and posted
@@ -14,15 +14,19 @@ name: Review gate
 # Codex (chatgpt-codex-connector) only posts comments, so it is reported for
 # information and does not block.
 #
-# The check is created via the Checks API so that runs triggered by comments
-# (which run on the default branch) still attach their result to the PR head.
-# No PR code is checked out or executed here.
+# How the check reaches the PR: the `review-ack` job runs on pull_request_target
+# events, so its result is attached to the PR head like any other job. Comment
+# events run on the default branch and cannot attach a job to the PR head, so
+# the `reevaluate` job simply re-runs the latest pull_request_target run for
+# that PR, which evaluates again with the new comment. (A check created via the
+# Checks API from a comment run lands in a stale check suite and branch
+# protection ignores it — learned the hard way on PR #16.)
 #
-# When Copilot finishes, GitHub emits no event we can use: runs triggered by
-# the Copilot actor wait for manual approval, and the review request simply
-# disappears. The `/reviewed` comment is therefore what triggers the final
-# evaluation, which matches the intended flow (the acknowledgment must be the
-# last word). `workflow_dispatch` re-evaluates a PR by hand if ever needed.
+# Copilot finishing emits no usable event: runs triggered by the Copilot actor
+# wait for manual approval and the review request just disappears. The
+# `/reviewed` comment is therefore the final trigger by design.
+#
+# No PR code is checked out or executed here.
 
 on:
   pull_request_target:
@@ -37,34 +41,35 @@ on:
         type: number
 
 permissions:
-  checks: write
   contents: read
   issues: read
   pull-requests: read
 
+# Do not cancel: a cancelled run leaves a cancelled check suite on the head.
 concurrency:
   group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  evaluate:
-    # For issue_comment only react to comments on pull requests.
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+  review-ack:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-      CHECK_NAME: review-ack
+      PR: ${{ github.event.pull_request.number }}
       # GraphQL reports the bot as `copilot-pull-request-reviewer`, REST as
       # `copilot-pull-request-reviewer[bot]`. The UI name "Copilot" is never
       # returned by the API, so it is deliberately not listed here.
       COPILOT_LOGINS: "copilot-pull-request-reviewer copilot-pull-request-reviewer[bot]"
       BOT_LOGINS: "copilot-pull-request-reviewer[bot] chatgpt-codex-connector[bot]"
+      # Who may acknowledge: repository owner/members/collaborators, plus the
+      # Claude app. Drive-by commenters cannot unblock a merge.
+      ACK_ASSOCIATIONS: "OWNER MEMBER COLLABORATOR"
       ACK_AUTHORS_EXTRA: "claude[bot]"
     steps:
-      - name: Evaluate and publish review-ack
+      - name: Evaluate
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +90,8 @@ jobs:
 
           # jq predicates built from the login lists above.
           bot_sel="$(for b in $BOT_LOGINS; do printf '.user.login == "%s" or ' "$b"; done; printf 'false')"
-          extra_sel="$(for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
+          ack_sel="$(for a in $ACK_ASSOCIATIONS; do printf '.author_association == "%s" or ' "$a"; done
+                     for a in $ACK_AUTHORS_EXTRA; do printf '.user.login == "%s" or ' "$a"; done; printf 'false')"
 
           # --- 1. Copilot state -------------------------------------------------
           copilot_state="done"
@@ -106,15 +112,15 @@ jobs:
           ack="$(gh api --paginate "$api/issues/$PR/comments" --jq "
               .[]
               | select(.created_at > \"$threshold\")
-              | select(.user.type == \"User\" or $extra_sel)
+              | select($ack_sel)
               | select(.body | test(\"^\\\\s*/reviewed\\\\b\"))
               | \"\(.user.login) at \(.created_at): \(.html_url)\"" | tail -n1)"
 
           # --- Verdict ---------------------------------------------------------
-          conclusion="success"
+          ok=true
           summary=""
           if [ "$copilot_state" = "in_progress" ]; then
-            conclusion="failure"
+            ok=false
             summary+="⏳ Copilot code review is still in progress (listed as requested reviewer)."$'\n'
           else
             summary+="✅ Copilot code review is not running ($copilot_reviews review(s) posted so far)."$'\n'
@@ -122,18 +128,56 @@ jobs:
           if [ -n "$ack" ]; then
             summary+="✅ Acknowledged by $ack"$'\n'
           else
-            conclusion="failure"
+            ok=false
             summary+="❌ No \`/reviewed\` comment newer than the head commit (${head_sha:0:7}, $head_date) and the last bot activity (${last_bot_activity:-none})."$'\n'
           fi
-          summary+=$'\n'"To unblock: read the bot comments, then post a PR comment starting with \`/reviewed\` (optionally followed by what was accepted or rejected)."
+          summary+=$'\n'"To unblock: read the bot comments, then post a PR comment starting with \`/reviewed\` (optionally followed by what was accepted or rejected). Posting it re-runs this check."
 
           printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$ok" != "true" ]; then
+            echo "::error::review-ack not satisfied; see the job summary."
+            exit 1
+          fi
 
-          title="Bot reviews acknowledged"
-          [ "$conclusion" = "success" ] || title="Waiting for review acknowledgment"
-
-          gh api -X POST "$api/check-runs" \
-            -f name="$CHECK_NAME" -f head_sha="$head_sha" \
-            -f status=completed -f conclusion="$conclusion" \
-            -f "output[title]=$title" -f "output[summary]=$summary" \
-            --jq '"check-run \(.name) → \(.conclusion) on \(.head_sha[0:7])"'
+  reevaluate:
+    # Comments re-run the evaluation only when they come from people who can
+    # acknowledge (owner/members/collaborators), the Claude app, or the review
+    # bots (a new bot comment must invalidate an earlier acknowledgment).
+    # Anyone else cannot burn Actions minutes by commenting.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+        contains(fromJSON('["claude[bot]","copilot-pull-request-reviewer[bot]","chatgpt-codex-connector[bot]"]'), github.event.comment.user.login)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.issue.number || inputs.pr }}
+      WORKFLOW_FILE: review-gate.yml
+    steps:
+      - name: Re-run the latest review-ack evaluation for this PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')"
+          # head_sha is a supported filter on this endpoint; the jq guard makes
+          # sure we never re-run a run for a different commit even if it were
+          # ignored.
+          run_id="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?event=pull_request_target&head_sha=$head_sha&per_page=20" \
+                    --jq "[.workflow_runs[] | select(.head_sha == \"$head_sha\")] | sort_by(.run_number) | last | .id // empty")"
+          if [ -z "$run_id" ]; then
+            echo "::warning::No pull_request_target run found for PR #$PR head ${head_sha:0:7}; push a commit or re-request review to create one."
+            exit 0
+          fi
+          status="$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.status')"
+          if [ "$status" != "completed" ]; then
+            echo "Run $run_id is still $status; it will pick up the current state on its own."
+            exit 0
+          fi
+          gh api -X POST "repos/$REPO/actions/runs/$run_id/rerun" >/dev/null
+          echo "Re-running review-ack (run $run_id) for PR #$PR at ${head_sha:0:7}: https://github.com/$REPO/actions/runs/$run_id" | tee -a "$GITHUB_STEP_SUMMARY"
