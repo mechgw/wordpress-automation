@@ -351,10 +351,14 @@ function executeDryRunCommands() {
     return { converted: 0 };
   }
 
-  dryRows.forEach(r => sheet.getRange(r, 8).setValue('PENDING'));
-  SpreadsheetApp.flush();
-  const stats = processWpCommands();
-  return Object.assign({ converted: dryRows.length }, stats);
+  // Konwersja i wykonanie pod jedną blokadą: gdy inne uruchomienie trwa,
+  // wiersze zostają DRY_RUN zamiast czekać jako PENDING bez potwierdzenia.
+  return withScriptLock_('komendy WordPress', () => {
+    dryRows.forEach(r => sheet.getRange(r, 8).setValue('PENDING'));
+    SpreadsheetApp.flush();
+    const stats = processWpCommands();
+    return Object.assign({ converted: dryRows.length }, stats);
+  });
 }
 
 function processOneWpCommand_(sheet, rowNumber, command) {

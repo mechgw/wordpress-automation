@@ -52,6 +52,13 @@ describe('Lock.gs withScriptLock_', () => {
     assert.deepEqual(plain(gas.$lock.slice(-1)), [['releaseLock']]);
   });
 
+  test('a nested call inside a held lock neither re-acquires nor releases it', () => {
+    const gas = loadProject();
+    const out = gas.withScriptLock_('outer', () => gas.withScriptLock_('inner', () => 'ok'));
+    assert.equal(out, 'ok');
+    assert.deepEqual(plain(gas.$lock), [['tryLock', 5000], ['releaseLock']], 'exactly one acquire/release pair');
+  });
+
   test('refuses immediately when another run holds the lock, without waiting or queueing', () => {
     const gas = loadProject({ lockHeld: true });
     let ran = false;
@@ -177,6 +184,13 @@ describe('executeDryRunCommands', () => {
     assert.match(gas.$alerts[0][1], /Wiersze DRY_RUN: 1/);
   });
 
+  test('when another run holds the lock, rows stay DRY_RUN and nothing is converted', () => {
+    const gas = project({ commands: [cmd('UPDATE_PAGE_FIELD', '7', 'title', 'N', 'YES', 'DRY_RUN')], lockHeld: true });
+    assert.throws(() => gas.executeDryRunCommands(), /Inne uruchomienie jeszcze trwa/);
+    assert.equal(status(gas), 'DRY_RUN', 'no PENDING left behind without confirmation');
+    assert.equal(gas.$fetchCalls.length, 0);
+  });
+
   test('answering YES converts DRY_RUN rows to PENDING and executes them for real', () => {
     const gas = project({ commands: [cmd('UPDATE_PAGE_FIELD', '7', 'title', 'Nowy', 'YES', 'DRY_RUN'), cmd('GET_PAGE_BY_ID', '8', '', '', 'YES', 'DONE', 'CMD-2')] });
     const out = gas.executeDryRunCommands();
@@ -184,5 +198,6 @@ describe('executeDryRunCommands', () => {
     assert.equal(status(gas, 2), 'DONE');
     assert.equal(gas.$wp.pages.get(7).title, 'Nowy');
     assert.equal(status(gas, 3), 'DONE', 'other rows untouched');
+    assert.deepEqual(plain(gas.$lock), [['tryLock', 5000], ['releaseLock']], 'conversion and execution share one lock');
   });
 });
