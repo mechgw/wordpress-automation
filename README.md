@@ -37,6 +37,8 @@ Optional:
 
 `WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
 
+`WP_DRY_RUN=TRUE` turns *Wykonaj polecenia* into a rehearsal: every write command runs its validations, reads and snapshot exactly as for real, but the write request is stopped right before `UrlFetchApp.fetch` and the command row gets status `DRY_RUN` with the method, URL and payload that would have been sent. Reads still execute. Dry run and the real write share one request builder (`buildWpRequest_`), so the preview cannot differ from production. Dry run works without `WP_ALLOW_WRITES`; without `WP_DRY_RUN` the write guard stays as it is.
+
 Nothing site-specific (domain, company name, REST namespace) is hardcoded in the sources; it all lives in Script Properties so the repository can stay public.
 
 ### Import status (is the data fresh?)

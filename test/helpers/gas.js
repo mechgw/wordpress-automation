@@ -123,7 +123,26 @@ function makeSheet(name, initialRows) {
     setNumberFormat() { return this; },
     setFontWeight() { return this; },
     setBackground() { return this; },
-    setFontColor() { return this; }
+    setFontColor() { return this; },
+    // Minimal TextFinder: exact (matchEntireCell) or substring search within the range.
+    createTextFinder(text) {
+      let entire = false;
+      const finder = {
+        matchEntireCell(flag) { entire = Boolean(flag); return finder; },
+        findNext() {
+          for (let r = row; r < row + rows; r++) {
+            for (let c = col; c < col + cols; c++) {
+              const v = String((grid[r - 1] || [])[c - 1] ?? '');
+              if (entire ? v === String(text) : v.includes(String(text))) {
+                return { getRow: () => r, getColumn: () => c, getValue: () => v };
+              }
+            }
+          }
+          return null;
+        }
+      };
+      return finder;
+    }
   });
   return {
     getName: () => name,
@@ -136,7 +155,9 @@ function makeSheet(name, initialRows) {
     },
     getLastRow: () => grid.length,
     getMaxRows: () => Math.max(grid.length, 1000),
+    getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
     insertRowsAfter() { return this; },
+    insertColumnsAfter() { return this; },
     appendRow(row) { grid.push(row.slice()); return this; },
     $grid: grid
   };
@@ -166,6 +187,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   return {
     getActive: () => ({ getSheetByName: sheetFor }),
     getUi: () => ui,
+    flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid
   };
 }

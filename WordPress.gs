@@ -27,6 +27,10 @@ function getWpConfig_() {
     username: props.getProperty('WP_USERNAME') || '',
     appPassword: props.getProperty('WP_APP_PASSWORD') || '',
     allowWrites: props.getProperty('WP_ALLOW_WRITES') === 'TRUE',
+    // Tryb próbny: komendy przechodzą walidacje, odczyty i snapshoty jak
+    // naprawdę, ale żadne żądanie zapisu nie opuszcza skryptu. Wynik komendy
+    // dostaje status DRY_RUN z opisem żądania, które zostałoby wysłane.
+    dryRun: props.getProperty('WP_DRY_RUN') === 'TRUE',
     // Namespace dedykowanych endpointów snippetu WordPress (bez ukośników),
     // np. "mojafirma" dla /wp-json/mojafirma/v1/...
     restNamespace: String(props.getProperty('WP_REST_NAMESPACE') || '').trim().replace(/^\/+|\/+$/g, '')
@@ -55,6 +59,23 @@ function wpBridgePath_(endpoint) {
   return '/wp-json/' + ns + '/v1/' + String(endpoint || '').replace(/^\/+/, '');
 }
 
+/**
+ * Wspólny strażnik komend zapisu: WP_ALLOW_WRITES (albo WP_DRY_RUN, bo w trybie
+ * próbnym żaden zapis i tak nie wychodzi) oraz potwierdzenie YES w kolumnie confirm.
+ * Rzuca błąd zamiast cokolwiek zwracać; komendy czytają konfigurację przez wpFetch_.
+ */
+function requireWpWrite_(command) {
+  const config = getWpConfig_();
+
+  if (!config.allowWrites && !config.dryRun) {
+    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
+  }
+
+  if (command.confirm !== 'YES') {
+    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
+  }
+}
+
 function getWpHeaders_(config) {
   const auth = Utilities.base64Encode(config.username + ':' + config.appPassword);
 
@@ -64,11 +85,14 @@ function getWpHeaders_(config) {
   };
 }
 
-function wpFetch_(path, options = {}) {
-  const config = getWpConfig_();
-
+/**
+ * Jedyny builder żądań do WordPressa. Prawdziwy zapis i tryb próbny (dry run)
+ * przechodzą przez tę samą funkcję, więc podgląd w dry run opisuje dokładnie
+ * to żądanie, które poszłoby na produkcję.
+ */
+function buildWpRequest_(config, path, options = {}) {
   const params = {
-    method: options.method || 'get',
+    method: String(options.method || 'get').toLowerCase(),
     headers: getWpHeaders_(config),
     muteHttpExceptions: true,
     followRedirects: true
@@ -79,7 +103,37 @@ function wpFetch_(path, options = {}) {
     params.payload = JSON.stringify(options.payload);
   }
 
-  const response = UrlFetchApp.fetch(config.baseUrl + path, params);
+  return { method: params.method, url: config.baseUrl + path, path, params };
+}
+
+/** Sygnał trybu próbnego: przechwytywany w processOneWpCommand_(), nigdy nie jest błędem zapisu. */
+function wpDryRunSignal_(request) {
+  const signal = new Error(
+    'DRY RUN: żądanie zapisu nie zostało wysłane. ' + request.method.toUpperCase() + ' ' + request.url
+  );
+  signal.isDryRun = true;
+  signal.request = {
+    method: request.method.toUpperCase(),
+    url: request.url,
+    payload: request.params.payload === undefined ? null : request.params.payload
+  };
+  return signal;
+}
+
+function describeDryRunRequest_(request) {
+  const payload = request.payload === null ? '' : ' | payload: ' + String(request.payload).slice(0, 3000);
+  return 'DRY RUN – nie wysłano. ' + request.method + ' ' + request.url + payload;
+}
+
+function wpFetch_(path, options = {}) {
+  const config = getWpConfig_();
+  const request = buildWpRequest_(config, path, options);
+
+  if (config.dryRun && request.method !== 'get') {
+    throw wpDryRunSignal_(request);
+  }
+
+  const response = UrlFetchApp.fetch(request.url, request.params);
   const code = response.getResponseCode();
   const text = response.getContentText();
 
@@ -284,6 +338,16 @@ function processOneWpCommand_(sheet, rowNumber, command) {
     sheet.getRange(rowNumber, 11).setValue(result.resultRef || '');
     sheet.getRange(rowNumber, 12).setValue(new Date());
   } catch (error) {
+    if (error && error.isDryRun) {
+      // Tryb próbny: walidacje, odczyty i snapshot już się wykonały; zapis nie.
+      sheet.getRange(rowNumber, 8).setValue('DRY_RUN');
+      sheet.getRange(rowNumber, 9).setValue('');
+      sheet.getRange(rowNumber, 10).setValue(describeDryRunRequest_(error.request).slice(0, 5000));
+      sheet.getRange(rowNumber, 11).setValue('');
+      sheet.getRange(rowNumber, 12).setValue(new Date());
+      return;
+    }
+
     sheet.getRange(rowNumber, 8).setValue('ERROR');
 
     if (error.httpCode) {
@@ -570,15 +634,7 @@ function writeMediaField_(mediaId, field, value) {
 }
 
 function updateMediaField_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(command.target)) {
     throw new Error('UPDATE_MEDIA_FIELD wymaga numerycznego ID mediów WordPress.');
@@ -822,15 +878,7 @@ function writeRankMathField_(postId, field, value) {
 }
 
 function updateRankMathField_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(command.target)) {
     throw new Error('UPDATE_RANK_MATH_FIELD wymaga ID strony WordPress.');
@@ -890,15 +938,7 @@ function updateRankMathField_(command) {
 
 
 function createPageDraft_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   const slug = String(command.target || '').trim().toLowerCase();
   const title = String(command.field || '').trim();
@@ -980,15 +1020,7 @@ function createPageDraft_(command) {
  * private/pending/future/trash ani cofnąć opublikowanej strony do szkicu.
  */
 function publishPage_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(command.target)) {
     throw new Error('PUBLISH_PAGE wymaga ID strony WordPress.');
@@ -1062,15 +1094,7 @@ function publishPage_(command) {
 }
 
 function updatePageField_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(command.target)) {
     throw new Error('UPDATE_PAGE_FIELD wymaga ID strony WordPress.');
@@ -1127,15 +1151,7 @@ function updatePageField_(command) {
  * Zapis jest wykonywany tylko wtedy, gdy fragment występuje dokładnie raz.
  */
 function replacePageContentText_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(command.target)) {
     throw new Error('REPLACE_PAGE_CONTENT_TEXT wymaga ID strony WordPress.');
@@ -1264,15 +1280,7 @@ function getPageLayout_(postId, commandId) {
  * Sam zapis wykonuje dedykowany endpoint PHP z własną whitelistą pól.
  */
 function copyPageLayout_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   if (!/^\d+$/.test(String(command.target || ''))) {
     throw new Error('COPY_PAGE_LAYOUT wymaga numerycznego ID strony docelowej w target.');
@@ -1358,15 +1366,7 @@ function savePageLayoutResult_(data, commandId) {
 }
 
 function restoreSnapshot_(command) {
-  const config = getWpConfig_();
-
-  if (!config.allowWrites) {
-    throw new Error('Zapisy do WordPressa są wyłączone. WP_ALLOW_WRITES != TRUE');
-  }
-
-  if (command.confirm !== 'YES') {
-    throw new Error('Brak potwierdzenia YES w kolumnie confirm.');
-  }
+  requireWpWrite_(command);
 
   const snapshotId = String(command.target || '').trim();
   if (!snapshotId) throw new Error('RESTORE_SNAPSHOT wymaga snapshot_id w kolumnie target.');
