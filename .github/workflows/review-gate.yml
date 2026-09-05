@@ -17,7 +17,11 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 permissions:
+  # Labels and comments on a PR go through the issues API.
   pull-requests: write
+  issues: write
+  # Reading the head commit date.
+  contents: read
 
 concurrency:
   group: review-gate-${{ github.event.pull_request.number }}

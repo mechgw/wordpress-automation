@@ -85,11 +85,11 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 - **validate** — manifest is valid JSON, no duplicated `.gs.gs` files, ESLint passes on all `.gs` sources.
 - **secret-scan** — Gitleaks scans the full history for committed secrets.
 - **pr-title** — title follows the Conventional Commits format above.
-- **review-ack** — the bot reviews (Copilot, Codex) were read. The check stays red until the PR carries the `reviews-acknowledged` label, and every new push removes the label again. The job summary shows which bots have already reviewed the current commit.
+- **review-ack** — the bot reviews (Copilot, Codex) were read. The check stays red until the PR carries the `reviews-acknowledged` label, and every new push removes the label again. The job summary gives a best-effort view of which bots have already posted something for the current commit.
 
 ### Acknowledging bot reviews
 
-1. Wait for Copilot and Codex to post their review (the *review-ack* summary shows who is done). A bot that hits its usage limit or errors out will not block you.
+1. Wait for Copilot and Codex to post their review (the *review-ack* summary is a hint, the PR conversation is the source of truth). A bot that hits its usage limit or errors out will not block you.
 2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
 3. Add the label, ideally with a short comment summarising what was accepted and what was rejected:
 
