@@ -150,16 +150,15 @@ function diagnozujZdarzeniaGA4() {
 
 /**
  * Ustawia właściwe key events dla serwisu:
- * - dodaje operational_order_submit i phone_click,
+ * - dodaje operational_order_submit, phone_click i b2b_lead_submit,
  * - usuwa mikrozdarzenia pricing_pdf_click, dedicated_calculator_use i regulamin_pdf_click.
  *
  * UWAGA: wymaga zakresu OAuth https://www.googleapis.com/auth/analytics.edit.
- * Nie dodaje b2b_lead_submit, dopóki strona nie zacznie wysyłać takiego eventu.
  */
 function konfigurujGlowneKeyEventsGA4() {
   const cfg = requireGa4Config_();
   const propertyId = String(cfg.propertyId);
-  const desired = ['operational_order_submit', 'phone_click'];
+  const desired = ['operational_order_submit', 'phone_click', 'b2b_lead_submit'];
   const remove = ['pricing_pdf_click', 'dedicated_calculator_use', 'regulamin_pdf_click'];
 
   let existing = listGa4KeyEvents_(propertyId);
@@ -201,7 +200,7 @@ function konfigurujGlowneKeyEventsGA4() {
 
   SpreadsheetApp.getUi().alert(
     'GA4 – key events',
-    'Główne: operational_order_submit + phone_click.\n' +
+    'Główne: operational_order_submit + phone_click + b2b_lead_submit.\n' +
     'Usunięte mikrozdarzenia: ' + (removed.length ? removed.join(', ') : 'brak do usunięcia') + '.\n\n' +
     'Uwaga: zmiana key events nie jest retroaktywna. Historyczne dane głównych akcji pobieramy osobno do GA4 BUSINESS EVENTS.',
     SpreadsheetApp.getUi().ButtonSet.OK
