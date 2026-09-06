@@ -34,7 +34,7 @@ function requireForminatorHistoryWriteApproval_(title, message) {
   let ui;
   try {
     ui = SpreadsheetApp.getUi();
-  } catch (e) {
+  } catch {
     throw new Error(
       'Forminator history: brak kontekstu UI. Najpierw uruchom armForminatorHistoryWrite(), ' +
       'a potem ponów operację.'
@@ -51,7 +51,7 @@ function requireForminatorHistoryWriteApproval_(title, message) {
 function showForminatorHistoryMessage_(message) {
   try {
     SpreadsheetApp.getUi().alert(message);
-  } catch (e) {
+  } catch {
     Logger.log(message);
   }
 }
