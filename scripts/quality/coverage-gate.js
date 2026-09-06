@@ -126,9 +126,9 @@ function thresholdFor(file, policy) {
   return { threshold: Number(policy.defaultThreshold ?? 0), rationale: 'defaultThreshold' };
 }
 
-function git(args) {
+function git(args, cwd = ROOT) {
   try {
-    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     const detail = (e.stderr || e.message || '').toString().trim().split('\n')[0];
     fail(`git ${args.join(' ')} failed: ${detail}. Is this a git checkout with the base ref available (CI needs fetch-depth: 0)?`);
@@ -136,7 +136,7 @@ function git(args) {
 }
 
 /** Changed *.gs lines as Map<file, Set<line>> for the requested mode. */
-function changedLines(mode) {
+function changedLines(mode, cwd = ROOT) {
   if (mode === 'none') return new Map();
   // -M: przeniesienie pliku bez zmiany treści nie jest nowym kodem. Bez tego
   // przeniesienie źródeł do src/ (#105) wyglądałoby jak napisanie ich od zera
@@ -151,7 +151,7 @@ function changedLines(mode) {
 
   const result = new Map();
   let file = null;
-  for (const line of git(diffArgs).split(/\r?\n/)) {
+  for (const line of git(diffArgs, cwd).split(/\r?\n/)) {
     if (line.startsWith('+++ ')) {
       const candidate = line === '+++ /dev/null' ? null : line.replace(/^\+\+\+ b\//, '');
       file = candidate && candidate.startsWith(SOURCE_DIR + '/') ? candidate : null;
@@ -263,4 +263,7 @@ function main() {
   console.log('\n[coverage-gate] PASS');
 }
 
-main();
+// Uruchamiane jako skrypt; przy require eksportujemy części do testów (#116).
+if (require.main === module) main();
+
+module.exports = { changedLines, thresholdFor, globToRegExp, parseLcov, ignoredLines, ranges };

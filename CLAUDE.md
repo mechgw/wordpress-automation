@@ -53,6 +53,8 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
   ze stage'a.
 - Trzy punkty kontrolne, zawsze: testy lokalnie przed commitem, CI przed merge'em, workflow deployu
   przed `clasp push`. Nigdy nie omijaj jednego, żeby dotrzeć do następnego.
+- Same bramki też są testowane: `test/coverage-gate.test.js`, `test/apps-script-compare.test.js`,
+  `test/review-ack.test.js`, `test/pr-template.test.js`.
 - Standardy: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
 
 ## Rób / nie rób
