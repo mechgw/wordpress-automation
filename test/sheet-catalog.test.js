@@ -232,7 +232,7 @@ describe('#78: katalog i menu', () => {
       assert.ok(!seen[entry.name], 'duplicate ' + entry.name);
       seen[entry.name] = true;
     });
-    assert.equal(catalog.length, 16);
+    assert.equal(catalog.length, 17);
   });
 
   test('#78/Codex: nadpisane w konfiguracji nazwy arkuszy GA4 trafiają do kategorii „dane”, nie do arkuszy własnych', () => {

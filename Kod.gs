@@ -17,6 +17,8 @@ function onOpen() {
     .addItem('Włącz codzienny live check SEO', 'ustawCodziennyLiveCheck')
     .addSeparator()
     .addItem('Sprawdź sitemapy (SITEMAPY)', 'sprawdzSitemapy')
+    .addItem('Odśwież adresy z sitemap (SITEMAP URLS)', 'odswiezMonitoringZSitemap')
+    .addItem('Włącz cotygodniowe odświeżanie z sitemap', 'ustawTygodnioweOdswiezanieSitemap')
     .addToUi();
 
     addGa4Menu_();

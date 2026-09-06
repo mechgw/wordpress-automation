@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -75,12 +75,25 @@ function parseA1(a1, gridRows = 1) {
  */
 function makeSheet(name, initialRows, sheetId = 0) {
   const grid = initialRows.map(r => r.slice());
+  // Arkusz Google ma skończoną siatkę: nowy ma 1000 wierszy i 26 kolumn, a zapis
+  // poza nią rzuca wyjątkiem zamiast ją powiększyć. Stub to odwzorowuje, bo
+  // inaczej „zapis 5000 wierszy do nowego arkusza” przechodzi w teście i pada
+  // dopiero u użytkownika.
+  let maxRows = Math.max(1000, grid.length);
+  let maxCols = Math.max(26, ...grid.map(r => r.length), 1);
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
     while (line.length < col) line.push('');
   };
-  const rangeOf = (row, col, rows, cols) => ({
+  const rangeOf = (row, col, rows, cols) => {
+    if (row + rows - 1 > maxRows) {
+      throw new Error(`The coordinates or dimensions of the range are invalid: rows ${row}..${row + rows - 1} exceed the ${maxRows} rows of "${name}".`);
+    }
+    if (col + cols - 1 > maxCols) {
+      throw new Error(`The coordinates or dimensions of the range are invalid: columns ${col}..${col + cols - 1} exceed the ${maxCols} columns of "${name}".`);
+    }
+    return {
     getValues: () => {
       const out = [];
       for (let r = row; r < row + rows; r++) {
@@ -143,7 +156,8 @@ function makeSheet(name, initialRows, sheetId = 0) {
       };
       return finder;
     }
-  });
+    };
+  };
   const sheet = {
     getName: () => name,
     getSheetId: () => sheetId,
@@ -161,15 +175,15 @@ function makeSheet(name, initialRows, sheetId = 0) {
       return rangeOf(args[0], args[1], args[2] ?? 1, args[3] ?? 1);
     },
     getLastRow: () => grid.length,
-    getMaxRows: () => Math.max(grid.length, 1000),
-    getMaxColumns: () => Math.max(26, ...grid.map(r => r.length)),
-    insertRowsAfter() { return this; },
+    getMaxRows: () => maxRows,
+    getMaxColumns: () => maxCols,
+    insertRowsAfter(after, howMany = 1) { maxRows += howMany; return sheet; },
     insertRowBefore(row) { grid.splice(row - 1, 0, []); return this; },
-    insertColumnsAfter() { return this; },
+    insertColumnsAfter(after, howMany = 1) { maxCols += howMany; return sheet; },
     deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
     setFrozenRows() { return this; },
     setColumnWidth() { return this; },
-    appendRow(row) { grid.push(row.slice()); return this; },
+    appendRow(row) { grid.push(row.slice()); maxRows = Math.max(maxRows, grid.length); return sheet; },
     $grid: grid,
     $tabColor: null,
     $hidden: false
@@ -268,16 +282,21 @@ function createStubs(opts) {
         fetchCalls.push({ url, params });
         const r = fetchImpl(url, params);
         if (!r) throw new Error(`fetch stub returned nothing for ${url}`);
+        const body = typeof r.text === 'string' ? r.text : JSON.stringify(r.json ?? {});
         return {
           getResponseCode: () => r.code,
-          getContentText: () => (typeof r.text === 'string' ? r.text : JSON.stringify(r.json ?? {})),
-          getAllHeaders: () => r.headers || {}
+          getContentText: () => body,
+          getAllHeaders: () => r.headers || {},
+          // `gzip` w atrapie odpowiedzi = treść po rozpakowaniu; getContentText()
+          // zwraca wtedy `text`, czyli to, co zobaczyłby kod bez ungzip.
+          getBlob: () => ({ $gzip: r.gzip, getDataAsString: () => body })
         };
       }
     },
     Utilities: {
       formatDate,
       base64Encode: s => Buffer.from(String(s), 'utf8').toString('base64'),
+      ungzip: blob => ({ getDataAsString: () => (blob && blob.$gzip !== undefined ? blob.$gzip : '') }),
       getUuid: () => '00000000-0000-4000-8000-000000000000',
       sleep() {}
     },

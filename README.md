@@ -19,6 +19,7 @@ Merge do `main` **niczego nie wdraża**. Publikacja wydania w GitHubie uruchamia
 - `UrlInspection.gs` — stan indeksowania kluczowych adresów z API inspekcji URL Search Console, zapisywany do arkusza `URL INSPEKCJA`.
 - `SeoLive.gs` — live SEO regression check: pobiera kluczowe adresy i porównuje status, cel przekierowania, title, H1, canonical, robots i schema z oczekiwaniami z arkusza `SEO LIVE`.
 - `Sitemaps.gs` — stan map witryny z API Sitemaps w Search Console, zapisywany do arkusza `SITEMAPY` i podsumowany w *Status danych*.
+- `SitemapUrls.gs` — adresy wyczytane z XML sitemap do arkusza `SITEMAP URLS` i automatyczne dosypywanie brakujących adresów do `SEO LIVE` oraz `URL INSPEKCJA`.
 - `Diagnostics.gs` — smoke test z menu, wyłącznie odczyt: Script Properties, zakładki, dostęp do GSC / GA4 / WordPressa, triggery, konfiguracja alertów, jedna linia raportu na krok.
 - `SheetCatalog.gs` — katalog arkuszy tworzonych przez skrypt: kolory zakładek, kolejność, generowany spis `START` i ukrywanie zakładek z danymi surowymi.
 - `Version.gs` — same placeholdery; workflow deployu nadpisuje go tagiem wydania, commitem i czasem przed `clasp push`, a arkusz pokazuje ten tag jako menu (*Szczegóły wdrożenia*). Drift check ignoruje ten plik.
@@ -104,6 +105,16 @@ Arkusz `SEO LIVE`: URL w kolumnie A, oczekiwania w B..H (tworzony z nagłówkiem
 ### Sitemapy (co wie o nich Search Console)
 
 *SEO / GSC → Sprawdź sitemapy (SITEMAPY)* wypisuje sitemapy skonfigurowanej właściwości przez API Sitemaps w Search Console i przepisuje arkusz `SITEMAPY`: ścieżka, typ (indeks albo zwykła sitemapa), czas zgłoszenia i ostatniego pobrania, flaga oczekiwania, liczba zgłoszonych adresów, ostrzeżenia, błędy, stan i czas sprawdzenia. Arkusz jest migawką API, nie listą do edycji. Stan to `OK` albo `UWAGA` dokładnie w tych przypadkach: `errors > 0`, sitemapa oczekująca dłużej niż 7 dni od zgłoszenia, sitemapa wymieniona w opcjonalnej Script Property `EXPECTED_SITEMAPS` (adresy po przecinku), której Search Console nie ma (dostaje własny wiersz), albo błąd API. Czas ostatniego pobrania jest wyłącznie informacyjny; Google nie traktuje starego pobrania jako usterki, więc skrypt też nie. Podsumowanie jest zapisywane w `SITEMAPS_STATUS` i pokazywane jako jedna linia w *Dane → Status danych*, wraz z błędem API, jeśli ostatnie sprawdzenie padło.
+
+### Sitemapa jako źródło listy monitorowanych adresów
+
+`sitemaps.list` w Search Console zwraca stan sitemap, nie ich zawartość, więc `SITEMAPY` pokazuje liczbę zgłoszonych adresów, a nie ich listę. *SEO / GSC → Odśwież adresy z sitemap (SITEMAP URLS)* pobiera XML każdej sitemapy witryny, rozwija indeksy do plików potomnych i zapisuje arkusz `SITEMAP URLS`: adres, sitemapa źródłowa, `lastmod`, czas odczytu. Adresy są deduplikowane po normalizacji, rozszerzenia obrazkowe (`image:loc`) nie są brane za adresy stron, a limity 30 plików i 5000 adresów chronią przed sitemapą wskazującą na siebie albo ogromną; przekroczenie limitu jest zgłaszane wprost. Sitemapy spakowane (`.xml.gz`) są rozpakowywane przed parsowaniem, a odpowiedź 200, która nie jest XML-em sitemapy (na przykład strona błędu), jest zgłaszana jako błąd zamiast po cichu dawać zero adresów. Siatka arkusza jest powiększana przed zapisem, bo nowy arkusz Google ma tylko 1000 wierszy.
+
+Z tej listy brakujące adresy trafiają do `SEO LIVE` i `URL INSPEKCJA`, po jednym wierszu, wyłącznie do kolumny A. Dzięki temu nowa strona nie wymaga pamiętania o dwóch dodatkowych zakładkach, a puste oczekiwania w `SEO LIVE` sprawdzają dokładnie to, czego się chce od adresu z sitemapy: status 200, brak przekierowania i brak `noindex`.
+
+**Synchronizacja tylko dopisuje.** Sitemapa jest listą adresów kanonicznych przeznaczonych do indeksowania, a nie listą wszystkich stron: celowe przekierowania, `noindex` i strony techniczne są poza nią i to często właśnie je trzeba pilnować. Adres monitorowany, którego nie ma w sitemapie, nigdy nie jest usuwany; okno wypisuje go jako „monitorowany mimo braku w sitemapie” i decyzję zostawia człowiekowi. Ręcznie dopisany wyjątek jest więc trwały i nie potrzebuje osobnej listy. Istniejące wiersze zachowują oczekiwania i wyniki, a drugie uruchomienie niczego nie dopisuje.
+
+*Włącz cotygodniowe odświeżanie z sitemap* instaluje trigger w poniedziałki około 06:00, godzinę przed inspekcją URL, więc nowe adresy trafiają do inspekcji w tym samym przebiegu tygodnia. Podział ról zostaje bez zmian: `SEO LIVE` mówi, co strona serwuje teraz, a `URL INSPEKCJA`, co Google ma w indeksie.
 
 ### Diagnostyka systemu (dlaczego coś nie działa?)
 

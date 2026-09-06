@@ -175,6 +175,17 @@ function ensureSheetWithHeader_(name, header) {
   return sheet;
 }
 
+/**
+ * Powiększa siatkę arkusza, gdy zapis wymaga więcej wierszy niż arkusz ma.
+ * Nowy arkusz Google ma 1000 wierszy, a `setValues` poza siatką rzuca wyjątkiem
+ * zamiast ją rozszerzyć, więc każdy zapis hurtowy musi przejść tędy.
+ */
+function ensureSheetRows_(sheet, rowsNeeded) {
+  const max = sheet.getMaxRows();
+  if (rowsNeeded > max) sheet.insertRowsAfter(max, rowsNeeded - max);
+  return sheet;
+}
+
 function importRunType_(run) {
   return run.trigger ? 'trigger' : 'ręczny';
 }
