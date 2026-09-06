@@ -55,6 +55,7 @@ function sheetCatalog_() {
     { name: URL_INSPECTION_SHEET, category: 'monitoring', owner: 'człowiek + skrypt', description: 'Adresy do monitorowania w kolumnie A; skrypt dopisuje stan w indeksie Google.' },
     { name: SEO_LIVE_SHEET, category: 'monitoring', owner: 'człowiek + skrypt', description: 'Adresy i oczekiwania w B..H; skrypt dopisuje wynik porównania ze stanem live.' },
     { name: SITEMAPS_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Migawka sitemap z Search Console; przepisywana przy każdym sprawdzeniu.' },
+    { name: SITEMAP_URLS_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Adresy wyczytane z XML sitemap; źródło listy monitorowanych stron.' },
     { name: WP_COMMANDS_SHEET, category: 'sterowanie', owner: 'człowiek + skrypt', description: 'Polecenia do WordPressa; status PENDING uruchamia, skrypt wpisuje wynik.' },
     { name: WP_RESULTS_SHEET, category: 'sterowanie', owner: 'skrypt', description: 'Wyniki wykonanych poleceń; podstawa idempotencji (command_id).' },
     { name: WP_SNAPSHOTS_SHEET, category: 'sterowanie', owner: 'skrypt', description: 'Stan stron sprzed zapisu; źródło dla RESTORE_SNAPSHOT.' },
