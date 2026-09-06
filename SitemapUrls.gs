@@ -50,6 +50,7 @@ function firstTagValue_(block, tag) {
 function parseSitemapXml_(xml) {
   const text = String(xml || '');
   const isIndex = /<sitemapindex[\s>]/i.test(text);
+  const looksLikeSitemap = isIndex || /<urlset[\s>]/i.test(text);
   const blockTag = isIndex ? 'sitemap' : 'url';
   const blocks = text.match(new RegExp('<' + blockTag + '(?:\\s[^>]*)?>[\\s\\S]*?<\\/' + blockTag + '>', 'gi')) || [];
   const entries = [];
@@ -57,7 +58,7 @@ function parseSitemapXml_(xml) {
     const loc = firstTagValue_(block, 'loc');
     if (loc) entries.push({ loc: loc, lastmod: firstTagValue_(block, 'lastmod') });
   });
-  return { isIndex: isIndex, entries: entries };
+  return { isIndex: isIndex, looksLikeSitemap: looksLikeSitemap, entries: entries };
 }
 
 /** Pobiera XML sitemapy; błąd HTTP jest jawny, nie cichy. */
@@ -69,6 +70,11 @@ function fetchSitemapXml_(url) {
   });
   const code = response.getResponseCode();
   if (code < 200 || code >= 300) throw new Error('HTTP ' + code);
+  // Sitemapy bywają spakowane (.xml.gz). getContentText() zwróciłby wtedy bajty
+  // jako tekst, parser nie znalazłby żadnego adresu i lista wyczyściłaby się po cichu.
+  if (/\.gz(\?|$)/i.test(String(url))) {
+    return Utilities.ungzip(response.getBlob()).getDataAsString() || '';
+  }
   return response.getContentText() || '';
 }
 
@@ -94,6 +100,9 @@ function collectSitemapUrls_(roots) {
     let parsed;
     try {
       parsed = parseSitemapXml_(fetchSitemapXml_(sitemapUrl));
+      // Odpowiedź 200, która nie jest sitemapą (strona błędu, HTML, zły MIME),
+      // musi być zgłoszona, a nie cicho potraktowana jako zero adresów.
+      if (!parsed.looksLikeSitemap) throw new Error('odpowiedź nie wygląda na XML sitemapy');
     } catch (e) {
       errors.push({ sitemap: sitemapUrl, error: String(e && e.message ? e.message : e) });
       continue;
@@ -146,6 +155,7 @@ function syncMonitoringSheet_(sheetName, header, sitemapUrls) {
 
   if (added.length) {
     const start = sheet.getLastRow() + 1;
+    ensureSheetRows_(sheet, start + added.length - 1);
     sheet.getRange(start, 1, added.length, 1).setValues(added.map(url => [url]));
   }
 
@@ -173,6 +183,7 @@ function refreshSitemapMonitoring_() {
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, SITEMAP_URLS_HEADER.length).clearContent();
   if (collected.urls.length) {
+    ensureSheetRows_(sheet, collected.urls.length + 1);
     sheet.getRange(2, 1, collected.urls.length, SITEMAP_URLS_HEADER.length)
       .setValues(collected.urls.map(item => [item.url, item.sitemap, item.lastmod, now]));
   }

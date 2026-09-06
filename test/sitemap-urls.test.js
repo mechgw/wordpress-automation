@@ -41,7 +41,8 @@ function project(opts) {
       if (String(url).includes(SITEMAPS_API)) return { code: 200, json: { sitemap: api } };
       const f = files[url];
       if (f === undefined) return { code: 404, text: 'not found' };
-      return typeof f === 'function' ? f() : { code: 200, text: f };
+      if (typeof f === 'function') return f();
+      return typeof f === 'object' ? f : { code: 200, text: f };
     }
   }, opts.load || {}));
 }
@@ -197,6 +198,51 @@ describe('#89: błędy i limity', () => {
     assert.equal(out.urls, 5000);
     assert.equal(out.truncated, true);
     assert.match(gas.$alerts[0][0], /UWAGA: przerwano na limicie \(30 plików \/ 5000 adresów\)\. Lista jest niepełna\.$/);
+  });
+
+  test('#89/Codex: więcej adresów niż 1000-wierszowa siatka nowego arkusza – siatka jest powiększana przed zapisem', () => {
+    const many = Array.from({ length: 1500 }, (_, i) => ['https://www.example.pl/p' + i + '/', '']);
+    const gas = project({ files: { [INDEX]: urlset(many) } });
+    const out = plain(gas.odswiezMonitoringZSitemap());
+    assert.equal(out.urls, 1500);
+
+    const ss = gas.SpreadsheetApp.getActive();
+    [URLS, LIVE, INSPECT].forEach(name => {
+      assert.ok(ss.getSheetByName(name).getMaxRows() >= 1501, name + ': siatka powiększona');
+      assert.equal(col(gas, name).length, 1500, name + ': wszystkie adresy zapisane');
+    });
+  });
+
+  test('#89/Codex: spakowana sitemapa .xml.gz jest rozpakowywana przed parsowaniem', () => {
+    const GZ = 'https://www.example.pl/page-sitemap.xml.gz';
+    const gas = project({
+      sitemaps: [{ path: GZ }],
+      files: { [GZ]: { code: 200, text: ' bajty gzip', gzip: urlset([['https://www.example.pl/a/', '2026-09-01']]) } }
+    });
+    const out = plain(gas.odswiezMonitoringZSitemap());
+    assert.equal(out.urls, 1, 'without ungzip the parser would silently find nothing');
+    assert.deepEqual(plain(out.errors), []);
+    assert.equal(plain(gas.$sheet(URLS))[1][0], 'https://www.example.pl/a/');
+    assert.deepEqual(col(gas, LIVE), ['https://www.example.pl/a/']);
+  });
+
+  test('#89/Codex: odpowiedź 200, która nie jest sitemapą, jest błędem, a nie cichym zerem adresów', () => {
+    const gas = project({
+      files: { [INDEX]: '<!doctype html><html><body>Strona nie istnieje</body></html>' },
+      extraSheets: { [LIVE]: [['URL'], ['https://www.example.pl/stara/']] }
+    });
+    const out = plain(gas.odswiezMonitoringZSitemap());
+    assert.equal(out.urls, 0);
+    assert.deepEqual(plain(out.errors), [{ sitemap: INDEX, error: 'odpowiedź nie wygląda na XML sitemapy' }]);
+    assert.match(gas.$alerts[0][0], /Sitemapy, których nie udało się pobrać:\n- https:\/\/www\.example\.pl\/sitemap_index\.xml: odpowiedź nie wygląda na XML sitemapy/);
+    assert.deepEqual(col(gas, LIVE), ['https://www.example.pl/stara/'], 'monitoring untouched');
+  });
+
+  test('pusta, ale poprawna sitemapa nie jest błędem', () => {
+    const gas = project({ files: { [INDEX]: urlset([]) } });
+    const out = plain(gas.odswiezMonitoringZSitemap());
+    assert.equal(out.urls, 0);
+    assert.deepEqual(plain(out.errors), []);
   });
 
   test('brak sitemap w Search Console → komunikat, żadnego zapisu do monitoringu', () => {
