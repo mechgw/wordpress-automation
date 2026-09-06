@@ -29,13 +29,13 @@ jobs:
         run: npm ci
 
       - name: Validate appsscript.json
-        run: node -e "JSON.parse(require('fs').readFileSync('appsscript.json', 'utf8'))"
+        run: node -e "JSON.parse(require('fs').readFileSync('src/appsscript.json', 'utf8'))"
 
       - name: Reject duplicate Apps Script extensions
         shell: bash
         run: |
           set -euo pipefail
-          bad_files="$(find . -maxdepth 1 -type f -name '*.gs.gs' -print)"
+          bad_files="$(find src -maxdepth 1 -type f -name '*.gs.gs' -print)"
           if [ -n "$bad_files" ]; then
             echo "Found files with duplicated .gs extension:"
             echo "$bad_files"
@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(*.gs)
+          files=(src/*.gs)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No .gs files found"
             exit 1

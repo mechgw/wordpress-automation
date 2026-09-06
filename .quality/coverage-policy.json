@@ -1,104 +1,104 @@
 {
-  "_comment": "Per-file line-coverage thresholds enforced by scripts/quality/coverage-gate.js. Rules are matched top-down; the first matching pattern wins, otherwise defaultThreshold applies. RATCHET: raise a threshold whenever tests push a file above it, never lower one without a rationale and a follow-up issue. Changed lines are always required to be 100% covered regardless of these thresholds.",
+  "_comment": "Per-file line-coverage thresholds enforced by scripts/quality/coverage-gate.js; source files live in src/. Rules are matched top-down; the first matching pattern wins, otherwise defaultThreshold applies. RATCHET: raise a threshold whenever tests push a file above it, never lower one without a rationale and a follow-up issue. Changed lines are always required to be 100% covered regardless of these thresholds.",
   "defaultThreshold": 80,
   "rules": [
     {
-      "pattern": "Version.gs",
+      "pattern": "src/Version.gs",
       "threshold": 100,
       "rationale": "Placeholder constant only; fully executed when the harness loads it."
     },
     {
-      "pattern": "Lock.gs",
+      "pattern": "src/Lock.gs",
       "threshold": 100,
       "rationale": "Tiny, fully covered (#52): acquire, release on success and on error, refusal."
     },
     {
-      "pattern": "Status.gs",
+      "pattern": "src/Status.gs",
       "threshold": 95,
       "rationale": "New in #39 with full coverage (100%); keep it near-complete."
     },
     {
-      "pattern": "Kod.gs",
+      "pattern": "src/Kod.gs",
       "threshold": 96,
       "rationale": "ZAPADKA 2026-09-07: pokrycie 96,88%. Poza zasięgiem zostają gałęzie błędów importRange_ i formatujący ogon replaceRange_."
     },
     {
-      "pattern": "GA4.gs",
+      "pattern": "src/GA4.gs",
       "threshold": 94,
       "rationale": "RATCHET 2026-09-06: diagnozujZdarzeniaGA4 is now covered end to end (95%). Remaining: error branches inside the import reports and a few formatting tails."
     },
     {
-      "pattern": "Alerts.gs",
+      "pattern": "src/Alerts.gs",
       "threshold": 95,
       "rationale": "New in #42 with full coverage: incident open/silent/close, guard, trigger, dialog line."
     },
     {
-      "pattern": "UrlInspection.gs",
+      "pattern": "src/UrlInspection.gs",
       "threshold": 95,
       "rationale": "New in #45 with full coverage: sheet bootstrap, per-row results, errors, change flag, cap, lock, trigger."
     },
     {
-      "pattern": "SeoLive.gs",
+      "pattern": "src/SeoLive.gs",
       "threshold": 95,
       "rationale": "New in #53 with full coverage: fetch with manual redirects, extraction, comparison, sheet run, trigger mail."
     },
     {
-      "pattern": "Sitemaps.gs",
+      "pattern": "src/Sitemaps.gs",
       "threshold": 95,
       "rationale": "New in #47 with full coverage: list mapping, error/pending/expected rules, API failure, status line."
     },
     {
-      "pattern": "AdsCostExperiment.gs",
+      "pattern": "src/AdsCostExperiment.gs",
       "threshold": 95,
       "rationale": "New in #46 step 1 with full coverage: compatibility variants, sample report, error paths, summary."
     },
     {
-      "pattern": "Diagnostics.gs",
+      "pattern": "src/Diagnostics.gs",
       "threshold": 95,
       "rationale": "New in #54 with full coverage: every step green and red, read-only guarantees, menu."
     },
     {
-      "pattern": "SheetCatalog.gs",
+      "pattern": "src/SheetCatalog.gs",
       "threshold": 95,
       "rationale": "New in #78 with full coverage: plan, colours, order, START rebuild, hiding, idempotence."
     },
     {
-      "pattern": "SitemapUrls.gs",
+      "pattern": "src/SitemapUrls.gs",
       "threshold": 95,
       "rationale": "New in #89 with full coverage: XML parsing, index expansion, dedupe, sync, limits, errors."
     },
     {
-      "pattern": "RecrawlQueue.gs",
+      "pattern": "src/RecrawlQueue.gs",
       "threshold": 95,
       "rationale": "New in #92 with full coverage: classification, change-date sources, exclusions, muting, new-only e-mail."
     },
     {
-      "pattern": "WordPress.gs",
+      "pattern": "src/WordPress.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07 (#88): snapshoty z robots i rollback domknęły plik do 95,13%. Poza zasięgiem zostają teksty alertów w testach menu."
     },
     {
-      "pattern": "ForminatorHistory.gs",
+      "pattern": "src/ForminatorHistory.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
     },
     {
-      "pattern": "GlobalFooterMigration.gs",
+      "pattern": "src/GlobalFooterMigration.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
     },
     {
-      "pattern": "CodeSnippets.gs",
+      "pattern": "src/CodeSnippets.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
     },
     {
-      "pattern": "FormSourcePageContext.gs",
+      "pattern": "src/FormSourcePageContext.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
     },
     {
-      "pattern": "SheetUsage.gs",
+      "pattern": "src/SheetUsage.gs",
       "threshold": 95,
       "rationale": "Nowy w #101 z pełnym pokryciem: pomiar zajętości, plan retencji, ochrona najnowszych snapshotów, potwierdzenie i anulowanie."
     }

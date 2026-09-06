@@ -1,5 +1,6 @@
 # Only Apps Script sources go to script.google.com.
 # CI config, lint config, docs and node_modules stay local.
+# Wzorce liczą się względem rootDir z .clasp.json, czyli src/ (#105).
 # `**/*` matches root files as well as nested ones in every glob dialect.
 **/*
 !appsscript.json

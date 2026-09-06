@@ -129,7 +129,11 @@ jobs:
           umask 077
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           # scriptExtensions keeps clasp 3 on .gs (its default is .js).
-          printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
+          # rootDir zależy od układu wdrażanego refa: źródła mieszkają w src/ od #105,
+          # ale rollback do wcześniejszego taga ma je w katalogu głównym.
+          if [ -f src/appsscript.json ]; then ROOT_DIR=src; else ROOT_DIR=.; fi
+          echo "clasp rootDir: $ROOT_DIR"
+          printf '{"scriptId":"%s","rootDir":"%s","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" "$ROOT_DIR" > .clasp.json
 
       # Version.gs in the repo holds placeholders; the deployed copy carries the
       # tag, commit, time and actor so the sheet menu can show what is live.
@@ -151,16 +155,20 @@ jobs:
           const body = Object.entries(v)
             .map(([k, val]) => `  ${k}: ${JSON.stringify(String(val))}`)
             .join(',\n');
-          fs.writeFileSync('Version.gs',
+          // Ten sam wybór układu co przy .clasp.json: rollback do starszego taga
+          // ma Version.gs w katalogu głównym.
+          const versionFile = fs.existsSync('src/appsscript.json') ? 'src/Version.gs' : 'Version.gs';
+          fs.writeFileSync(versionFile,
             '/**\n' +
             ' * Wygenerowane przez workflow "Deploy to Apps Script". Nie edytuj ręcznie.\n' +
             ` * Źródło: https://github.com/${process.env.GITHUB_REPOSITORY}/releases\n` +
             ' */\n' +
             `const DEPLOYED_VERSION = {\n${body}\n};\n`);
           EOF
-          cat Version.gs
+          if [ -f src/appsscript.json ]; then VERSION_FILE=src/Version.gs; else VERSION_FILE=Version.gs; fi
+          cat "$VERSION_FILE"
           # Syntax check with the project's ESLint config (node --check rejects .gs).
-          npx eslint Version.gs
+          npx eslint "$VERSION_FILE"
 
       - name: Files that will be pushed
         shell: bash

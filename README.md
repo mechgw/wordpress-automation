@@ -55,6 +55,12 @@ Opcjonalne:
 
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
+### Układ repozytorium
+
+Źródła Apps Script mieszkają w `src/`: dziewiętnaście plików `*.gs` plus `appsscript.json`. Katalog główny trzyma wyłącznie konfigurację narzędzi, dokumentację i licencję.
+
+Apps Script nie ma katalogów, więc `clasp` dostaje `rootDir` wskazujący `src`. Dzięki temu nazwy plików po stronie Google są dokładnie takie jak wcześniej, bez prefiksu katalogu. Workflow deployu i drift check wykrywają układ same: wdrożenie taga sprzed tej zmiany, czyli rollback, nadal działa, bo wtedy `rootDir` wskazuje katalog główny.
+
 ### Widoczność flag zapisu
 
 `WP_ALLOW_WRITES` to jedyny wyłącznik chroniący produkcyjny WordPress przed niezamierzonym zapisem. W praktyce zostaje włączony na stałe, bo tak jest wygodniej przy częstych zmianach, a wyłącznik zawsze włączony nie chroni przed niczym. `WP_DRY_RUN` daje problem odwrotny: zapomniany sprawia, że komendy tylko udają zapis.

@@ -16,6 +16,8 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
+/** Źródła Apps Script mieszkają w src/ (#105). */
+const SOURCE_DIR = path.join(ROOT, 'src');
 const HELPERS = path.join(__dirname, 'helpers', 'gas.js');
 
 function sourcesList() {
@@ -27,7 +29,7 @@ function sourcesList() {
 
 describe('#102: kompletność SOURCES', () => {
   const sources = sourcesList();
-  const files = fs.readdirSync(ROOT).filter(f => f.endsWith('.gs'));
+  const files = fs.readdirSync(SOURCE_DIR).filter(f => f.endsWith('.gs'));
 
   test('każdy plik *.gs z repozytorium jest w SOURCES', () => {
     for (const file of files) {
@@ -60,7 +62,7 @@ describe('#102: kompletność SOURCES', () => {
     const policy = JSON.parse(fs.readFileSync(path.join(ROOT, '.quality', 'coverage-policy.json'), 'utf8'));
     const patterns = policy.rules.map(r => r.pattern);
     for (const file of files) {
-      assert.ok(patterns.includes(file), `Brak reguły progu pokrycia dla ${file} w .quality/coverage-policy.json.`);
+      assert.ok(patterns.includes('src/' + file), `Brak reguły progu pokrycia dla src/${file} w .quality/coverage-policy.json.`);
     }
   });
 });
