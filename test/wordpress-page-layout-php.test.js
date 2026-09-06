@@ -90,8 +90,15 @@ test('#88: empty robots value clears the meta instead of writing an empty array'
 });
 
 test('#88: robots value is readable as a REST field so one request returns it with the page', () => {
-  assert.match(bridge, /register_rest_field\(\s*\n\t*'page',\s*\n\t*'cc_rank_math_robots'/);
+  assert.match(bridge, /register_rest_field\( 'page', 'wpa_rank_math_robots', \$robots_field \);/);
   assert.match(bridge, /function wpa_robots_read/);
   assert.match(bridge, /get_post_meta\( \$post_id, 'rank_math_robots', true \)/);
   assert.doesNotMatch(bridge, /citycouriers/i);
+});
+
+test('#103: pole jest wystawione pod nazwą docelową i historyczną, żeby aktualizacja snippetu nie zrywała odczytu', () => {
+  assert.match(bridge, /register_rest_field\( 'page', 'cc_rank_math_robots', \$robots_field \);/);
+  // Obie nazwy dzielą jedną definicję, więc nie mogą się rozjechać.
+  assert.equal(bridge.split('$robots_field = array(').length - 1, 1);
+  assert.match(bridge, /nazwa historyczna, zachowana wyłącznie na czas aktualizacji/);
 });

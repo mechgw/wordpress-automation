@@ -19,7 +19,7 @@ The write endpoint copies presence as well as value. If the source page does not
 
 ## Rank Math robots bridge
 
-The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and the read-only REST field `cc_rank_math_robots` on pages. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
+The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and a read-only REST field with the robots value on pages. The field is registered under two names: `wpa_rank_math_robots` (target name, matching the function prefix in this file) and `cc_rank_math_robots` (historical name, kept only while installations catch up). The script reads the target name and falls back to the historical one; *WordPress → Test Rank Math bridge* says which one the installation exposes. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
 
 Design notes:
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WordPress Automation — GeneratePress Page Layout REST Bridge
  * Description: Adds narrowly scoped REST endpoints for the GeneratePress page-layout settings and for the Rank Math robots directives used by wordpress-automation.
- * Version: 1.1.0
+ * Version: 1.2.0
  * License: MIT
  */
 
@@ -520,25 +520,29 @@ add_action(
 
 /**
  * Odczyt robots wystawiony jako pole REST strony, żeby WordPress.gs mógł je
- * pobrać razem z resztą danych jednym żądaniem (_fields=cc_rank_math_robots).
+ * pobrać razem z resztą danych jednym żądaniem (_fields=wpa_rank_math_robots).
+ *
+ * Pole jest rejestrowane pod dwiema nazwami. `wpa_rank_math_robots` to nazwa
+ * docelowa, spójna z prefiksem funkcji w tym pliku. `cc_rank_math_robots` to
+ * nazwa historyczna, zachowana wyłącznie na czas aktualizacji: skrypt czyta
+ * nową, a starą tylko wtedy, gdy nowej nie ma. Po wgraniu tej wersji snippetu
+ * do WordPressa starą nazwę można usunąć.
  */
 add_action(
 	'rest_api_init',
 	function () {
-		register_rest_field(
-			'page',
-			'cc_rank_math_robots',
-			array(
-				'get_callback' => function ( $page ) {
-					return wpa_robots_read( (int) $page['id'] );
-				},
-				'schema'       => array(
-					'description' => 'Rank Math robots directives as a comma-separated list; empty means Rank Math defaults.',
-					'type'        => 'string',
-					'context'     => array( 'edit' ),
-				),
-			)
+		$robots_field = array(
+			'get_callback' => function ( $page ) {
+				return wpa_robots_read( (int) $page['id'] );
+			},
+			'schema'       => array(
+				'description' => 'Rank Math robots directives as a comma-separated list; empty means Rank Math defaults.',
+				'type'        => 'string',
+				'context'     => array( 'edit' ),
+			),
 		);
+		register_rest_field( 'page', 'wpa_rank_math_robots', $robots_field );
+		register_rest_field( 'page', 'cc_rank_math_robots', $robots_field );
 	},
 	100
 );

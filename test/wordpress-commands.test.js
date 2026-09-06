@@ -384,7 +384,7 @@ describe('UPDATE_RANK_MATH_FIELD i UPDATE_MEDIA_FIELD', () => {
     const pages = [Object.assign({}, SAMPLE_PAGES[0], { hasRobots: false })];
     const gas = project({ commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex')], wp: fakeWordPress({ pages }) });
     gas.processWpCommands();
-    assert.match(message(gas), /Most nie udostępnia pola cc_rank_math_robots.*Zaktualizuj snippet page-layout-rest-bridge\.php/s);
+    assert.match(message(gas), /Most nie udostępnia pola z robots.*Zaktualizuj snippet page-layout-rest-bridge\.php/s);
     assert.deepEqual(writes(gas), []);
     assert.equal(snapshots(gas).length, 0, 'brak snapshotu, bo komenda padła przed zapisem');
   });
