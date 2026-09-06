@@ -124,18 +124,19 @@ function seoLiveExtract_(html, headers) {
   const xRobots = seoLiveHeader_(headers, 'X-Robots-Tag').toLowerCase();
   if (xRobots) robots.push('header: ' + xRobots);
 
-  const types = [];
-  (html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || []).forEach(block => {
-    (block.match(/"@type"\s*:\s*"([^"]+)"/g) || []).forEach(m => types.push(/"([^"]+)"\s*$/.exec(m)[1]));
-    (block.match(/"@type"\s*:\s*\[([^\]]*)\]/g) || []).forEach(m => (m.match(/"([^"]+)"/g) || []).slice(1).forEach(q => types.push(q.replace(/"/g, ''))));
-  });
+  // Typy pochodzą z prawdziwego JSON.parse, a nie z regexa (#110): tylko wtedy
+  // widać typy zagnieżdżone i te z @graph, i tylko wtedy da się sprawdzać
+  // wartości, a nie samą obecność.
+  const jsonLd = parseJsonLd_(html);
 
   return {
     title: titleMatch ? seoLiveText_(titleMatch[1]) : '',
     h1: h1Match ? seoLiveText_(h1Match[1]) : '',
     canonical,
     robots: robots.join(' | '),
-    types: types.filter((t, i, arr) => arr.indexOf(t) === i)
+    types: jsonLdTypeList_(jsonLd.nodes),
+    schemaNodes: jsonLd.nodes,
+    schemaErrors: jsonLd.errors
   };
 }
 
@@ -191,6 +192,11 @@ function seoLiveCompare_(url, expect, fetched, page) {
     }
   });
 
+  // Kontrole semantyczne są opcjonalne: bez reguł i bez uszkodzonych bloków ta
+  // część nic nie dokłada, więc arkusze bez konfiguracji działają jak dotąd.
+  schemaSemanticDiffs_(fetched.html, page.schemaNodes || [], page.schemaErrors || [], expect.schemaRules || [])
+    .forEach(diff => diffs.push(diff));
+
   return diffs;
 }
 
@@ -224,6 +230,8 @@ function runSeoLiveCheck_() {
   const width = SEO_LIVE_HEADER.length;
   const values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
   const index = seoLiveIndexLookup_();
+  // Reguły semantyczne czytamy raz na przebieg, nie raz na adres (#110).
+  const schemaExpectations = schemaExpectations_();
   const now = formatImportTime_(new Date().toISOString());
 
   values.forEach((line, i) => {
@@ -235,7 +243,9 @@ function runSeoLiveCheck_() {
     try {
       if (!/^https?:\/\//i.test(url)) throw new Error('Adres musi zaczynać się od http:// lub https://');
       const fetched = seoLiveFetch_(url);
-      const diffs = seoLiveCompare_(url, seoLiveExpectations_(line), fetched, seoLiveExtract_(fetched.html, fetched.headers));
+      const expect = seoLiveExpectations_(line);
+      expect.schemaRules = schemaRulesFor_(schemaExpectations, url);
+      const diffs = seoLiveCompare_(url, expect, fetched, seoLiveExtract_(fetched.html, fetched.headers));
       result = diffs.length ? 'UWAGA: ' + diffs.length + ' różnic(e)' : 'OK';
       details = diffs.join('; ');
       summary.checked++;

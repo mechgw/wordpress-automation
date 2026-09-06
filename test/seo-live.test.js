@@ -269,7 +269,61 @@ describe('live check: helpery', () => {
       '<script type="application/ld+json">{"@type":"WebPage"}</script><script type="application/ld+json">{"@type":"WebPage"}</script>',
       { 'X-Robots-Tag': 'NOINDEX' }
     ));
-    assert.deepEqual(out, { title: '', h1: 'Pierwszy', canonical: 'https://www.example.pl/c/', robots: 'noindex | header: noindex', types: ['WebPage'] });
+    assert.equal(out.title, '');
+    assert.equal(out.h1, 'Pierwszy');
+    assert.equal(out.canonical, 'https://www.example.pl/c/');
+    assert.equal(out.robots, 'noindex | header: noindex');
+    assert.deepEqual(out.types, ['WebPage'], 'typy nadal bez powtórzeń');
+    // Od #110 ekstrakcja zwraca też sparsowane węzły, żeby dało się sprawdzać
+    // wartości, a nie samą obecność typu.
+    assert.equal(out.schemaNodes.length, 2);
+    assert.deepEqual(out.schemaErrors, []);
+  });
+});
+
+describe('#110: kontrole semantyczne w przebiegu SEO LIVE', () => {
+  const SCHEMA = 'SEO SCHEMA';
+  const SCHEMA_HEADER = ['URL', 'Ścieżka w schema', 'Oczekiwanie', 'Źródło', 'Uwagi'];
+  const URL = 'https://www.example.pl/oferta/';
+  const page = price =>
+    '<html><head><title>Oferta</title><link rel="canonical" href="' + URL + '"></head>' +
+    '<body><h1>Oferta</h1><p>Cena: 100 zł</p>' +
+    '<script type="application/ld+json">{"@type":"Offer","price":"' + price + '"}</script>' +
+    '</body></html>';
+
+  const run = (rules, price) => {
+    const sheets = rules ? { [SCHEMA]: [SCHEMA_HEADER, ...rules] } : {};
+    const gas = project([row(URL)], { [URL]: { code: 200, text: page(price) } }, { sheets: sheets });
+    gas.sprawdzStronyLive();
+    return gas.$sheet(SHEET)[1];
+  };
+
+  test('bez zakładki reguł zachowanie jest identyczne jak dotąd', () => {
+    const line = run(null, '999');
+    assert.equal(line[8], 'OK', 'schema opisuje inną cenę, ale nikt o to nie prosił');
+    assert.equal(line[9], '');
+  });
+
+  test('reguła wykrywa cenę w schema niezgodną z widoczną treścią', () => {
+    const line = run([['', 'Offer.price', '', 'strona']], '999');
+    assert.match(String(line[8]), /^UWAGA: 1 różnic/);
+    assert.match(String(line[9]), /schema Offer\.price: „999” nie występuje w widocznej treści/);
+  });
+
+  test('zgodna cena nie generuje różnicy', () => {
+    assert.equal(run([['', 'Offer.price', '', 'strona']], '100')[8], 'OK');
+  });
+
+  test('różnica semantyczna trafia do tej samej kolumny co pozostałe', () => {
+    const line = run([['', 'Offer.price', '120', 'wartość']], '999');
+    assert.match(String(line[9]), /^schema Offer\.price: „999” \(oczekiwano „120”\)$/);
+  });
+
+  test('pozycja przygotowania reguł jest w menu SEO / GSC', () => {
+    const gas = project(null, {});
+    gas.onOpen();
+    const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
+    assert.ok(seo.items.map(i => i.fn).includes('przygotujRegulySchema'));
   });
 });
 
