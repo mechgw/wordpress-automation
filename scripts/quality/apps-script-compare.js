@@ -70,16 +70,41 @@ function normalizeTrailingNewline(cwd) {
   }
 }
 
+/**
+ * Druga strona tej samej normalizacji: plik w repozytorium (index) bez znaku
+ * nowej linii na końcu, który Apps Script oddaje z tym znakiem, nie jest
+ * driftem. Gdy jedyną różnicą jest ten znak, index dostaje wersję z
+ * roboczego katalogu; każda inna różnica zostaje widoczna w status/diff.
+ */
+function normalizeIndexTrailingNewline(cwd) {
+  const tracked = git(cwd, ['ls-files', '--', '*.gs', 'appsscript.json']).split('\n').map(s => s.trim()).filter(Boolean);
+  for (const f of tracked) {
+    const shown = spawnSync('git', ['show', ':' + f], { cwd, encoding: 'utf8' });
+    if (shown.status !== 0) continue;
+    const indexed = shown.stdout;
+    if (!indexed.length || indexed.endsWith('\n')) continue;
+    const p = path.join(cwd, f);
+    if (fs.existsSync(p) && fs.readFileSync(p, 'utf8') === indexed + '\n') git(cwd, ['add', '--', f]);
+  }
+}
+
 /** Zwraca { changes: string, patch: string } albo puste stringi gdy brak różnic. */
 function compare(cwd) {
   normalizeTrailingNewline(cwd);
+  normalizeIndexTrailingNewline(cwd);
   // Restore only when the ref tracks Version.gs (older tags do not have it).
   if (git(cwd, ['ls-files', '--', 'Version.gs']).trim()) {
     git(cwd, ['checkout', '--', 'Version.gs']);
   }
   const pathspec = ['--', '*.gs', 'appsscript.json'];
-  // Keep the leading status column (" M", "??"); only strip trailing whitespace.
-  const changes = git(cwd, ['status', '--porcelain', ...pathspec]).replace(/\s+$/, '');
+  // Keep the leading status columns (" M", "??"); only strip trailing whitespace.
+  // Lines with a change only in the index (e.g. "M  Kod.gs" after the trailing
+  // newline normalisation above) are not drift: drift is worktree vs index.
+  const changes = git(cwd, ['status', '--porcelain', ...pathspec])
+    .split('\n')
+    .filter(l => l.trim() && (l.startsWith('??') || l[1] !== ' '))
+    .join('\n')
+    .replace(/\s+$/, '');
   if (!changes.trim()) return { changes: '', patch: '' };
   // Untracked files enter the diff via intent-to-add; reset afterwards.
   const untracked = changes.split('\n').filter(l => l.startsWith('??')).map(l => l.slice(3).trim());
@@ -124,4 +149,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { compare, normalizeTrailingNewline };
+module.exports = { compare, normalizeTrailingNewline, normalizeIndexTrailingNewline };

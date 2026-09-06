@@ -70,6 +70,27 @@ describe('apps-script-compare', () => {
     assert.equal(fs.readFileSync(path.join(root, 'Version.gs'), 'utf8'), "const DEPLOYED_VERSION = { tag: 'dev' };\n", 'Version.gs restored from git');
   });
 
+  test('a committed source without a final newline that Apps Script returns with one is not drift (v2.15.0 deploy failure)', () => {
+    const { root, fake } = repo(`fs.writeFileSync('Kod.gs', 'function a() {}\\n');`);
+    const g = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    fs.writeFileSync(path.join(root, 'Kod.gs'), 'function a() {}');
+    g(['commit', '-q', '-am', 'drop final newline']);
+    const r = run(root, fake);
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /✅ Apps Script matches v9\.9\.9\./);
+  });
+
+  test('the same file with a real change on top of the newline difference is still drift', () => {
+    const { root, fake } = repo(`fs.writeFileSync('Kod.gs', 'function a() { return 2; }\\n');`);
+    const g = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    fs.writeFileSync(path.join(root, 'Kod.gs'), 'function a() {}');
+    g(['commit', '-q', '-am', 'drop final newline']);
+    const r = run(root, fake, ['--patch', 'drift.patch']);
+    assert.equal(r.status, 1);
+    assert.match(r.out, / M Kod\.gs/);
+    assert.match(fs.readFileSync(path.join(root, 'drift.patch'), 'utf8'), /return 2/);
+  });
+
   test('a changed source is drift: exit 1, file listed, patch written', () => {
     const { root, fake } = repo(`fs.writeFileSync('GA4.gs', 'function b() { return 1; }\\n');`);
     const r = run(root, fake, ['--patch', 'drift.patch']);
