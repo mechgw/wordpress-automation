@@ -272,6 +272,22 @@ describe('#78: katalog i menu', () => {
     assert.equal(plain(gas.ukryjArkuszeTechniczne()).includes('Dziennik zmian'), false, 'nigdy nie jest ukrywany');
   });
 
+  test('#78/Codex: kolizja nazw z konfiguracją GA4 nie odbiera arkuszowi skryptu statusu zarządzanego', () => {
+    // Patologiczna, ale możliwa konfiguracja: wyjście GA4 wskazuje nazwę arkusza człowieka.
+    const gas = loadProject({ sheets: {
+      'Konfiguracja GA4': [['Klucz', 'Wartość'], ['propertyId', 'properties/111'], ['landingSheet', 'Dziennik zmian']],
+      'Dziennik zmian': [['date']],
+      'Analiza': [['a']]
+    } });
+    gas.uporzadkujArkusze();
+
+    assert.equal(colors(gas)['Dziennik zmian'], '#434343', 'liczy się wpis arkusza skryptu, nie człowieka');
+    const row = plain(gas.$sheet(START)).slice(4).find(r => String(r[0]).includes('"Dziennik zmian"'));
+    assert.equal(row[1], 'Dane surowe i logi');
+    assert.equal(row[3], 'Surowe dane GA4: strony docelowe. Nie edytuj ręcznie.');
+    assert.deepEqual(plain(gas.ukryjArkuszeTechniczne()), ['Dziennik zmian'], 'ukrywanie i opis mówią to samo');
+  });
+
   test('menu Dane ma trzy pozycje porządkowe na końcu', () => {
     const gas = project();
     gas.onOpen();

@@ -70,7 +70,8 @@ function sheetCatalog_() {
     { name: ga4.businessEventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: zdarzenia biznesowe. Nie edytuj ręcznie.' },
     { name: ga4.adsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
     { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' },
-    // Arkusz człowieka, z którego skrypt tylko czyta. W katalogu jest po to, żeby
+    // Arkusz człowieka: skrypt nie zapisuje do niego danych, ale go czyta, wymienia
+    // w spisie START i może przesunąć jego zakładkę. W katalogu jest po to, żeby
     // START mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl.
     { name: RECRAWL_CHANGELOG_SHEET, category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' }
   ];
@@ -87,12 +88,19 @@ function sheetCategory_(key) {
  */
 function sheetPlan_() {
   const ss = SpreadsheetApp.getActive();
+  // Przy kolizji nazw (np. gdy w konfiguracji GA4 ustawiono nazwę arkusza równą
+  // nazwie arkusza człowieka) wygrywa wpis arkusza skryptu, niezależnie od
+  // kolejności w katalogu: inaczej arkusz zapisywany przez import byłby
+  // opisany jako własny, a mimo to ukrywany razem z danymi surowymi.
   const catalog = {};
-  sheetCatalog_().forEach(entry => { catalog[entry.name] = entry; });
+  sheetCatalog_().forEach(entry => {
+    const current = catalog[entry.name];
+    if (!current || (current.category === 'wlasne' && entry.category !== 'wlasne')) catalog[entry.name] = entry;
+  });
 
-  // Wpis katalogowy w kategorii „wlasne” opisuje arkusz człowieka, z którego
-  // skrypt tylko czyta: dostaje własny opis w START, ale zachowuje kolor,
-  // widoczność i miejsce wśród arkuszy własnych.
+  // Wpis katalogowy w kategorii „wlasne” opisuje arkusz człowieka, do którego
+  // skrypt nie zapisuje danych: dostaje własny opis w spisie START i, jak każda
+  // zakładka z planu, może zostać przesunięty, ale zachowuje kolor i widoczność.
   const managed = name => catalog[name] && catalog[name].category !== 'wlasne';
   const existing = ss.getSheets().map(s => s.getName());
   const known = existing.filter(managed);
