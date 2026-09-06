@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
   workflow_dispatch:
+    inputs:
+      compare_ref:
+        description: "Z czym porównać żywy projekt: main (domyślnie) albo gałąź, np. przy zmianie układu źródeł"
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -19,10 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout main
+      # Domyślnie main. Możliwość wskazania gałęzi jest potrzebna, gdy zmiana
+      # dotyka układu źródeł albo samego porównania: bez tego nie da się jej
+      # sprawdzić przed merge'em, a to jedyny dowód, że clasp widzi to samo.
+      - name: Checkout ${{ inputs.compare_ref || 'main' }}
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ inputs.compare_ref || 'main' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -54,8 +62,8 @@ jobs:
       # Shared with the deploy workflow: clasp pull, trailing-newline
       # normalisation, Version.gs restored from git, git status limited to the
       # sources. See scripts/quality/apps-script-compare.js (unit-tested).
-      - name: Pull live project and compare with main
-        run: node scripts/quality/apps-script-compare.js --label main --patch apps-script-drift.patch
+      - name: Pull live project and compare with ${{ inputs.compare_ref || 'main' }}
+        run: node scripts/quality/apps-script-compare.js --label "${{ inputs.compare_ref || 'main' }}" --patch apps-script-drift.patch
 
       - name: Upload drift patch
         if: failure()
