@@ -198,11 +198,25 @@ function sprawdzAktualnoscImportow() {
   scheduledJobs_().filter(job => job.key !== ALERT_GUARD_JOB_KEY).map(job => job.key).forEach(source => {
     const record = readJobRecord_(source);
 
-    // Opcjonalne zadanie bez triggera, które nigdy nie działało, jest
-    // nieużywane, a nie zepsute. Bez tego włączenie monitoringu zasypałoby
-    // skrzynkę alertami o zadaniach, których użytkownik świadomie nie
-    // uruchomił. Importu ten wyjątek nie obejmuje: brak importu to incydent.
-    if (scheduledJob_(source).optional && !record.lastRun && !effectiveLastOk_(record) && !hasImportTrigger_(source)) return;
+    // Opcjonalne zadanie, które nigdy nie zapisało przebiegu, wymaga rozróżnienia
+    // trzech sytuacji, bo każda znaczy co innego:
+    //
+    //   bez triggera  – nieużywane, nie zepsute; milczymy;
+    //   z triggerem, pierwsza obserwacja – zadanie działa od dawna, tylko znacznik
+    //     pojawił się razem z monitoringiem; dajemy mu jego własny próg na
+    //     pierwszy przebieg, zamiast ogłaszać awarię tego samego ranka;
+    //   z triggerem, próg minął bez przebiegu – to już realna awaria.
+    //
+    // Importu ten wyjątek nie obejmuje: brak importu jest incydentem od razu.
+    if (scheduledJob_(source).optional && !record.lastRun && !effectiveLastOk_(record)) {
+      if (!hasImportTrigger_(source)) return;
+      if (!record.waitingSince) {
+        record.waitingSince = now.toISOString();
+        writeJobRecord_(source, record);
+        return;
+      }
+      if (!isJobStale_(source, { finishedAt: record.waitingSince }, now)) return;
+    }
 
     checked++;
     const stale = isJobStale_(source, effectiveLastOk_(record), now);

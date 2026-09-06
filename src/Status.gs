@@ -419,7 +419,12 @@ function jobStatusText_(key, now) {
   const triggerPart = ' | trigger: ' + (hasImportTrigger_(key) ? 'TAK' : 'NIE');
 
   if (!lastOk && !lastRun) {
-    return 'BRAK PRZEBIEGU – uruchom zadanie z menu' + triggerPart;
+    // Zadanie z triggerem, które jeszcze nie zapisało przebiegu, czeka na
+    // pierwsze uruchomienie; to nie to samo co zadanie w ogóle nieużywane.
+    const waiting = record.waitingSince && hasImportTrigger_(key);
+    return (waiting
+      ? 'BRAK PRZEBIEGU – zadanie jest włączone i czeka na pierwszy przebieg'
+      : 'BRAK PRZEBIEGU – uruchom zadanie z menu') + triggerPart;
   }
 
   let text;
@@ -472,6 +477,9 @@ function recordJobRun_(key, trigger, fn) {
     durationMs: Date.now() - startedAt
   };
   record.lastOk = record.lastRun;
+  // Znacznik oczekiwania na pierwszy przebieg przestaje być potrzebny: od teraz
+  // świeżość liczy się od ostatniego udanego uruchomienia.
+  delete record.waitingSince;
   writeJobRecord_(key, record);
   updateImportIncident_(key, record);
   return result;

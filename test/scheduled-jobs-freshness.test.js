@@ -66,11 +66,51 @@ describe('#99: strażnik obejmuje zadania monitorujące', () => {
     assert.doesNotMatch(gas.$mails[0].body, /kolejka recrawl/);
   });
 
-  test('opcjonalne zadanie z zainstalowanym triggerem, które nigdy nie działało, jest incydentem', () => {
+  test('włączone zadanie bez historii dostaje próg na pierwszy przebieg, zamiast alertu od razu', () => {
+    // Tak wygląda instalacja tuż po włączeniu monitoringu: trigger jest od dawna,
+    // ale znacznik przebiegu pojawia się dopiero teraz. Ogłaszanie awarii tego
+    // samego ranka byłoby fałszywym alarmem.
     const gas = loadProject({ properties: MAIL, triggers: ['kolejkaRecrawlTrigger'] });
     const out = gas.sprawdzAktualnoscImportow();
-    assert.equal(counts(out).opened, 3, 'dwa importy plus włączona kolejka recrawl');
+    assert.equal(counts(out).opened, 2, 'tylko importy; kolejka recrawl dostaje czas na pierwszy przebieg');
+    assert.doesNotMatch(gas.$mails[0].body, /kolejka recrawl/);
+    assert.ok(jobRecord(gas, 'LAST_RUN_RECRAWL').waitingSince, 'moment rozpoczęcia oczekiwania jest zapisany');
+  });
+
+  test('gdy próg minie, a zadanie nadal nie działało, incydent jednak się otwiera', () => {
+    const waited = JSON.stringify({ waitingSince: hoursAgo(40) });
+    const gas = loadProject({
+      properties: Object.assign({}, MAIL, { LAST_RUN_RECRAWL: waited }),
+      triggers: ['kolejkaRecrawlTrigger']
+    });
+    const out = gas.sprawdzAktualnoscImportow();
+    assert.equal(counts(out).opened, 3, 'dwa importy plus kolejka recrawl, która nie ruszyła mimo triggera');
     assert.match(gas.$mails[0].body, /- kolejka recrawl: BRAK PRZEBIEGU/);
+  });
+
+  test('zadanie tygodniowe czeka na pierwszy przebieg swoim progiem, nie dobowym', () => {
+    const props = days => Object.assign({}, MAIL, { LAST_RUN_URL_INSPECTION: JSON.stringify({ waitingSince: hoursAgo(days * 24) }) });
+    const waiting = loadProject({ properties: props(5), triggers: ['sprawdzIndeksowanieTrigger'] });
+    assert.equal(counts(waiting.sprawdzAktualnoscImportow()).opened, 2, 'po pięciu dniach zadanie tygodniowe jeszcze ma czas');
+
+    const late = loadProject({ properties: props(9), triggers: ['sprawdzIndeksowanieTrigger'] });
+    assert.equal(counts(late.sprawdzAktualnoscImportow()).opened, 3, 'po dziewięciu dniach to już awaria');
+  });
+
+  test('pierwszy udany przebieg kasuje znacznik oczekiwania', () => {
+    const gas = loadProject({ properties: Object.assign({}, MAIL, { LAST_RUN_RECRAWL: JSON.stringify({ waitingSince: hoursAgo(10) }) }) });
+    gas.recordJobRun_('RECRAWL', true, () => ({ detail: 'gotowe' }));
+    const rec = jobRecord(gas, 'LAST_RUN_RECRAWL');
+    assert.equal(rec.waitingSince, undefined, 'od teraz świeżość liczy się od ostatniego przebiegu');
+    assert.equal(rec.lastOk.detail, 'gotowe');
+  });
+
+  test('status włączonego zadania bez historii mówi, że czeka na pierwszy przebieg', () => {
+    const gas = loadProject({
+      properties: { LAST_RUN_SEO_LIVE: JSON.stringify({ waitingSince: hoursAgo(2) }) },
+      triggers: ['sprawdzStronyLiveTrigger']
+    });
+    assert.match(gas.jobStatusText_('SEO_LIVE'), /^BRAK PRZEBIEGU – zadanie jest włączone i czeka na pierwszy przebieg/);
   });
 
   test('zadanie tygodniowe ma własny próg: po 7 dniach jest świeże, po 9 nieaktualne', () => {
