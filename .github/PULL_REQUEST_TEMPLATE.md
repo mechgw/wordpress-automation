@@ -1,49 +1,52 @@
 <!--
-Title: Conventional Commits (feat: / fix: / docs: / chore: / ci: / test: / refactor:), lowercase subject.
-Fields that do not apply → "N/A (reason)". Do not leave placeholders.
-Standards: docs/quality/testing-standard.md, docs/quality/test-matrix-template.md
+Tytuł: Conventional Commits (feat: / fix: / docs: / chore: / ci: / test: / refactor:), temat małą literą.
+Pola, które nie dotyczą zmiany → „N/A (powód)”. Nie zostawiaj placeholderów.
+Standardy: docs/quality/testing-standard.md, docs/quality/test-matrix-template.md
+Check `pr-template` sprawdza: kompletny wiersz matrycy, każdą pozycję macierzy dowodów
+(odhaczona, „N/A (powód)” albo jawnie odłożona: „po wdrożeniu” / „follow-up” / #issue),
+uzasadnienie deficytu pokrycia i link Fixes/Refs.
 -->
 
-## Context
+## Kontekst
 
-- **Why:** one sentence on the value of this change.
-- **Problem:** what is wrong or missing today.
-- **Solution:** what changed and how it addresses the problem.
-- **Details (optional):** risks, edge cases, decisions.
+- **Dlaczego:** jedno zdanie o wartości tej zmiany.
+- **Problem:** co dziś jest źle albo czego brakuje.
+- **Rozwiązanie:** co się zmieniło i jak to rozwiązuje problem.
+- **Szczegóły (opcjonalnie):** ryzyka, przypadki brzegowe, decyzje.
 
-## Test matrix
+## Macierz testów
 
-<!-- From docs/quality/test-matrix-template.md. Trivial change: scenario table + residual risk. -->
+<!-- Z docs/quality/test-matrix-template.md. Zmiana trywialna: tabela scenariuszy + ryzyko rezydualne. -->
 
-| ID  | Scenario | Criticality | Layer (Unit / Sheet / Runtime) | Test |
-| --- | -------- | ----------- | ------------------------------ | ---- |
-| T1  |          |             |                                |      |
+| ID  | Scenariusz | Krytyczność | Warstwa (Unit / Sheet / Runtime) | Test |
+| --- | ---------- | ----------- | -------------------------------- | ---- |
+| T1  |            |             |                                  |      |
 
-**Residual risk / deferred:** none, or list with reason and follow-up issue.
+**Ryzyko rezydualne / odłożone:** brak, albo lista z powodem i issue z follow-upem.
 
-## Evidence matrix
+## Macierz dowodów
 
-<!-- Tick with a short confirmation, or N/A with a reason. -->
+<!-- Odhacz z krótkim potwierdzeniem albo N/A z powodem. -->
 
-- [ ] **Unit (VM):** tests added/updated in `test/`, `npm test` green
-- [ ] **Coverage:** changed `*.gs` lines 100% covered (`npm run quality:gate -- --changed=base:origin/main`), per-file thresholds met
-- [ ] **Sheet manual test:** which menu item was run and its result, or N/A
-- [ ] **Runtime:** drift check / deploy dry run / rollback plan for workflow or deploy changes, or N/A
-- [ ] **Security:** credentials, Script Properties, public repo hygiene (no site identity in code), or N/A
+- [ ] **Unit (VM):** testy dodane/zaktualizowane w `test/`, `npm test` zielone
+- [ ] **Pokrycie:** zmienione linie `*.gs` pokryte w 100 % (`npm run quality:gate -- --changed=base:origin/main`), progi per plik spełnione
+- [ ] **Test ręczny w arkuszu:** która pozycja menu została uruchomiona i z jakim wynikiem, albo N/A
+- [ ] **Runtime:** drift check / dry run deployu / plan rollbacku przy zmianach workflow lub deployu, albo N/A
+- [ ] **Bezpieczeństwo:** poświadczenia, Script Properties, higiena publicznego repo (brak tożsamości witryny w kodzie), albo N/A
 
-**Coverage deficit justification:** none, or the entries added to `.quality/changed-lines-ignore.json` and why.
+**Uzasadnienie deficytu pokrycia:** brak, albo wpisy dodane do `.quality/changed-lines-ignore.json` i dlaczego.
 
-## Bot reviews
+## Recenzje botów
 
-- [ ] Copilot finished; comments read, accepted ones applied, rejected ones answered in-thread
-- [ ] `/reviewed` comment posted (turns the `review-ack` check green)
+- [ ] Copilot zakończył; komentarze przeczytane, przyjęte wdrożone, odrzucone odpowiedziane w wątku
+- [ ] Komentarz `/reviewed` opublikowany (zielony check `review-ack`)
 
-## Links
+## Linki
 
-Fixes: #`<nr>` or Refs: #`<nr>`
+Fixes: #`<nr>` albo Refs: #`<nr>`
 
-## Before merge
+## Przed merge
 
-- [ ] Title follows the convention
-- [ ] `validate`, `secret-scan`, `pr-title`, `review-ack` green
-- [ ] Follow-ups listed above or `none`
+- [ ] Tytuł zgodny z konwencją
+- [ ] `validate`, `secret-scan`, `pr-title`, `review-ack` zielone
+- [ ] Follow-upy wypisane wyżej albo `brak`

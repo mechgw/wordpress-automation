@@ -1,40 +1,40 @@
-# GitHub label taxonomy
+# Taksonomia etykiet GitHub
 
-`labels.json` is the declarative source of truth for labels managed by this repository. The model follows the same governance pattern as `system.produkcja`, but keeps only the families that are useful here.
+`labels.json` to deklaratywne źródło prawdy o etykietach zarządzanych przez to repozytorium. Model powtarza wzorzec z `system.produkcja`, ale zachowuje tylko rodziny, które są tu przydatne.
 
-The **Sync GitHub labels** Action reconciles names, colors and descriptions after the manifest reaches `main`, and can also be run manually. It is intentionally non-destructive: labels outside the manifest are left alone. Explicit one-time removals live under `migrations.delete`.
+Action **Sync GitHub labels** uzgadnia nazwy, kolory i opisy po wejściu manifestu do `main`; można go też uruchomić ręcznie. Celowo nie jest destrukcyjny: etykiety spoza manifestu zostają w spokoju. Jawne jednorazowe usunięcia żyją w `migrations.delete`.
 
-## Classification rules
+## Zasady klasyfikacji
 
-| Family | Rule | Meaning |
+| Rodzina | Zasada | Znaczenie |
 | --- | --- | --- |
-| Priority `P0`–`P4` | exactly 1 per open Issue | Business/operational order of work. |
-| Risk `T1`–`T3` | exactly 1 when work can change production behaviour | Cost/risk of getting the change wrong, not implementation effort. |
-| `area:*` | 1 or more | Where the work belongs. |
-| State | 0 or more | `blocked`, `needs-triage`, `monitoring`. |
-| Change type | 0 or more | Compatible with Release Drafter / Conventional Commits. |
-| `policy:*` | 0 or more | Cross-cutting invariant or policy affected by the work. |
+| Priorytet `P0`–`P4` | dokładnie 1 na otwarte issue | Biznesowa/operacyjna kolejność pracy. |
+| Ryzyko `T1`–`T3` | dokładnie 1, gdy praca może zmienić zachowanie produkcji | Koszt/ryzyko pomyłki w zmianie, nie nakład implementacji. |
+| `area:*` | 1 lub więcej | Gdzie praca należy. |
+| Stan | 0 lub więcej | `blocked`, `needs-triage`, `monitoring`. |
+| Typ zmiany | 0 lub więcej | Zgodny z Release Drafterem / Conventional Commits. |
+| `policy:*` | 0 lub więcej | Przekrojowy niezmiennik albo polityka, której praca dotyczy. |
 
-Priority and risk are independent. A tiny but urgent production defect can be `P0` + `T1`; a large security-sensitive refactor can be `P2` + `T3`.
+Priorytet i ryzyko są niezależne. Drobny, ale pilny defekt produkcyjny może być `P0` + `T1`; duży refaktor wrażliwy na bezpieczeństwo może być `P2` + `T3`.
 
-Priority lives in the label, not in the Issue title. After migration, do not prefix titles with `[P0]`, `[P1]`, etc.; duplicating the value in the title would create two sources of truth that can drift apart.
+Priorytet żyje w etykiecie, nie w tytule issue. Po migracji nie prefiksuj tytułów `[P0]`, `[P1]` itd.; duplikowanie wartości w tytule tworzyłoby dwa źródła prawdy, które się rozjadą.
 
-## Color semantics
+## Semantyka kolorów
 
-The colors are deliberately consistent with the established taxonomy in `system.produkcja`:
+Kolory są celowo spójne z ustaloną taksonomią w `system.produkcja`:
 
-- warm colors — urgency (`P0` → `P2`);
-- grey — low priority / monitoring;
-- cool blue/indigo — risk tiers;
-- near-black — blocked;
-- green — every `area:*` label;
-- purple — every `policy:*` label.
+- kolory ciepłe — pilność (`P0` → `P2`);
+- szary — niski priorytet / monitoring;
+- chłodny niebieski/indygo — poziomy ryzyka;
+- prawie czarny — zablokowane;
+- zielony — każda etykieta `area:*`;
+- fioletowy — każda etykieta `policy:*`.
 
-The color is only a visual cue. The label name and description always carry the meaning.
+Kolor to tylko wskazówka wizualna. Znaczenie zawsze niesie nazwa i opis etykiety.
 
-## Areas
+## Obszary
 
-The initial closed set is:
+Początkowy zamknięty zbiór:
 
 - `area:wordpress`
 - `area:seo`
@@ -47,27 +47,27 @@ The initial closed set is:
 - `area:tests`
 - `area:security`
 
-Add a new area only when an existing area would make filtering misleading. Do not create ad-hoc labels directly in the GitHub UI; change `labels.json` in a reviewed PR.
+Nowy obszar dodawaj tylko wtedy, gdy istniejący uczyniłby filtrowanie mylącym. Nie twórz etykiet ad hoc w interfejsie GitHuba; zmień `labels.json` w zrecenzowanym PR-ze.
 
-## Typical examples
+## Typowe przykłady
 
-A WordPress route-layout defect that is currently blocking correct production rendering:
+Defekt układu tras WordPressa, który blokuje obecnie poprawne renderowanie produkcji:
 
 `P0` · `T2` · `bug` · `area:wordpress` · `area:seo`
 
-A post-deployment SEO measurement task waiting for enough data:
+Zadanie pomiaru SEO po wdrożeniu, czekające na wystarczającą ilość danych:
 
 `P1` · `T1` · `monitoring` · `area:seo` · `area:analytics` · `area:gsc`
 
-A CI or repository-governance improvement:
+Usprawnienie CI albo zarządzania repozytorium:
 
 `P2` · `T1` · `chore` · `area:github` · `area:tests`
 
-## Changing the taxonomy
+## Zmiana taksonomii
 
-1. Edit `.github/labels.json` in a branch.
-2. Run `npm test`; `test/labels.test.js` validates the manifest contract.
-3. Open a PR and follow the normal review gate.
-4. After merge, **Sync GitHub labels** applies the reviewed state to the repository.
+1. Edytuj `.github/labels.json` na gałęzi.
+2. Uruchom `npm test`; `test/labels.test.js` sprawdza kontrakt manifestu.
+3. Otwórz PR i przejdź normalną bramkę review.
+4. Po merge'u **Sync GitHub labels** nakłada zrecenzowany stan na repozytorium.
 
-Do not enable implicit pruning. Label deletion is a migration and must be named explicitly so the audit trail explains why it disappeared.
+Nie włączaj niejawnego usuwania. Usunięcie etykiety to migracja i musi być nazwane jawnie, żeby ślad audytowy tłumaczył, dlaczego zniknęła.
