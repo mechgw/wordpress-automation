@@ -1,137 +1,138 @@
 # wordpress-automation
 
-Google Apps Script automation for WordPress, Google Search Console and Google Analytics 4 workflows.
+Automatyzacja Google Apps Script dla procesów WordPress, Google Search Console i Google Analytics 4.
 
-## Project status
+## Status projektu
 
-The repository is the canonical source for the Apps Script project. The current production version is the [latest release](https://github.com/mechgw/wordpress-automation/releases/latest).
+Repozytorium jest kanonicznym źródłem projektu Apps Script. Obecna wersja produkcyjna to [najnowsze wydanie](https://github.com/mechgw/wordpress-automation/releases/latest).
 
-Merging into `main` does **not** deploy anything. Publishing a GitHub release triggers the *Deploy to Apps Script* workflow for that tag, and a maintainer approves it in the `production` environment before anything is pushed. The same workflow can also be run by hand against `main`.
+Merge do `main` **niczego nie wdraża**. Publikacja wydania w GitHubie uruchamia workflow *Deploy to Apps Script* dla tego taga, a opiekun zatwierdza go w środowisku `production`, zanim cokolwiek zostanie wypchnięte. Ten sam workflow można też uruchomić ręcznie względem `main`.
 
-## Files
+## Pliki
 
-- `appsscript.json` — Apps Script manifest and OAuth scopes.
-- `Kod.gs` — shared entry points and Google Search Console integration.
-- `GA4.gs` — Google Analytics 4 and Ads-related automation.
-- `WordPress.gs` — WordPress REST automation bridge.
-- `Status.gs` — import status: run records in Script Properties, one-line status in the config cells, the `IMPORT LOG` sheet, the *Dane* menu.
-- `Alerts.gs` — e-mail alerts on the incident model (open once, silent while open, close on recovery) and the daily freshness guard.
-- `UrlInspection.gs` — Google index status of key URLs from the Search Console URL Inspection API, written into the `URL INSPEKCJA` sheet.
-- `SeoLive.gs` — live SEO regression check: fetches key URLs and compares status, redirect target, title, H1, canonical, robots and schema with the expectations in the `SEO LIVE` sheet.
-- `Sitemaps.gs` — sitemap status from the Search Console Sitemaps API, written into the `SITEMAPY` sheet and summarised in *Status danych*.
-- `Diagnostics.gs` — read-only smoke test from the menu: Script Properties, sheets, GSC / GA4 / WordPress access, triggers, alert configuration, one report per step.
-- `SheetCatalog.gs` — the catalogue of script-owned sheets: tab colours, tab order, the generated `START` index and hiding the raw-data tabs.
-- `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
-- `eslint.config.js` — lint rules with Apps Script services declared as globals.
-- `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
+- `appsscript.json` — manifest Apps Script i zakresy OAuth.
+- `Kod.gs` — wspólne punkty wejścia i integracja z Google Search Console.
+- `GA4.gs` — Google Analytics 4 i automatyzacja związana z Ads.
+- `WordPress.gs` — most automatyzacji REST do WordPressa.
+- `Status.gs` — status importów: rekordy uruchomień w Script Properties, jednolinijkowy status w komórkach konfiguracji, arkusz `IMPORT LOG`, menu *Dane*.
+- `Alerts.gs` — alerty e-mail w modelu incydentu (otwórz raz, cisza w trakcie, zamknij po powrocie do normy) i codzienny strażnik aktualności.
+- `UrlInspection.gs` — stan indeksowania kluczowych adresów z API inspekcji URL Search Console, zapisywany do arkusza `URL INSPEKCJA`.
+- `SeoLive.gs` — live SEO regression check: pobiera kluczowe adresy i porównuje status, cel przekierowania, title, H1, canonical, robots i schema z oczekiwaniami z arkusza `SEO LIVE`.
+- `Sitemaps.gs` — stan map witryny z API Sitemaps w Search Console, zapisywany do arkusza `SITEMAPY` i podsumowany w *Status danych*.
+- `Diagnostics.gs` — smoke test z menu, wyłącznie odczyt: Script Properties, zakładki, dostęp do GSC / GA4 / WordPressa, triggery, konfiguracja alertów, jedna linia raportu na krok.
+- `SheetCatalog.gs` — katalog arkuszy tworzonych przez skrypt: kolory zakładek, kolejność, generowany spis `START` i ukrywanie zakładek z danymi surowymi.
+- `Version.gs` — same placeholdery; workflow deployu nadpisuje go tagiem wydania, commitem i czasem przed `clasp push`, a arkusz pokazuje ten tag jako menu (*Szczegóły wdrożenia*). Drift check ignoruje ten plik.
+- `eslint.config.js` — reguły lintu z globalnymi symbolami Apps Script.
+- `.claspignore` — do Apps Script trafiają wyłącznie `*.gs` i `appsscript.json`.
 
-## Secrets and configuration
+## Sekrety i konfiguracja
 
-Do not commit credentials or API secrets. Runtime credentials belong in Apps Script **Script Properties**.
+Nie commituj poświadczeń ani sekretów API. Poświadczenia runtime należą do **Script Properties** w Apps Script.
 
-The WordPress bridge currently expects properties such as:
+Most WordPressa oczekuje obecnie właściwości:
 
 - `WP_BASE_URL`
 - `WP_USERNAME`
 - `WP_APP_PASSWORD`
 - `WP_ALLOW_WRITES`
-- `WP_REST_NAMESPACE` — namespace of the site-specific REST bridge snippet, e.g. `acme` for `/wp-json/acme/v1/seo-meta`.
+- `WP_REST_NAMESPACE` — namespace snippetu REST specyficznego dla witryny, np. `acme` dla `/wp-json/acme/v1/seo-meta`.
 
-Optional:
+Opcjonalne:
 
-- `SITE_DOMAIN` — domain used to auto-pick the GA4 property by its web stream URL. Falls back to the host of `WP_BASE_URL`; with neither set, the property has to be chosen by hand in the config sheet.
-- `ALERT_EMAIL` — recipient of import alerts (one address or a comma-separated list). Without it nothing is sent and nothing fails; incidents are still tracked and shown in *Status danych*. A value that is not an address (for example `TRUE`) is never used: *Status danych* and the guard dialog show it as `NIEPRAWIDŁOWY ADRES` until it is fixed.
-- `ALERT_RECOVERY` — `FALSE` disables the "import works again" e-mail; the incident is still closed. Default: enabled.
+- `SITE_DOMAIN` — domena używana do automatycznego wyboru właściwości GA4 po URL-u strumienia web. Fallbackiem jest host z `WP_BASE_URL`; bez obu właściwość trzeba wskazać ręcznie w arkuszu konfiguracji.
+- `ALERT_EMAIL` — adresat alertów importu (jeden adres albo lista po przecinku). Bez niego nic nie jest wysyłane i nic nie pada; incydenty są nadal śledzone i widoczne w *Status danych*. Wartość, która nie jest adresem (na przykład `TRUE`), nigdy nie zostanie użyta: *Status danych* i okno strażnika pokazują ją jako `NIEPRAWIDŁOWY ADRES`, dopóki nie zostanie poprawiona.
+- `ALERT_RECOVERY` — `FALSE` wyłącza e-mail „import ponownie działa”; incydent i tak jest zamykany. Domyślnie włączone.
+- `EXPECTED_SITEMAPS` — lista adresów sitemap po przecinku, których brak w Search Console ma być zgłaszany.
 
-`WP_ALLOW_WRITES` should remain disabled unless a write operation is intentionally being performed.
+`WP_ALLOW_WRITES` powinno pozostać wyłączone, chyba że celowo wykonujesz operację zapisu.
 
-### Concurrency and idempotency
+### Współbieżność i idempotencja
 
-- **One script lock** (`Lock.gs`, `LockService.getScriptLock`) wraps every GSC/GA4 import and the whole *Wykonaj polecenia* loop. It is a short `tryLock` (5 s) with no queueing: a second run that finds the lock held stops with `Inne uruchomienie jeszcze trwa (…)`. For imports that refusal is recorded as a failed run in the status cell, so a lost run is visible instead of two runs writing the same sheet or the same WordPress page.
-- **Command statuses in `WP COMMANDS`:** `PENDING` is picked up; `RUNNING` means a run was interrupted after the row was claimed (Apps Script time limit, crash). Such a row is never re-executed automatically: check the page in WordPress, then set `ERROR`, or `PENDING` with a new `command_id`. `SKIPPED` means a write command was refused because it has no `command_id` or a result for that `command_id` already exists in `WP RESULTS`; to run it again, give it a new id. Read commands may be repeated freely.
-- **Menu *WordPress → Wykonaj wiersze DRY_RUN naprawdę*** asks for confirmation, flips `DRY_RUN` rows to `PENDING` and runs them; it refuses while `WP_DRY_RUN` is still `TRUE`.
+- **Jeden lock skryptu** (`Lock.gs`, `LockService.getScriptLock`) obejmuje każdy import GSC/GA4 i całą pętlę *Wykonaj polecenia*. To krótkie `tryLock` (5 s) bez kolejkowania: drugie uruchomienie, które zastanie lock zajęty, kończy się komunikatem `Inne uruchomienie jeszcze trwa (…)`. Przy importach odmowa jest zapisywana jako nieudane uruchomienie w komórce statusu, więc utracony przebieg jest widoczny, zamiast dwóch przebiegów zapisujących ten sam arkusz albo tę samą stronę WordPressa.
+- **Statusy poleceń w `WP COMMANDS`:** `PENDING` jest podejmowane; `RUNNING` oznacza przebieg przerwany po zajęciu wiersza (limit czasu Apps Script, awaria). Taki wiersz nigdy nie jest wykonywany ponownie automatycznie: sprawdź stronę w WordPressie, potem ustaw `ERROR` albo `PENDING` z nowym `command_id`. `SKIPPED` oznacza polecenie zapisu odrzucone, bo nie ma `command_id` albo wynik dla tego `command_id` już istnieje w `WP RESULTS`; żeby wykonać je ponownie, nadaj nowe id. Polecenia odczytu można powtarzać dowolnie.
+- **Menu *WordPress → Wykonaj wiersze DRY_RUN naprawdę*** prosi o potwierdzenie, przestawia wiersze `DRY_RUN` na `PENDING` i wykonuje je; odmawia, dopóki `WP_DRY_RUN` jest `TRUE`.
 
-`WP_DRY_RUN=TRUE` turns *Wykonaj polecenia* into a rehearsal: every write command runs its validations, reads and snapshot exactly as for real, but the write request is stopped right before `UrlFetchApp.fetch` and the command row gets status `DRY_RUN` with the method, URL and payload that would have been sent. Reads still execute. Dry run and the real write share one request builder (`buildWpRequest_`), so the preview cannot differ from production. Dry run works without `WP_ALLOW_WRITES`; without `WP_DRY_RUN` the write guard stays as it is.
+`WP_DRY_RUN=TRUE` zamienia *Wykonaj polecenia* w próbę generalną: każde polecenie zapisu przechodzi walidacje, odczyty i snapshot dokładnie jak na produkcji, ale żądanie zapisu jest zatrzymywane tuż przed `UrlFetchApp.fetch`, a wiersz polecenia dostaje status `DRY_RUN` z metodą, URL-em i payloadem, które zostałyby wysłane. Odczyty nadal się wykonują. Dry run i prawdziwy zapis dzielą jeden builder żądania (`buildWpRequest_`), więc podgląd nie może różnić się od produkcji. Dry run działa bez `WP_ALLOW_WRITES`; bez `WP_DRY_RUN` blokada zapisów pozostaje bez zmian.
 
-Nothing site-specific (domain, company name, REST namespace) is hardcoded in the sources; it all lives in Script Properties so the repository can stay public.
+Nic specyficznego dla witryny (domena, nazwa firmy, namespace REST) nie jest zaszyte w źródłach; wszystko żyje w Script Properties, żeby repozytorium mogło pozostać publiczne.
 
-### Import status (is the data fresh?)
+### Status importów (czy dane są świeże?)
 
-Every GSC and GA4 import, manual or from the daily trigger, records its outcome in Script Properties (`LAST_IMPORT_GSC`, `LAST_IMPORT_GA4`: last run and last successful run with timestamp, row counts, error, duration). Two places show it:
+Każdy import GSC i GA4, ręczny albo z codziennego triggera, zapisuje swój wynik w Script Properties (`LAST_IMPORT_GSC`, `LAST_IMPORT_GA4`: ostatnie uruchomienie i ostatnie udane uruchomienie z czasem, liczbą wierszy, błędem, czasem trwania). Pokazują to dwa miejsca:
 
-- **Cells** `Konfiguracja GSC!B8` and `Konfiguracja GA4!B9`, one line each, readable by people and by anything that reads the sheet through the API:
+- **Komórki** `Konfiguracja GSC!B8` i `Konfiguracja GA4!B9`, po jednej linii, czytelne dla człowieka i dla wszystkiego, co czyta arkusz przez API:
 
-  | Cell text | Meaning |
+  | Tekst komórki | Znaczenie |
   | --- | --- |
-  | `AKTYWNE – ostatni import: 2026-09-05 06:02 \| 1234 wierszy \| trigger: TAK` | last run succeeded, data is fresh, daily trigger installed |
-  | `BŁĄD 2026-09-06 06:01: <message> \| ostatni poprawny import: 2026-09-05 06:02 \| trigger: TAK` | last run failed; the data is from the previous successful run |
-  | `NIEAKTUALNE – …` | last successful import is older than 36 hours (or there is none); do not trust the data |
-  | `BRAK IMPORTU – uruchom import z menu \| trigger: NIE` | never imported |
+  | `AKTYWNE – ostatni import: 2026-09-05 06:02 \| 1234 wierszy \| trigger: TAK` | ostatnie uruchomienie się udało, dane są świeże, codzienny trigger zainstalowany |
+  | `BŁĄD 2026-09-06 06:01: <komunikat> \| ostatni poprawny import: 2026-09-05 06:02 \| trigger: TAK` | ostatnie uruchomienie padło; dane pochodzą z poprzedniego udanego |
+  | `NIEAKTUALNE – …` | ostatni udany import jest starszy niż 36 godzin (albo go nie ma); nie ufaj danym |
+  | `BRAK IMPORTU – uruchom import z menu \| trigger: NIE` | nigdy nie importowano |
 
-- **Menu *Dane* → *Status danych***: the same for both sources plus schedule, last run result, manual/trigger and duration. *Odśwież status w komórkach* rewrites the cells (for example after installing a trigger).
+- **Menu *Dane* → *Status danych***: to samo dla obu źródeł plus harmonogram, wynik ostatniego uruchomienia, tryb ręczny/trigger i czas trwania. *Odśwież status w komórkach* przepisuje komórki (na przykład po zainstalowaniu triggera).
 
-A failed trigger run therefore never masquerades as a fresh import, and the cells say whether the trigger is still installed.
+Nieudany przebieg triggera nigdy nie udaje więc świeżego importu, a komórki mówią, czy trigger jest nadal zainstalowany.
 
-**History and anomalies** (`IMPORT LOG` sheet, created automatically): every run appends a row with time, source, run type (`trigger` / `ręczny`; the daily import counts as `trigger` only when Apps Script invoked it from the time-driven trigger, the same menu item run by hand is `ręczny`), days in the imported range (`0` on failed runs, where the range is unknown), result, row count, duration, details and error or warning. Rows older than 90 days are pruned wherever they sit, so sorting the sheet by hand is safe; the anomaly rule also ignores expired rows and orders history by time, not by row position. After each successful run the row count is compared with the median of the last 7 successful runs of the **same profile** (source + run type + days), so a daily 1-day trigger import is never compared with a manual 90-day backfill. Fewer than 7 runs in a profile means no alarm. Zero rows with a positive median, or fewer than half the median, adds `UWAGA: mało danych: <n> wierszy vs mediana <m>` to the status cell, the *Status danych* dialog and the log row. The import itself still counts as successful; the warning is a signal to look at the source.
+**Historia i anomalie** (arkusz `IMPORT LOG`, tworzony automatycznie): każde uruchomienie dopisuje wiersz z czasem, źródłem, typem uruchomienia (`trigger` / `ręczny`; import dzienny liczy się jako `trigger` tylko wtedy, gdy wywołał go trigger czasowy Apps Script, ta sama pozycja menu uruchomiona ręcznie to `ręczny`), liczbą dni w importowanym zakresie (`0` przy nieudanych przebiegach, gdzie zakres jest nieznany), wynikiem, liczbą wierszy, czasem trwania, szczegółami oraz błędem lub ostrzeżeniem. Wiersze starsze niż 90 dni są usuwane niezależnie od tego, gdzie leżą, więc ręczne sortowanie arkusza jest bezpieczne; reguła anomalii również pomija wygasłe wiersze i porządkuje historię po czasie, nie po pozycji wiersza. Po każdym udanym przebiegu liczba wierszy jest porównywana z medianą ostatnich 7 udanych przebiegów **tego samego profilu** (źródło + typ uruchomienia + dni), więc codzienny import triggera na 1 dzień nigdy nie jest porównywany z ręcznym uzupełnieniem 90 dni. Mniej niż 7 przebiegów w profilu oznacza brak alarmu. Zero wierszy przy dodatniej medianie albo mniej niż połowa mediany dopisuje `UWAGA: mało danych: <n> wierszy vs mediana <m>` do komórki statusu, okna *Status danych* i wiersza logu. Sam import nadal liczy się jako udany; ostrzeżenie to sygnał, żeby zajrzeć do źródła.
 
-### E-mail alerts (incident model)
+### Alerty e-mail (model incydentu)
 
-Alerts are sent by `MailApp` (scope `script.send_mail`; the first deploy with this scope requires re-authorising the script once) to `ALERT_EMAIL`. They do not fire per event but per **incident**, one per source, stored in the same `LAST_IMPORT_*` record:
+Alerty wysyła `MailApp` (zakres `script.send_mail`; pierwsze wdrożenie z tym zakresem wymaga jednorazowej ponownej autoryzacji skryptu) na adres z `ALERT_EMAIL`. Nie wysyłają się przy każdym zdarzeniu, tylko per **incydent**, jeden na źródło, przechowywany w tym samym rekordzie `LAST_IMPORT_*`:
 
-| Transition | What happens |
+| Przejście | Co się dzieje |
 | --- | --- |
-| OK → problem | incident opens, **one** e-mail with source, time, manual/trigger, the error or the anomaly text and the last good import |
-| problem → problem | silence; the incident only updates its reason and details (an error after an anomaly, a new error message) |
-| problem → OK | incident closes; e-mail *Import ponownie działa* unless `ALERT_RECOVERY=FALSE` |
+| OK → problem | incydent otwarty, **jeden** e-mail ze źródłem, czasem, trybem ręczny/trigger, treścią błędu lub anomalii i ostatnim poprawnym importem |
+| problem → problem | cisza; incydent aktualizuje tylko powód i szczegóły (błąd po anomalii, nowy komunikat błędu) |
+| problem → OK | incydent zamknięty; e-mail *Import ponownie działa*, chyba że `ALERT_RECOVERY=FALSE` |
 
-A problem is a failed run (`BŁĄD`, including a refused lock) or a row-count anomaly (`UWAGA, mało danych`). Subjects start with `[wordpress-automation]`; every body ends with the sheet URL and the deployed version. Sending is best-effort: a `MailApp` failure (daily quota, bad address) is logged and never changes the outcome of the import or the guard. An incident whose opening e-mail could not be sent (no `ALERT_EMAIL` yet, quota) is notified once on the next occurrence after sending becomes possible, then falls silent as usual.
+Problemem jest nieudany przebieg (`BŁĄD`, w tym odmowa locka) albo anomalia liczby wierszy (`UWAGA, mało danych`). Tematy zaczynają się od `[wordpress-automation]`; każda treść kończy się URL-em arkusza i wdrożoną wersją. Wysyłka jest best-effort: awaria `MailApp` (limit dzienny, zły adres) trafia do logu i nigdy nie zmienia wyniku importu ani strażnika. Incydent, którego e-mail otwierający nie mógł zostać wysłany (brak `ALERT_EMAIL`, limit), dostaje powiadomienie raz przy kolejnym wystąpieniu, gdy wysyłka stanie się możliwa, a potem milczy jak zwykle.
 
-**Stale data** has no run to react to, so a daily guard (`sprawdzAktualnoscImportow`, menu *Dane → Sprawdź aktualność importów*) checks both sources: a source that is `NIEAKTUALNE` or `BRAK IMPORTU` opens a `stale` incident and all such sources go into **one** aggregate e-mail; while the incident is open the guard stays quiet. When the source is fresh again the guard closes the incident (recovery e-mail, same switch). Incidents opened by a failed run are left to the import path. *Dane → Sprawdź aktualność teraz (alerty)* runs the same check from the menu and shows a dialog with both sources, the incidents opened and closed, and whether an e-mail went out or why it did not (no address, invalid address, `MailApp` error). *Dane → Włącz codzienne alerty e-mail* installs the guard trigger around 08:00, after the GSC and GA4 imports; the dialog says where alerts go, or warns that `ALERT_EMAIL` is missing or invalid. *Status danych* shows the open incident per source, the recipient and whether the guard trigger is installed.
+**Nieaktualne dane** nie mają przebiegu, na który można zareagować, więc codzienny strażnik (`sprawdzAktualnoscImportow`, menu *Dane → Sprawdź aktualność teraz (alerty)*) sprawdza oba źródła: źródło w stanie `NIEAKTUALNE` albo `BRAK IMPORTU` otwiera incydent `stale`, a wszystkie takie źródła trafiają do **jednego** zbiorczego e-maila; przy otwartym incydencie strażnik milczy. Gdy źródło znowu jest świeże, strażnik zamyka incydent (e-mail o powrocie do normy, ten sam przełącznik). Incydenty otwarte przez nieudany przebieg zostawia ścieżce importu. Pozycja menu pokazuje okno z oboma źródłami, liczbą otwartych i zamkniętych incydentów oraz informacją, czy e-mail wyszedł, a jeśli nie, to dlaczego (brak adresu, nieprawidłowy adres, błąd `MailApp`). *Dane → Włącz codzienne alerty e-mail* instaluje trigger strażnika ok. 08:00, po importach GSC i GA4; okno mówi, gdzie trafiają alerty, albo ostrzega, że `ALERT_EMAIL` brakuje lub jest nieprawidłowe. *Status danych* pokazuje otwarty incydent per źródło, adresata i to, czy trigger strażnika jest zainstalowany.
 
-### URL inspection (what Google has in its index)
+### Inspekcja URL (co Google ma w indeksie)
 
-`URL INSPEKCJA` sheet, column A = addresses to watch (created with its header on first run). *SEO / GSC → Sprawdź indeksowanie (URL INSPEKCJA)* calls the Search Console URL Inspection API for every address and writes, in the same row: verdict (`ZAINDEKSOWANY (PASS)`, `WYKLUCZONY (NEUTRAL)`, `BŁĄD INDEKSOWANIA (FAIL)`, `NIEZNANY`), coverage state as Google phrases it (for example `Excluded by 'noindex' tag`), canonical according to Google and according to the page, last crawl, robots.txt state, check time. A verdict or coverage different from the previous run is flagged in *Zmiana* as `ZMIANA: old → new`; an unchanged state clears the flag. One failing address goes into *Błąd* with the check time and keeps its previous values; the other rows are still processed. Addresses without `http(s)://` are rejected without a request.
+Arkusz `URL INSPEKCJA`, kolumna A = adresy do monitorowania (tworzony z nagłówkiem przy pierwszym uruchomieniu). *SEO / GSC → Sprawdź indeksowanie (URL INSPEKCJA)* woła API inspekcji URL Search Console dla każdego adresu i zapisuje w tym samym wierszu: werdykt (`ZAINDEKSOWANY (PASS)`, `WYKLUCZONY (NEUTRAL)`, `BŁĄD INDEKSOWANIA (FAIL)`, `NIEZNANY`), stan pokrycia w brzmieniu Google (na przykład `Excluded by 'noindex' tag`), kanoniczny wg Google i wg strony, ostatni crawl, stan robots.txt, czas sprawdzenia. Werdykt albo pokrycie inne niż w poprzednim przebiegu jest oznaczane w kolumnie *Zmiana* jako `ZMIANA: stare → nowe`; stan bez zmian czyści flagę. Jeden błędny adres trafia do kolumny *Błąd* z czasem sprawdzenia i zachowuje poprzednie wartości; pozostałe wiersze są przetwarzane dalej. Adresy bez `http(s)://` są odrzucane bez żądania.
 
-The result is the state **in Google's index**, not the live page: after changing `noindex`, a canonical or the content, the row changes only after Google recrawls the page (the live check is a separate tool, issue #53). The API allows 2000 inspections per site per day; one run handles at most 150 addresses and reports the rest as skipped. Addresses are processed never-checked first, then oldest check first (the *Sprawdzono* column), so a longer list rotates through consecutive runs instead of always starting from the top. A sheet that already holds addresses but no header gets the header inserted above them. *Włącz cotygodniową inspekcję URL* installs a weekly trigger (Monday, around 07:00) that runs the same check without a dialog. The run holds the shared script lock and uses the existing read-only Search Console scope.
+Wynik to stan **w indeksie Google**, nie stan opublikowanej strony: po zmianie `noindex`, canonicala albo treści wiersz zmieni się dopiero po ponownym crawlu (sprawdzenie stanu live to osobne narzędzie, poniżej). API pozwala na 2000 inspekcji dziennie na witrynę; jeden przebieg obsługuje najwyżej 150 adresów i zgłasza resztę jako pominiętą. Adresy są przetwarzane najpierw te nigdy niesprawdzone, potem od najdawniej sprawdzonych (kolumna *Sprawdzono*), więc dłuższa lista rotuje w kolejnych przebiegach, zamiast zawsze zaczynać od góry. Arkusz, który ma już adresy, ale nie ma nagłówka, dostaje nagłówek wstawiony nad nimi. *Włącz cotygodniową inspekcję URL* instaluje trigger tygodniowy (poniedziałek, ok. 07:00), który wykonuje to samo sprawdzenie bez okna. Przebieg trzyma wspólny lock skryptu i korzysta z istniejącego zakresu Search Console tylko do odczytu.
 
-### Live SEO regression check (what the page serves right now)
+### Live SEO regression check (co strona serwuje teraz)
 
-`SEO LIVE` sheet: URL in column A, expectations in B..H (created with its header on first run). *SEO / GSC → Sprawdź strony live (SEO LIVE)* fetches every address with `UrlFetchApp` (no login, redirects followed by hand up to 5 hops) and compares it with the expectations: final HTTP status (blank = 200), final URL after redirects (blank = the address itself, so any redirect is a difference), `<title>`, first `<h1>`, `<link rel="canonical">`, robots (`index` by default or `noindex`; meta `robots`/`googlebot` and the `X-Robots-Tag` header both count) and JSON-LD `@type` values listed comma-separated. Blank expectations are skipped except status and robots. The row gets `OK`, `UWAGA: n różnic(e)` with every difference spelled out as `what is (oczekiwano what was expected)`, or `BŁĄD` with the network error; one failing address never stops the others. Column L repeats the Google index verdict from `URL INSPEKCJA` for the same address, so the live state and the indexed state sit side by side and are labelled as such.
+Arkusz `SEO LIVE`: URL w kolumnie A, oczekiwania w B..H (tworzony z nagłówkiem przy pierwszym uruchomieniu). *SEO / GSC → Sprawdź strony live (SEO LIVE)* pobiera każdy adres przez `UrlFetchApp` (bez logowania, przekierowania śledzone ręcznie do 5 skoków) i porównuje go z oczekiwaniami: końcowy status HTTP (pusto = 200), końcowy URL po przekierowaniach (pusto = sam adres, więc każde przekierowanie jest różnicą), `<title>`, pierwszy `<h1>`, `<link rel="canonical">`, robots (`index` domyślnie albo `noindex`; liczą się meta `robots`/`googlebot` i nagłówek `X-Robots-Tag`) oraz wartości `@type` z JSON-LD wypisane po przecinku. Puste oczekiwania są pomijane, poza statusem i robots. Wiersz dostaje `OK`, `UWAGA: n różnic(e)` z każdą różnicą wypisaną jako `co jest (oczekiwano czego)` albo `BŁĄD` z komunikatem sieci; jeden błędny adres nigdy nie zatrzymuje pozostałych. Kolumna L powtarza werdykt z indeksu Google z `URL INSPEKCJA` dla tego samego adresu, więc stan live i stan w indeksie stoją obok siebie i są tak podpisane.
 
-*Włącz codzienny live check SEO* installs a daily trigger (around 09:00). The trigger run sends one e-mail (to `ALERT_EMAIL`, best-effort) listing only **new** differences, that is rows that were `OK` or empty on the previous run; a difference that persists is not repeated, the sheet is the full picture.
+*Włącz codzienny live check SEO* instaluje trigger dzienny (ok. 09:00). Przebieg z triggera wysyła jeden e-mail (na `ALERT_EMAIL`, best-effort) wymieniający wyłącznie **nowe** różnice, czyli wiersze, które w poprzednim przebiegu były `OK` albo puste; utrzymująca się różnica nie jest powtarzana, pełnym obrazem jest arkusz.
 
-### Sitemaps (what Search Console knows about them)
+### Sitemapy (co wie o nich Search Console)
 
-*SEO / GSC → Sprawdź sitemapy (SITEMAPY)* lists the sitemaps of the configured property through the Search Console Sitemaps API and rewrites the `SITEMAPY` sheet: path, type (index or plain sitemap), submitted and last-downloaded time, pending flag, submitted URL count, warnings, errors, state and check time. The sheet is a snapshot of the API, not an editable list. The state is `OK` or `UWAGA` for exactly these cases: `errors > 0`, a sitemap still pending more than 7 days after submission, a sitemap listed in the optional Script Property `EXPECTED_SITEMAPS` (comma-separated URLs) that Search Console does not have (it gets its own row), or an API error. The last-download time is informational only; Google does not treat an old download as a fault, so the script does not either. The summary is stored in `SITEMAPS_STATUS` and shown as one line in *Dane → Status danych*, including the API error if the last check failed.
+*SEO / GSC → Sprawdź sitemapy (SITEMAPY)* wypisuje sitemapy skonfigurowanej właściwości przez API Sitemaps w Search Console i przepisuje arkusz `SITEMAPY`: ścieżka, typ (indeks albo zwykła sitemapa), czas zgłoszenia i ostatniego pobrania, flaga oczekiwania, liczba zgłoszonych adresów, ostrzeżenia, błędy, stan i czas sprawdzenia. Arkusz jest migawką API, nie listą do edycji. Stan to `OK` albo `UWAGA` dokładnie w tych przypadkach: `errors > 0`, sitemapa oczekująca dłużej niż 7 dni od zgłoszenia, sitemapa wymieniona w opcjonalnej Script Property `EXPECTED_SITEMAPS` (adresy po przecinku), której Search Console nie ma (dostaje własny wiersz), albo błąd API. Czas ostatniego pobrania jest wyłącznie informacyjny; Google nie traktuje starego pobrania jako usterki, więc skrypt też nie. Podsumowanie jest zapisywane w `SITEMAPS_STATUS` i pokazywane jako jedna linia w *Dane → Status danych*, wraz z błędem API, jeśli ostatnie sprawdzenie padło.
 
-### System diagnostics (why does something not work?)
+### Diagnostyka systemu (dlaczego coś nie działa?)
 
-*Dane → Diagnostyka systemu (tylko odczyt)* runs `smokeTest()` and shows one line per step: required Script Properties (and which optional ones are set; the value of `ALERT_EMAIL` is never printed, valid or not, only whether it is configured and whether it parses as an address), configuration sheets and expected tabs, a Search Console read (site list, is `siteUrl` among the properties and with which permission), a GA4 Data API read (property metadata), a WordPress read (`/wp/v2/users/me`: who the application password logs in as and whether it can edit pages, plus the write and dry-run switches), installed triggers, alert recipient (configured / invalid / absent, never the address itself) and sitemap state. Every step runs even when an earlier one fails, errors keep their HTTP code, and nothing is written anywhere: no sheet, no Script Property, no WordPress call other than GET, no lock. It does not run from CI (see #54: `clasp run` and reading a cell were rejected as too expensive to configure); the deploy verification (#44) proves the right files are live, the status model (#43, #42) tells whether the real processes work, and this dialog tells why they do not.
+*Dane → Diagnostyka systemu (tylko odczyt)* uruchamia `smokeTest()` i pokazuje po jednej linii na krok: wymagane Script Properties (i to, które opcjonalne są ustawione; wartość `ALERT_EMAIL` nigdy nie jest wypisywana, poprawna czy nie, tylko to, czy jest skonfigurowana i czy parsuje się jako adres), arkusze konfiguracji i oczekiwane zakładki, odczyt Search Console (lista właściwości, czy `siteUrl` jest wśród nich i z jakim uprawnieniem), odczyt GA4 Data API (metadane właściwości), odczyt WordPressa (`/wp/v2/users/me`: kogo loguje hasło aplikacji i czy może edytować strony, plus przełączniki zapisu i dry run), zainstalowane triggery, adresat alertów (skonfigurowany / nieprawidłowy / brak, nigdy sam adres) i stan sitemap. Każdy krok wykonuje się nawet wtedy, gdy wcześniejszy padł, błędy zachowują kod HTTP i nic nigdzie nie jest zapisywane: żaden arkusz, żadna Script Property, żadne wywołanie WordPressa inne niż GET, żaden lock. Nie działa z CI (zob. #54: `clasp run` i odczyt komórki odrzucone jako zbyt kosztowne w konfiguracji); weryfikacja deployu (#44) dowodzi, że żyją właściwe pliki, model statusu (#43, #42) mówi, czy realne procesy działają, a to okno mówi, dlaczego nie działają.
 
-### Keeping the file tidy
+### Porządek w pliku
 
-The file has more than twenty tabs and gains one with every feature, so the order is maintained by the script instead of by hand. *Dane → Uporządkuj arkusze* colours the tabs by category (monitoring green, control orange, configuration grey, raw data near-black, `START` purple), puts the tabs in that order and rebuilds the `START` sheet: one row per tab with a link, its category, who maintains it (człowiek / skrypt / both) and one sentence on what belongs there. It is idempotent, so a second run reports that nothing changed.
+Plik ma ponad dwadzieścia zakładek i zyskuje kolejną z każdą funkcją, więc kolejność utrzymuje skrypt, nie ręka. *Dane → Uporządkuj arkusze* koloruje zakładki kategoriami (monitoring zielony, sterowanie pomarańczowy, konfiguracja szary, dane surowe prawie czarny, `START` fioletowy), ustawia zakładki w tej kolejności i przepisuje arkusz `START`: wiersz na każdą zakładkę z linkiem, kategorią, informacją, kto ją prowadzi (człowiek / skrypt / oba) i jednym zdaniem o tym, co tam należy. Działanie jest idempotentne, więc drugie uruchomienie zgłasza, że nic się nie zmieniło.
 
-Only sheets the script itself creates are catalogued (`SheetCatalog.gs`, one entry per sheet). **Your own sheets are never recoloured and never hidden**; they keep their relative order and sit right after `START`, because those are the ones read daily. A new feature that creates a sheet adds one catalogue entry, otherwise the sheet lands among the unmanaged ones.
+Katalogowane są wyłącznie arkusze, które tworzy sam skrypt (`SheetCatalog.gs`, jeden wpis na arkusz). **Twoje własne arkusze nigdy nie są przekolorowane ani ukryte**; zachowują kolejność względną i stoją zaraz za `START`, bo to je czyta się codziennie. Nowa funkcja tworząca arkusz dodaje jeden wpis do katalogu, inaczej arkusz wyląduje wśród niezarządzanych.
 
-Raw data and logs stay visible by default. *Dane → Ukryj arkusze techniczne* hides `GSC RAW`, the GA4 raw tabs and `IMPORT LOG`; *Pokaż arkusze techniczne* brings them back. Hiding is deliberately a separate menu item, not a side effect of tidying, and the imports keep working on hidden sheets.
+Dane surowe i logi domyślnie zostają widoczne. *Dane → Ukryj arkusze techniczne* chowa `GSC RAW`, surowe zakładki GA4 i `IMPORT LOG`; *Pokaż arkusze techniczne* przywraca je. Ukrywanie jest celowo osobną pozycją menu, nie efektem ubocznym porządkowania, a importy działają na ukrytych arkuszach bez zmian.
 
-### GitHub repository secrets
+### Sekrety repozytorium GitHub
 
-The deploy and drift-check workflows need two repository secrets (Settings → Secrets and variables → Actions):
+Workflow deployu i drift checku potrzebują dwóch sekretów repozytorium (Settings → Secrets and variables → Actions):
 
-| Secret | Value |
+| Sekret | Wartość |
 | --- | --- |
-| `CLASPRC_JSON` | Full contents of `~/.clasprc.json` after running `clasp login` locally. |
-| `APPS_SCRIPT_ID` | The Apps Script project id (Apps Script editor → Project settings → Script ID). |
+| `CLASPRC_JSON` | Pełna zawartość `~/.clasprc.json` po lokalnym `clasp login`. |
+| `APPS_SCRIPT_ID` | Identyfikator projektu Apps Script (edytor Apps Script → Ustawienia projektu → Script ID). |
 
-Rotate `CLASPRC_JSON` by running `clasp login` again and updating the secret.
+`CLASPRC_JSON` rotuje się przez ponowne `clasp login` i aktualizację sekretu.
 
-The approval gate is a repository setting, not something the workflow creates. Settings → Environments → `production` must have **Required reviewers** enabled and deployment branches limited to `main` and `v*` tags. Without that, the deploy workflow would push as soon as it is triggered.
+Bramka zatwierdzania to ustawienie repozytorium, nie coś, co tworzy workflow. Settings → Environments → `production` musi mieć włączone **Required reviewers** i gałęzie wdrożeniowe ograniczone do `main` i tagów `v*`. Bez tego workflow deployu wypchnąłby zmiany od razu po uruchomieniu.
 
-The Google account behind `CLASPRC_JSON` must also have the Apps Script API switched on at <https://script.google.com/home/usersettings>, otherwise `clasp push` fails with "User has not enabled the Apps Script API".
+Konto Google stojące za `CLASPRC_JSON` musi też mieć włączone Apps Script API na <https://script.google.com/home/usersettings>, inaczej `clasp push` kończy się błędem „User has not enabled the Apps Script API”.
 
-## Local development
+## Praca lokalna
 
 ```bash
 npm ci
@@ -139,111 +140,113 @@ npm run lint
 npm test
 ```
 
-### Unit tests
+### Testy jednostkowe
 
-`test/` holds Node unit tests (`node --test`, no extra packages). `test/helpers/gas.js` loads the `.gs` files into a VM context with small stand-ins for the Google services (`SpreadsheetApp`, `PropertiesService`, `UrlFetchApp`, `Utilities`, `ScriptApp`), so the shared global scope of Apps Script is reproduced and the pure helpers plus the configuration layer can be exercised without Google:
+W `test/` leżą testy jednostkowe Node (`node --test`, bez dodatkowych pakietów). `test/helpers/gas.js` ładuje pliki `.gs` do kontekstu VM z drobnymi zamiennikami usług Google (`SpreadsheetApp`, `PropertiesService`, `UrlFetchApp`, `Utilities`, `ScriptApp`, `MailApp`, `LockService`), więc wspólny zasięg globalny Apps Script jest odwzorowany, a czyste helpery i warstwa konfiguracji dają się przetestować bez Google:
 
-- date parsing and shifting, hostname/domain matching, GA4 row extraction, WordPress response helpers;
-- `getWpConfig_` / `wpBridgePath_` validation (missing or malformed Script Properties), `wpFetch_` request shape and response parsing;
-- `getGa4Config_` defaults, `Version.gs` presence/absence;
-- `testGA4` end to end against stubbed Admin/Data API responses (property auto-pick by stream domain, ambiguous and empty cases, what lands in the config sheet);
-- the WordPress bridge flows: `testRankMathBridge`, `getPageRawById_`, `writeRankMathField_`, `getPageLayout_`, `copyPageLayout_`, including the result rows appended to *WP RESULTS* and every named failure path.
+- parsowanie i przesuwanie dat, dopasowanie hosta/domeny, wyciąganie wierszy GA4, helpery odpowiedzi WordPressa;
+- walidacja `getWpConfig_` / `wpBridgePath_` (brakujące albo zniekształcone Script Properties), kształt żądania i parsowanie odpowiedzi w `wpFetch_`;
+- domyślne wartości `getGa4Config_`, obecność/brak `Version.gs`;
+- `testGA4` end to end na zastubowanych odpowiedziach Admin/Data API (automatyczny wybór właściwości po domenie strumienia, przypadki niejednoznaczne i puste, co trafia do arkusza konfiguracji);
+- przepływy mostu WordPressa: `testRankMathBridge`, `getPageRawById_`, `writeRankMathField_`, `getPageLayout_`, `copyPageLayout_`, wraz z wierszami wyników dopisywanymi do *WP RESULTS* i każdą nazwaną ścieżką błędu.
 
-The sheet stub is a real cell grid: fixtures start at row 1, `gas.$cell('Konfiguracja GA4', 'B9')` reads a cell, `gas.$sheet(name)` the whole grid, `gas.$alerts` the UI alerts, and `fetchRouter([[urlSubstring, response], ...])` routes stubbed HTTP calls.
+Stub arkusza to prawdziwa siatka komórek: fixture'y zaczynają się od wiersza 1, `gas.$cell('Konfiguracja GA4', 'B9')` czyta komórkę, `gas.$sheet(nazwa)` całą siatkę, `gas.$alerts` okna UI, a `fetchRouter([[fragmentUrl, odpowiedź], ...])` rozdziela zastubowane wywołania HTTP.
 
-Everything that talks to Sheets, GA4 or WordPress for real stays covered by the sheet's *Sprawdź połączenie* / *Test …* menu items and the drift check. Two VM gotchas when writing tests: create `Date` objects with `gas.$Date`, and compare objects returned from the sources through `plain()` (different realm, different prototypes).
+Wszystko, co naprawdę rozmawia z Sheets, GA4 albo WordPressem, pozostaje pokryte pozycjami menu *Sprawdź połączenie* / *Test …* w arkuszu oraz drift checkiem. Trzy pułapki VM przy pisaniu testów: twórz obiekty `Date` przez `gas.$Date`, porównuj obiekty zwrócone ze źródeł przez `plain()` (inny realm, inne prototypy), a `Utilities.formatDate` w stubie formatuje w strefie maszyny, więc uruchom też `TZ=UTC npm test`, zanim wypchniesz zmiany.
 
-### Quality gates and standards
+### Bramki jakości i standardy
 
-- **Standard:** [docs/quality/testing-standard.md](docs/quality/testing-standard.md) (layers, ten rules, gold standard, forbidden patterns). Plan tests with [docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md) and record evidence in the PR template.
-- **Coverage gate:** `npm run quality:gate -- --changed=base:origin/main` runs the tests with V8 coverage and enforces two rules: per-file thresholds from `.quality/coverage-policy.json` (a ratchet, thresholds only go up) and **100% coverage of changed `*.gs` lines**. Justified exceptions live in `.quality/changed-lines-ignore.json`.
-- **Pre-commit hook:** `npm ci` points git at `.githooks/` (`core.hooksPath`). On every commit the hook blocks credentials and build artifacts, lints the staged files, and runs the tests plus the coverage gate on the staged `*.gs` lines. `git commit --no-verify` skips it locally; CI runs the same gate against `main` and blocks the merge.
-- **CI:** the `validate` job runs lint, tests and the gate against the PR base commit.
-- **Deploy:** the deploy workflow runs lint, tests and the per-file thresholds on the tag being deployed, after the `production` approval and before `clasp push`. Tests therefore guard every stage: commit, merge, deploy.
+- **Standard:** [docs/quality/testing-standard.md](docs/quality/testing-standard.md) (warstwy, dziesięć zasad, złoty standard, wzorce zabronione). Planuj testy przez [docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md), a dowody zapisuj w szablonie PR-a.
+- **Bramka pokrycia:** `npm run quality:gate -- --changed=base:origin/main` uruchamia testy z pokryciem V8 i egzekwuje dwie zasady: progi per plik z `.quality/coverage-policy.json` (zapadka, progi idą tylko w górę) i **100 % pokrycia zmienionych linii `*.gs`**. Uzasadnione wyjątki żyją w `.quality/changed-lines-ignore.json`.
+- **Hook pre-commit:** `npm ci` ustawia gitowi katalog `.githooks/` (`core.hooksPath`). Przy każdym commicie hook blokuje poświadczenia i artefakty budowania, lintuje pliki ze stage'a i uruchamia testy oraz bramkę pokrycia na zmienionych liniach `*.gs`. `git commit --no-verify` pomija go lokalnie; CI uruchamia tę samą bramkę względem `main` i blokuje merge.
+- **CI:** job `validate` uruchamia lint, testy i bramkę względem commitu bazowego PR-a.
+- **Deploy:** workflow deployu uruchamia lint, testy i progi per plik na wdrażanym tagu, po zatwierdzeniu `production` i przed `clasp push`. Testy pilnują więc każdego etapu: commitu, merge'a, wdrożenia.
 
-To work against the live Apps Script project, log in once (clasp is installed by `npm ci`):
+Żeby pracować z żywym projektem Apps Script, zaloguj się raz (clasp instaluje `npm ci`):
 
 ```bash
 npx clasp login
 ```
 
-Then create a git-ignored `.clasp.json` with the project id:
+Potem utwórz ignorowany przez gita `.clasp.json` z identyfikatorem projektu:
 
 ```json
 { "scriptId": "<script id>", "rootDir": ".", "scriptExtensions": ["gs"] }
 ```
 
-`scriptExtensions` matters: clasp 3 defaults to `.js`, which would pull the sources as `Kod.js` next to `Kod.gs`.
+`scriptExtensions` ma znaczenie: clasp 3 domyślnie używa `.js`, co pobrałoby źródła jako `Kod.js` obok `Kod.gs`.
 
-`clasp status` lists what would be pushed. Do not run `clasp push` locally; use the deploy workflow so every deployment is reviewed and logged.
+`clasp status` pokazuje, co zostałoby wypchnięte. Nie uruchamiaj `clasp push` lokalnie; użyj workflow deployu, żeby każde wdrożenie było zrecenzowane i zapisane.
 
-## Development workflow
+## Przebieg pracy
 
-`main` is protected: changes land only through pull requests, CI must pass, force-pushes are blocked.
+`main` jest chroniony: zmiany wchodzą wyłącznie przez pull requesty, CI musi przejść, force-push jest zablokowany. Ochrona jest ścisła, więc gałąź musi być aktualna względem `main`; PR w konflikcie nie dostaje w ogóle checków `pull_request`, dopóki nie zmergujesz `main` do gałęzi.
 
-PR titles must follow Conventional Commits (enforced by the *PR title* check). Release Drafter uses the prefix to resolve the next version:
+Tytuły PR-ów muszą trzymać się Conventional Commits (pilnuje tego check *PR title*). Release Drafter używa prefiksu do ustalenia kolejnej wersji:
 
-- `feat:` / `new:` — new functionality; minor release.
-- `fix:` / `bug:` / `hotfix:` — bug fix; patch release.
-- `docs:` — documentation; patch release.
-- `chore:` / `refactor:` / `ci:` / `test:` / `style:` — maintenance; patch release.
+- `feat:` / `new:` — nowa funkcjonalność; wydanie minor.
+- `fix:` / `bug:` / `hotfix:` — poprawka błędu; wydanie patch.
+- `docs:` — dokumentacja; wydanie patch.
+- `chore:` / `refactor:` / `ci:` / `test:` / `style:` — utrzymanie; wydanie patch.
 
-### CI checks on every PR
+### Checki CI przy każdym PR
 
-- **validate** — manifest is valid JSON, no duplicated `.gs.gs` files, ESLint passes on all `.gs` sources.
-- **secret-scan** — Gitleaks scans the full history for committed secrets.
-- **pr-title** — title follows the Conventional Commits format above.
-- **review-ack** — green only when (1) Copilot code review is not in progress and (2) the bot comments were acknowledged with a `/reviewed` comment.
-- **pr-template** (observation period, not required yet) — the PR body follows the template: at least one filled row in the test matrix, every evidence-matrix item checked, marked `N/A (reason)` or explicitly deferred (`po wdrożeniu` / `after deploy` / `follow-up` / an issue number), a non-empty coverage-deficit justification, and a `Fixes:` or `Refs:` issue link without the `<nr>` placeholder. English and Polish headings are both accepted. Drafts are skipped; Dependabot PRs are exempt. Logic in `scripts/quality/pr-template.js`, tests in `test/pr-template.test.js`; run it locally with `PR_BODY="$(cat body.md)" node scripts/quality/pr-template.js` or `--body-file body.md`.
+- **validate** — manifest jest poprawnym JSON-em, brak zdublowanych plików `.gs.gs`, ESLint przechodzi na wszystkich źródłach `.gs`.
+- **secret-scan** — Gitleaks skanuje pełną historię pod kątem zacommitowanych sekretów.
+- **pr-title** — tytuł zgodny z powyższym formatem Conventional Commits.
+- **review-ack** — zielony tylko wtedy, gdy (1) recenzja Copilota nie trwa i (2) komentarze botów zostały potwierdzone komentarzem `/reviewed`.
+- **pr-template** (okres obserwacji, jeszcze niewymagany) — treść PR-a trzyma się szablonu: co najmniej jeden kompletny wiersz matrycy testów, każda pozycja macierzy dowodów odhaczona, oznaczona `N/A (powód)` albo jawnie odłożona (`po wdrożeniu` / `after deploy` / `follow-up` / numer issue), niepuste uzasadnienie deficytu pokrycia oraz link `Fixes:` albo `Refs:` bez placeholdera `<nr>`. Akceptowane są nagłówki polskie i angielskie. Drafty są pomijane; PR-y Dependabota zwolnione. Logika w `scripts/quality/pr-template.js`, testy w `test/pr-template.test.js`; lokalnie uruchom `PR_BODY="$(cat body.md)" node scripts/quality/pr-template.js` albo `--body-file body.md`.
 
-### Acknowledging bot reviews
+### Potwierdzanie recenzji botów
 
-1. Wait until Copilot has finished. While it is running it is listed as a requested reviewer and the check stays red. A bot that errors out or hits its usage limit (Codex does this regularly) does not block anything.
-2. Read the comments. Fix what is worth fixing, reply to the rest, resolve the threads (required before merge).
-3. Post a PR comment that starts with `/reviewed`, followed by a short note on what was accepted and what was rejected. It has to be newer than the last commit and the last bot **review** (a review object or an inline comment), so a new push or a new bot review means a new `/reviewed`. Plain bot comments to the PR, such as Codex's usage-limit notice, do not reset it. The logic lives in `scripts/quality/review-ack.js` with unit tests in `test/review-ack.test.js`.
+1. Poczekaj, aż Copilot skończy. W trakcie figuruje jako oczekujący recenzent, a check pozostaje czerwony. Bot, który padnie albo wyczerpie limit użycia (Codex robi to regularnie), niczego nie blokuje. Codex potrafi dotrzeć kilka minut po Copilocie: przed merge'em sprawdź wątki jeszcze raz, bo ochrona gałęzi wymaga ich rozwiązania.
+2. Przeczytaj komentarze. Popraw to, co warto, na resztę odpowiedz, rozwiąż wątki (wymagane przed merge'em).
+3. Opublikuj komentarz do PR-a zaczynający się od `/reviewed`, a po nim krótką notatkę, co zostało przyjęte, a co odrzucone. Musi być nowszy niż ostatni commit i ostatnia **recenzja** bota (obiekt review albo komentarz w kodzie), więc nowy push albo nowa recenzja bota oznacza nowe `/reviewed`. Zwykłe komentarze botów do PR-a, na przykład komunikat Codexa o limicie użycia, nie unieważniają potwierdzenia.
 
-The check runs on every push and review request. Every PR comment (including `/reviewed`) re-runs the latest evaluation for that PR, so the comment is what turns the check green; Copilot finishing its review produces no event on its own. If it ever looks stale, post `/reviewed` again or run *Review gate* by hand with the PR number.
+Gdy oba boty nie zrecenzowały PR-a z powodu limitów, PR może zostać zmergowany bez ich recenzji (decyzja właściciela z 2026-09-06), pod warunkiem że komentarz `/reviewed` mówi o tym wprost, a pozostałe checki są zielone.
+
+Check uruchamia się przy każdym pushu i prośbie o recenzję. Każdy komentarz do PR-a (w tym `/reviewed`) ponawia najnowszą ocenę tego PR-a, więc to komentarz zmienia check na zielony; zakończenie recenzji przez Copilota samo w sobie nie generuje zdarzenia. Jeśli wynik wygląda na nieaktualny, opublikuj `/reviewed` ponownie albo uruchom *Review gate* ręcznie z numerem PR-a. Logika żyje w `scripts/quality/review-ack.js` z testami jednostkowymi w `test/review-ack.test.js`.
 
 ```bash
-gh pr comment <number> --body "/reviewed accepted the permissions fix, skipped the wording nit"
+gh pr comment <numer> --body "/reviewed przyjęta poprawka uprawnień, pominięta uwaga o sformułowaniu"
 ```
 
-Dependabot opens weekly PRs for GitHub Actions and npm dev dependencies.
+Dependabot otwiera cotygodniowe PR-y dla GitHub Actions i deweloperskich zależności npm.
 
-## Deploying to Apps Script
+## Wdrażanie do Apps Script
 
-The normal path is a release:
+Normalna ścieżka to wydanie:
 
-1. Merge the changes into `main` and make sure CI is green.
-2. Releases → open the draft prepared by Release Drafter → *Publish release*. This creates the `vX.Y.Z` tag.
-3. Actions → the *Deploy to Apps Script* run that just started → *Review deployments* → approve `production`. Nothing is pushed until approved.
+1. Zmerguj zmiany do `main` i upewnij się, że CI jest zielone.
+2. Releases → otwórz draft przygotowany przez Release Drafter → *Publish release*. To tworzy tag `vX.Y.Z`.
+3. Actions → uruchomiony właśnie przebieg *Deploy to Apps Script* → *Review deployments* → zatwierdź `production`. Nic nie jest wypychane przed zatwierdzeniem.
 
-The workflow checks out the released tag, runs lint and the tests, prints the files clasp will push, runs `clasp push --force`, records an immutable Apps Script version named after the tag, and then **verifies the live project**: it pulls the project back and compares it with the tag (`scripts/quality/apps-script-compare.js`, the same script the drift check uses). A red verification step means the push already happened but the project differs; investigate or roll back with `deploy_ref`. The job summary lists the pushed files, the version and the comparison result. Pre-releases are ignored.
+Workflow pobiera wydany tag, uruchamia lint i testy, wypisuje pliki, które clasp wypchnie, wykonuje `clasp push --force`, zapisuje niezmienną wersję Apps Script nazwaną od taga, a potem **weryfikuje żywy projekt**: pobiera projekt z powrotem i porównuje go z tagiem (`scripts/quality/apps-script-compare.js`, ten sam skrypt, którego używa drift check). Czerwony krok weryfikacji oznacza, że push już się odbył, ale projekt się różni; zbadaj to albo cofnij przez `deploy_ref`. Podsumowanie joba wypisuje wypchnięte pliki, wersję i wynik porównania. Pre-release'y są ignorowane.
 
-For an ad-hoc deploy without a release: Actions → *Deploy to Apps Script* → *Run workflow*, leave *Use workflow from* on `main`, keep *deploy_ref* as `main`, optionally tick *create_version*, then approve it the same way.
+Wdrożenie doraźne bez wydania: Actions → *Deploy to Apps Script* → *Run workflow*, zostaw *Use workflow from* na `main`, zostaw *deploy_ref* jako `main`, opcjonalnie zaznacz *create_version* i zatwierdź tak samo.
 
-**Rollback**: same dialog, still run from `main`, but set *deploy_ref* to the previous release tag (for example `v2.9.1`). The workflow verifies the tag exists, checks it out, lints it, and after approval pushes those sources to Apps Script. Always keep *Use workflow from* on `main`: that dropdown selects the workflow definition, and older tags carry older definitions.
+**Rollback**: to samo okno, nadal uruchamiane z `main`, ale *deploy_ref* ustawione na poprzedni tag wydania (na przykład `v2.9.1`). Workflow sprawdza, czy tag istnieje, pobiera go, lintuje i po zatwierdzeniu wypycha te źródła do Apps Script. Zawsze zostawiaj *Use workflow from* na `main`: ta lista wybiera definicję workflow, a starsze tagi niosą starsze definicje.
 
 ```bash
 gh workflow run deploy-apps-script.yml --ref main -f deploy_ref=v2.9.1
 ```
 
-clasp is a pinned dev dependency (`package-lock.json`), so local runs and both workflows use the same version; Dependabot proposes upgrades.
+clasp jest przypiętą zależnością deweloperską (`package-lock.json`), więc uruchomienia lokalne i oba workflow używają tej samej wersji; Dependabot proponuje aktualizacje.
 
 ## Drift check
 
-*Apps Script drift check* runs every Monday (and on demand). It pulls the live project and compares it with `main` using `scripts/quality/apps-script-compare.js` (trailing newlines normalised on both sides: Apps Script always returns a file with a final newline, so a committed source without one is not drift, and ESLint's `eol-last` rule keeps such files out of the repository; `Version.gs` ignored, only `*.gs` and `appsscript.json` compared). If someone edited code directly in the Apps Script editor, the run fails and attaches a patch with the differences so the change can be brought back into the repository.
+*Apps Script drift check* działa w każdy poniedziałek (i na żądanie). Pobiera żywy projekt i porównuje go z `main` przez `scripts/quality/apps-script-compare.js` (końcowe znaki nowej linii normalizowane po obu stronach: Apps Script zawsze zwraca plik z końcową nową linią, więc zacommitowane źródło bez niej nie jest driftem, a reguła ESLint `eol-last` trzyma takie pliki poza repozytorium; `Version.gs` ignorowany, porównywane tylko `*.gs` i `appsscript.json`). Jeśli ktoś edytował kod bezpośrednio w edytorze Apps Script, przebieg pada i dołącza patch z różnicami, żeby zmianę dało się wnieść z powrotem do repozytorium.
 
-## Releases
+## Wydania
 
-Release notes live on the [Releases page](https://github.com/mechgw/wordpress-automation/releases) and are prepared automatically by **Release Drafter**. There is no `CHANGELOG.md`; the published releases are the changelog.
+Notatki wydań żyją na [stronie Releases](https://github.com/mechgw/wordpress-automation/releases) i przygotowuje je automatycznie **Release Drafter**. Nie ma pliku `CHANGELOG.md`; opublikowane wydania są changelogiem.
 
-- PRs are labelled from their title where possible.
-- Merging a PR into `main` refreshes the draft release.
-- `feat`/`new` resolve to a minor bump; everything else to a patch bump.
+- PR-y są etykietowane na podstawie tytułu, gdy to możliwe.
+- Merge PR-a do `main` odświeża draft wydania.
+- `feat`/`new` dają podbicie minor; wszystko inne patch.
 
-Publishing the draft from the Releases page is what triggers a deployment (see above). The initial baseline is `v2.8.0`; future versions follow Semantic Versioning.
+Publikacja draftu ze strony Releases jest tym, co uruchamia wdrożenie (zob. wyżej). Bazą początkową jest `v2.8.0`; kolejne wersje trzymają się Semantic Versioning.
 
-## License
+## Licencja
 
 MIT.

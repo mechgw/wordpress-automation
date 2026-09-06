@@ -1,44 +1,67 @@
 # CLAUDE.md
 
-Guidance for AI agents working in this repository. Humans: README.md is the entry point.
+Wskazówki dla agentów AI pracujących w tym repozytorium. Dla ludzi punktem wejścia jest README.md.
 
-## What this is
+## Co to jest
 
-Google Apps Script project (container-bound to a Google Sheet) automating WordPress, Google Search
-Console and GA4 tasks. Sources are the four `*.gs` files plus `appsscript.json`. The repository is
-**public**: no company names, domains, ids or credentials in code, comments, tests or fixtures. Site
-identity lives in Script Properties (`WP_REST_NAMESPACE`, `SITE_DOMAIN`, `WP_*`).
+Projekt Google Apps Script (przypięty do arkusza Google) automatyzujący zadania WordPress, Google
+Search Console i GA4. Źródła to pliki `*.gs` plus `appsscript.json`. Repozytorium jest **publiczne**:
+żadnych nazw firm, domen, identyfikatorów ani poświadczeń w kodzie, komentarzach, testach ani
+fixture'ach. Tożsamość witryny żyje w Script Properties (`WP_REST_NAMESPACE`, `SITE_DOMAIN`, `WP_*`).
 
-## Workflow
+## Język
 
-1. Branch from `main`, PR with a Conventional Commits title.
-2. Fill the PR template: test matrix + evidence matrix
+Cała komunikacja w repozytorium jest po polsku: issues, PR-y (tytuł po prefiksie i opis), komentarze,
+dokumentacja, komunikaty w arkuszu, treść commitów poza prefiksem Conventional Commits. Nazwy
+techniczne zostają w oryginale: nazwy checków (`validate`, `secret-scan`, `pr-title`, `review-ack`,
+`pr-template`), właściwości, komend, funkcji i plików. Komentarze techniczne w workflow'ach i
+skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłumaczenia.
+
+## Przebieg pracy
+
+1. Gałąź od `main`, PR z tytułem w konwencji Conventional Commits.
+2. Wypełnij szablon PR-a: macierz testów + macierz dowodów
    ([docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md)).
-3. Wait for Copilot's review. Read every comment; apply or answer in-thread and resolve the thread.
-4. Post a comment starting with `/reviewed` (only owner/collaborators count). This turns the
-   `review-ack` check green; a new push or a new bot **review** (review object or inline comment)
-   requires a fresh `/reviewed`. Plain bot comments to the PR, such as a usage-limit notice, do not.
-5. Merge when `validate`, `secret-scan`, `pr-title`, `review-ack` are green and threads resolved.
-6. Publishing the Release Drafter draft deploys the tag to Apps Script after the owner approves the
-   `production` environment. Rollback: run *Deploy to Apps Script* with `deploy_ref=<tag>`.
+3. Poczekaj na recenzję Copilota i Codexa. Przeczytaj każdy komentarz; wdroż albo odpowiedz w wątku
+   i rozwiąż wątek. Ochrona gałęzi wymaga rozwiązanych wątków, a Codex potrafi dotrzeć kilka minut
+   po Copilocie: przed merge'em sprawdź wątki jeszcze raz. Gdy bot nie zrecenzował z powodu limitu
+   użycia, PR może wejść bez jego recenzji (decyzja właściciela z 2026-09-06), z jawną adnotacją
+   w komentarzu `/reviewed`.
+4. Opublikuj komentarz zaczynający się od `/reviewed` (liczą się tylko właściciel/współpracownicy).
+   To zmienia check `review-ack` na zielony; nowy push albo nowa **recenzja** bota (obiekt review
+   lub komentarz w kodzie) wymaga nowego `/reviewed`. Zwykłe komentarze botów do PR-a, np. komunikat
+   o limicie użycia, nie.
+5. Merge, gdy `validate`, `secret-scan`, `pr-title`, `review-ack` są zielone i wątki rozwiązane.
+   Ochrona gałęzi jest ścisła: gałąź musi być aktualna względem `main`; PR w konflikcie nie dostaje
+   w ogóle checków `pull_request` (merge `main` do gałęzi, push, ponowne `/reviewed`).
+6. Publikacja draftu Release Draftera wdraża tag do Apps Script po zatwierdzeniu środowiska
+   `production` przez właściciela. Rollback: uruchom *Deploy to Apps Script* z `deploy_ref=<tag>`.
+   Deploy czerwony wyłącznie na kroku weryfikacji: uruchom ręcznie *Apps Script drift check*
+   i pobierz artefakt z patchem, zanim cokolwiek zmienisz.
 
-## Quality gates
+## Bramki jakości
 
-- `npm run lint` — ESLint for `*.gs` (Apps Script globals + cross-file functions), `test/`, `scripts/`.
-- `npm test` — Node unit tests; `.gs` files run in a VM with stubbed Google services
-  (`test/helpers/gas.js`).
-- `npm run quality:gate -- --changed=base:origin/main` — per-file thresholds
-  (`.quality/coverage-policy.json`) and **100% coverage of changed `*.gs` lines**; exceptions with
-  reasons in `.quality/changed-lines-ignore.json`.
-- Pre-commit hook (`.githooks/pre-commit`, installed by `npm ci`) runs the same on staged files.
-- Three checkpoints, always: run tests locally before committing, CI before merge, deploy workflow
-  before `clasp push`. Never bypass one to reach the next.
-- Standards: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
+- `npm run lint` — ESLint dla `*.gs` (globalne symbole Apps Script + funkcje między plikami),
+  `test/`, `scripts/`; w tym `eol-last` (znak nowej linii na końcu pliku, Apps Script go wymaga).
+- `npm test` — testy jednostkowe Node; pliki `.gs` działają w VM z zastubowanymi usługami Google
+  (`test/helpers/gas.js`). Stub `Utilities.formatDate` formatuje w strefie maszyny: przed pushem
+  uruchom też `TZ=UTC npm test`.
+- `npm run quality:gate -- --changed=base:origin/main` — progi per plik
+  (`.quality/coverage-policy.json`) i **100 % pokrycia zmienionych linii `*.gs`**; wyjątki
+  z uzasadnieniem w `.quality/changed-lines-ignore.json`.
+- Hook pre-commit (`.githooks/pre-commit`, instalowany przez `npm ci`) uruchamia to samo na plikach
+  ze stage'a.
+- Trzy punkty kontrolne, zawsze: testy lokalnie przed commitem, CI przed merge'em, workflow deployu
+  przed `clasp push`. Nigdy nie omijaj jednego, żeby dotrzeć do następnego.
+- Standardy: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
 
-## Do / don't
+## Rób / nie rób
 
-- Do extend the harness stubs rather than registering coverage exceptions.
-- Do keep `Version.gs` as placeholders; the deploy workflow stamps it.
-- Don't run `clasp push` locally; the deploy workflow is the only path to production.
-- Don't touch `.clasp.json` / `.clasprc.json` (git-ignored, credentials).
-- Don't lower a coverage threshold without a rationale and a follow-up issue.
+- Rozszerzaj stuby harnessu zamiast rejestrować wyjątki pokrycia.
+- Trzymaj `Version.gs` jako placeholdery; workflow deployu go stempluje.
+- Nowy plik `*.gs`: dopisz do `SOURCES` w `test/helpers/gas.js` i do `.quality/coverage-policy.json`.
+- Nie uruchamiaj `clasp push` lokalnie; jedyną drogą do produkcji jest workflow deployu.
+- Nie dotykaj `.clasp.json` / `.clasprc.json` (ignorowane przez gita, poświadczenia).
+- Nie obniżaj progu pokrycia bez uzasadnienia i issue z follow-upem.
+- Commituj przez `git add -A && git commit`, nie `git commit -a`; sprawdź kod wyjścia commitu, zanim
+  odpowiesz w wątkach, wyślesz `/reviewed` albo zmergujesz.
