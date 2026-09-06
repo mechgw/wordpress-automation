@@ -77,6 +77,8 @@ function parseA1(a1, gridRows = 1) {
  */
 function makeSheet(name, initialRows, sheetId = 0, limits = null) {
   const grid = initialRows.map(r => r.slice());
+  // Siatka formuł, domyślnie pusta; fixture może podać ją przez { formulas }.
+  const formulas = ((limits && limits.formulas) || []).map(r => r.slice());
   // Arkusz Google ma skończoną siatkę: nowy ma 1000 wierszy i 26 kolumn, a zapis
   // poza nią rzuca wyjątkiem zamiast ją powiększyć. Stub to odwzorowuje, bo
   // inaczej „zapis 5000 wierszy do nowego arkusza” przechodzi w teście i pada
@@ -110,6 +112,20 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
       throw new Error(`The coordinates or dimensions of the range are invalid: columns ${col}..${col + cols - 1} exceed the ${maxCols} columns of "${name}".`);
     }
     return {
+    /**
+     * Formuły w zakresie. Stub trzyma je w osobnej siatce ($formulas), bo
+     * getValues() zwraca wynik, a komórka z formułą dającą pusty tekst nadal
+     * jest treścią i nie wolno jej skasować (#118).
+     */
+    getFormulas: () => {
+      const out = [];
+      for (let r = row; r < row + rows; r++) {
+        const line = [];
+        for (let c = col; c < col + cols; c++) line.push((formulas[r - 1] || [])[c - 1] ?? '');
+        out.push(line);
+      }
+      return out;
+    },
     getValues: () => {
       const out = [];
       for (let r = row; r < row + rows; r++) {
@@ -230,7 +246,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   Object.keys(sheets).forEach(name => {
     const value = sheets[name];
     if (value && !Array.isArray(value) && typeof value === 'object') {
-      limits[name] = { maxRows: value.maxRows, maxColumns: value.maxColumns };
+      limits[name] = { maxRows: value.maxRows, maxColumns: value.maxColumns, formulas: value.formulas };
       sheets[name] = value.rows || [];
     }
   });

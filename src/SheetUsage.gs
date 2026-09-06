@@ -139,6 +139,45 @@ const TRIM_SPARE_ROWS = 2000;
 /** Poniżej tylu zbędnych wierszy przycinanie nie jest warte zachodu. */
 const TRIM_MIN_GAIN_ROWS = 1000;
 
+/**
+ * Ile wierszy skanujemy naraz, szukając realnego końca danych. Typowa zakładka
+ * kończy się w pierwszej porcji od dołu, więc rzadko czytamy więcej.
+ */
+const TRIM_SCAN_CHUNK = 5000;
+
+/**
+ * Ostatni wiersz z rzeczywistą treścią.
+ *
+ * getLastRow() zwraca koniec zakresu danych arkusza, a ten bywa zawyżony przez
+ * samo formatowanie: zakładka, w której wartości sięgają wiersza 6545, potrafi
+ * raportować 100000, bo kiedyś sięgała tam treść albo formatowanie. Ufając
+ * temu, przycinanie pomijało największe zakładki (#118).
+ *
+ * Skanujemy więc od dołu porcjami i zatrzymujemy się na pierwszej, która ma
+ * jakąkolwiek wartość albo formułę. Formuła licząca się do pustego tekstu też
+ * jest treścią i nie wolno jej skasować, dlatego sprawdzamy oba.
+ */
+function lastContentRow_(sheet) {
+  const cols = sheet.getMaxColumns();
+  let top = sheet.getLastRow();
+
+  while (top > 0) {
+    const from = Math.max(1, top - TRIM_SCAN_CHUNK + 1);
+    const range = sheet.getRange(from, 1, top - from + 1, cols);
+    const values = range.getValues();
+    const formulas = range.getFormulas();
+
+    for (let i = values.length - 1; i >= 0; i--) {
+      const hasValue = values[i].some(function (v) { return v !== '' && v !== null && v !== undefined; });
+      const hasFormula = formulas[i].some(function (f) { return String(f || '') !== ''; });
+      if (hasValue || hasFormula) return from + i;
+    }
+
+    top = from - 1;
+  }
+  return 0;
+}
+
 /** Plan przycięcia: ile wierszy da się usunąć w każdej zakładce i ile to komórek. */
 function planRowTrim_() {
   const sheets = [];
@@ -146,7 +185,7 @@ function planRowTrim_() {
 
   SpreadsheetApp.getActive().getSheets().forEach(function (sheet) {
     const maxRows = sheet.getMaxRows();
-    const lastRow = sheet.getLastRow();
+    const lastRow = lastContentRow_(sheet);
     const keep = lastRow + TRIM_SPARE_ROWS;
     const removable = maxRows - keep;
     if (removable < TRIM_MIN_GAIN_ROWS) return;
@@ -205,7 +244,7 @@ function przytnijPusteWiersze() {
     if (!sheet) return;
     // Liczymy jeszcze raz na świeżo: między podglądem a potwierdzeniem mógł
     // wejść import i dopisać wiersze.
-    const keep = sheet.getLastRow() + TRIM_SPARE_ROWS;
+    const keep = lastContentRow_(sheet) + TRIM_SPARE_ROWS;
     const removable = sheet.getMaxRows() - keep;
     if (removable < 1) return;
     sheet.deleteRows(keep + 1, removable);
