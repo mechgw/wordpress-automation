@@ -180,6 +180,7 @@ PR titles must follow Conventional Commits (enforced by the *PR title* check). R
 - **secret-scan** — Gitleaks scans the full history for committed secrets.
 - **pr-title** — title follows the Conventional Commits format above.
 - **review-ack** — green only when (1) Copilot code review is not in progress and (2) the bot comments were acknowledged with a `/reviewed` comment.
+- **pr-template** (observation period, not required yet) — the PR body follows the template: at least one filled row in the test matrix, every evidence-matrix item checked, marked `N/A (reason)` or explicitly deferred (`po wdrożeniu` / `after deploy` / `follow-up` / an issue number), a non-empty coverage-deficit justification, and a `Fixes:` or `Refs:` issue link without the `<nr>` placeholder. English and Polish headings are both accepted. Drafts are skipped; Dependabot PRs are exempt. Logic in `scripts/quality/pr-template.js`, tests in `test/pr-template.test.js`; run it locally with `PR_BODY="$(cat body.md)" node scripts/quality/pr-template.js` or `--body-file body.md`.
 
 ### Acknowledging bot reviews
 
