@@ -205,6 +205,48 @@ describe('#118: przycinanie pustego przydziału wierszy', () => {
     assert.deepEqual(plain(gas.planRowTrim_()).sheets, [], 'poniżej 1000 zbędnych wierszy nie warto ruszać');
   });
 
+  /** Zakładka, w której wartości kończą się wcześnie, ale zakres danych sięga niżej. */
+  function padded(filled, padTo, maxRows, cols) {
+    const rows = [];
+    for (let i = 0; i < filled; i++) rows.push(new Array(cols).fill('x'));
+    for (let i = filled; i < padTo; i++) rows.push(new Array(cols).fill(''));
+    return { rows: rows, maxRows: maxRows, maxColumns: cols };
+  }
+
+  test('#118: zawyżony getLastRow nie wyklucza zakładki; liczy się ostatnia realna treść', () => {
+    // Tak wygląda GSC RAW: wartości do 6545, ale arkusz raportuje koniec danych
+    // na wierszu 100000, bo sięga tam formatowanie po dawnych importach.
+    const gas = project({ 'GSC RAW': padded(6545, 100000, 100000, 12) });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName('GSC RAW');
+    assert.equal(sheet.getLastRow(), 100000, 'arkusz sam uważa, że dane sięgają dołu');
+    assert.equal(gas.lastContentRow_(sheet), 6545, 'a realna treść kończy się dużo wyżej');
+
+    const plan = plain(gas.planRowTrim_());
+    assert.equal(plan.sheets.length, 1, 'zakładka trafia do planu mimo zawyżonego zakresu');
+    assert.equal(plan.sheets[0].keep, 8545);
+    assert.equal(plan.sheets[0].cells, 91455 * 12);
+  });
+
+  test('#118: formuła dająca pusty tekst jest treścią i wyznacza granicę cięcia', () => {
+    const rows = [];
+    for (let i = 0; i < 12000; i++) rows.push(['', '']);
+    rows[0] = ['x', ''];
+    const formulas = [];
+    for (let i = 0; i < 12000; i++) formulas.push(['', '']);
+    formulas[9000] = ['', '=IF(A1="";"";A1)'];
+    const gas = project({ 'Raport': { rows: rows, formulas: formulas, maxRows: 100000, maxColumns: 2 } });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName('Raport');
+    assert.equal(gas.lastContentRow_(sheet), 9001, 'formuła licząca się do pustego nie jest pustką');
+    assert.equal(plain(gas.planRowTrim_()).sheets[0].keep, 11001);
+  });
+
+  test('#118: zakładka zupełnie pusta nie wywraca skanowania', () => {
+    const gas = project({ 'Pusta': { rows: [], maxRows: 50000, maxColumns: 5 } });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName('Pusta');
+    assert.equal(gas.lastContentRow_(sheet), 0);
+    assert.equal(plain(gas.planRowTrim_()).sheets[0].keep, 2000);
+  });
+
   test('odpowiedź NIE nie usuwa niczego', () => {
     const gas = project({ 'GSC RAW': wide(100, 100000, 12) }, 'NO');
     const out = plain(gas.przytnijPusteWiersze());
