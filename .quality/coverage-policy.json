@@ -53,6 +53,11 @@
       "rationale": "New in #46 step 1 with full coverage: compatibility variants, sample report, error paths, summary."
     },
     {
+      "pattern": "Diagnostics.gs",
+      "threshold": 95,
+      "rationale": "New in #54 with full coverage: every step green and red, read-only guarantees, menu."
+    },
+    {
       "pattern": "WordPress.gs",
       "threshold": 90,
       "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94%). Remaining lines are alert texts of the menu tests."
