@@ -97,6 +97,18 @@ Próg nieaktualności jest ustawiany per zadanie: doba z okładem dla zadań cod
 
 Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorujące bez zainstalowanego triggera, które nigdy nie działało, jest nieużywane, a nie zepsute, i milczy. Zadanie z triggerem, które jeszcze nie zapisało przebiegu, dostaje swój własny próg na pierwsze uruchomienie: tak wygląda instalacja tuż po włączeniu monitoringu, gdzie trigger jest od dawna, a znacznik dopiero się pojawił. Dopiero gdy próg minie bez ani jednego przebiegu, otwiera się incydent. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
 
+### Semantyczne kontrole JSON-LD
+
+Sprawdzenie obecności `@type` chroni przed zniknięciem całego typu danych strukturalnych, ale przepuszcza gorszą regresję: schema jest, tylko opisuje co innego niż strona. Cena w `Offer` inna niż widoczna, pytanie w `FAQPage`, którego nie ma w FAQ, dwa węzły podające sprzeczne wartości tego samego pola.
+
+`SEO LIVE` parsuje więc JSON-LD prawdziwym `JSON.parse`, spłaszczając `@graph`, tablice i węzły zagnieżdżone do jednej listy. Uszkodzony blok jest zgłaszany z numerem, bez wypisywania jego treści, i nie przerywa czytania pozostałych.
+
+Kontrole wartości są opcjonalne i opisane w zakładce `SEO SCHEMA`, którą zakłada *SEO / GSC → Przygotuj reguły schema*. Reguła to ścieżka `Typ.pole`, na przykład `Offer.price` albo `FAQPage.mainEntity.name`, oraz źródło oczekiwania. Źródło `wartość` porównuje schema z tym, co wpiszesz, i zgłasza sprzeczne wartości w kilku węzłach; źródło `strona` wymaga, żeby każda wartość z JSON-LD była widoczna w treści strony. Wiersz bez adresu opisuje regułę wspólną dla wszystkich stron.
+
+Różnice trafiają do tej samej kolumny co pozostałe i mają rozróżnialne początki: nieprawidłowy JSON-LD, brak wartości, sprzeczne wartości, niezgodna wartość. Bez zakładki i bez reguł `SEO LIVE` działa dokładnie jak wcześniej.
+
+To kontrola spójności danych, nie walidator Google Rich Results: wynik nie mówi nic o kwalifikacji do rich resultów ani o rankingu.
+
 ### Duża treść strony
 
 Komórka arkusza mieści 50 000 znaków, więc pełna wymiana treści długiej strony nie mieściła się w kolumnie `value` polecenia. Treść przychodzi wtedy z zakładki `WP PAYLOADS`, podzielona na części, a w `WP COMMANDS` zostaje sama referencja `payload:<identyfikator>`.

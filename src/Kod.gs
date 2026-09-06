@@ -15,6 +15,7 @@ function onOpen() {
     .addItem('Włącz cotygodniową inspekcję URL', 'ustawTygodniowaInspekcje')
     .addItem('Sprawdź strony live (SEO LIVE)', 'sprawdzStronyLive')
     .addItem('Włącz codzienny live check SEO', 'ustawCodziennyLiveCheck')
+    .addItem('Przygotuj reguły schema (SEO SCHEMA)', 'przygotujRegulySchema')
     .addSeparator()
     .addItem('Sprawdź sitemapy (SITEMAPY)', 'sprawdzSitemapy')
     .addItem('Odśwież adresy z sitemap (SITEMAP URLS)', 'odswiezMonitoringZSitemap')
