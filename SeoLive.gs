@@ -282,7 +282,7 @@ function sprawdzStronyLive() {
 
 /** Handler codziennego triggera: bez okna; jeden e-mail o NOWYCH rozbieżnościach. */
 function sprawdzStronyLiveTrigger() {
-  const summary = withScriptLock_('live check SEO', runSeoLiveCheck_);
+  const summary = recordJobRun_('SEO_LIVE', true, () => withScriptLock_('live check SEO', runSeoLiveCheck_));
   Logger.log(seoLiveSummaryText_(summary));
   if (summary.newProblems.length) {
     sendImportAlert_('Live SEO: ' + summary.newProblems.length + ' nowa(e) rozbieżność(ci)', [

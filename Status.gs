@@ -21,6 +21,11 @@
  */
 
 const IMPORT_STALE_AFTER_HOURS = 36;
+/**
+ * Zadania tygodniowe: 8 dni. Doba zapasu wystarcza na przesunięcie okna
+ * triggera i na jeden pominięty przebieg, a nie ukrywa zadania, które stanęło.
+ */
+const WEEKLY_STALE_AFTER_HOURS = 8 * 24;
 
 /**
  * Historia runów (#43): zakładka IMPORT LOG dopisywana przy każdym uruchomieniu.
@@ -53,15 +58,39 @@ function importSources_() {
  * triggera spoza tej listy.
  */
 function scheduledJobs_() {
+  // staleAfterHours: próg per zadanie. Zadanie tygodniowe oceniane progiem
+  // dobowym zgłaszałoby incydent przez sześć dni z siedmiu.
+  //
+  // optional: zadanie monitorujące, które użytkownik może świadomie zostawić
+  // wyłączone. Import jest zawsze oczekiwany, więc brak importu to incydent
+  // nawet wtedy, gdy nie ma triggera.
   return [
-    { key: 'GSC', handler: 'importDzienny', label: 'import GSC', schedule: 'codziennie ok. 05:00' },
-    { key: 'GA4', handler: 'importGA4Dzienny', label: 'import GA4', schedule: 'codziennie ok. 06:00' },
-    { key: 'ALERTS', handler: ALERT_GUARD_HANDLER, label: 'strażnik alertów', schedule: 'codziennie ok. 08:00' },
-    { key: 'SITEMAP_URLS', handler: SITEMAP_SYNC_TRIGGER_HANDLER, label: 'adresy z sitemap', schedule: 'poniedziałek ok. 06:00' },
-    { key: 'URL_INSPECTION', handler: URL_INSPECTION_TRIGGER_HANDLER, label: 'inspekcja URL', schedule: 'poniedziałek ok. 07:00' },
-    { key: 'SEO_LIVE', handler: SEO_LIVE_TRIGGER_HANDLER, label: 'live check SEO', schedule: 'codziennie ok. 09:00' },
-    { key: 'RECRAWL', handler: RECRAWL_TRIGGER_HANDLER, label: 'kolejka recrawl', schedule: 'codziennie ok. 10:00' }
+    { key: 'GSC', handler: 'importDzienny', label: 'import GSC', schedule: 'codziennie ok. 05:00', prop: 'LAST_IMPORT_GSC', staleAfterHours: IMPORT_STALE_AFTER_HOURS },
+    { key: 'GA4', handler: 'importGA4Dzienny', label: 'import GA4', schedule: 'codziennie ok. 06:00', prop: 'LAST_IMPORT_GA4', staleAfterHours: IMPORT_STALE_AFTER_HOURS },
+    { key: 'ALERTS', handler: ALERT_GUARD_HANDLER, label: 'strażnik alertów', schedule: 'codziennie ok. 08:00', prop: 'LAST_RUN_ALERTS', staleAfterHours: IMPORT_STALE_AFTER_HOURS },
+    { key: 'SITEMAP_URLS', handler: SITEMAP_SYNC_TRIGGER_HANDLER, label: 'adresy z sitemap', schedule: 'poniedziałek ok. 06:00', prop: 'LAST_RUN_SITEMAP_URLS', staleAfterHours: WEEKLY_STALE_AFTER_HOURS, optional: true },
+    { key: 'URL_INSPECTION', handler: URL_INSPECTION_TRIGGER_HANDLER, label: 'inspekcja URL', schedule: 'poniedziałek ok. 07:00', prop: 'LAST_RUN_URL_INSPECTION', staleAfterHours: WEEKLY_STALE_AFTER_HOURS, optional: true },
+    { key: 'SEO_LIVE', handler: SEO_LIVE_TRIGGER_HANDLER, label: 'live check SEO', schedule: 'codziennie ok. 09:00', prop: 'LAST_RUN_SEO_LIVE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true },
+    { key: 'RECRAWL', handler: RECRAWL_TRIGGER_HANDLER, label: 'kolejka recrawl', schedule: 'codziennie ok. 10:00', prop: 'LAST_RUN_RECRAWL', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true }
   ];
+}
+
+/**
+ * Nazwa zadania w komunikatach dla człowieka. Importy zachowują swoją pełną
+ * nazwę („Search Console (GSC)”), bo tak są opisane w mailach i w komórkach
+ * konfiguracji; rejestr trzyma krótką etykietę na potrzeby jednej linii
+ * diagnostyki.
+ */
+function jobLabel_(key) {
+  const source = importSources_()[key];
+  return source ? source.label : scheduledJob_(key).label;
+}
+
+/** Definicja zadania cyklicznego; nieznany klucz to błąd programisty, nie danych. */
+function scheduledJob_(key) {
+  const job = scheduledJobs_().filter(j => j.key === key)[0];
+  if (!job) throw new Error('Nieznane zadanie cykliczne: ' + key);
+  return job;
 }
 
 function importSource_(source) {
@@ -70,8 +99,8 @@ function importSource_(source) {
   return def;
 }
 
-function readImportRecord_(source) {
-  const raw = PropertiesService.getScriptProperties().getProperty(importSource_(source).key);
+function readJobRecord_(key) {
+  const raw = PropertiesService.getScriptProperties().getProperty(scheduledJob_(key).prop);
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -81,8 +110,8 @@ function readImportRecord_(source) {
   }
 }
 
-function writeImportRecord_(source, record) {
-  PropertiesService.getScriptProperties().setProperty(importSource_(source).key, JSON.stringify(record));
+function writeJobRecord_(key, record) {
+  PropertiesService.getScriptProperties().setProperty(scheduledJob_(key).prop, JSON.stringify(record));
 }
 
 /**
@@ -92,7 +121,7 @@ function writeImportRecord_(source, record) {
  */
 function recordImportRun_(source, trigger, fn) {
   const startedAt = Date.now();
-  const record = readImportRecord_(source);
+  const record = readJobRecord_(source);
   let result;
 
   try {
@@ -105,7 +134,7 @@ function recordImportRun_(source, trigger, fn) {
       error: String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300),
       durationMs: Date.now() - startedAt
     };
-    writeImportRecord_(source, record);
+    writeJobRecord_(source, record);
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
     updateImportIncident_(source, record);
@@ -133,7 +162,7 @@ function recordImportRun_(source, trigger, fn) {
 
   record.lastRun = run;
   record.lastOk = run;
-  writeImportRecord_(source, record);
+  writeJobRecord_(source, record);
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
   updateImportIncident_(source, record);
@@ -316,7 +345,7 @@ function importAnomaly_(source, run, history, now) {
 }
 
 function hasImportTrigger_(source) {
-  const handler = importSource_(source).trigger;
+  const handler = scheduledJob_(source).handler;
   return ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === handler);
 }
 
@@ -340,15 +369,15 @@ function isTriggerRun_(e) {
   return !!(e && typeof e === 'object' && (e.triggerUid || e['trigger-uid']));
 }
 
-function isImportStale_(lastOk, now) {
+function isJobStale_(key, lastOk, now) {
   if (!lastOk || !lastOk.finishedAt) return true;
   const age = (now || new Date()).getTime() - new Date(lastOk.finishedAt).getTime();
-  return !(age >= 0 && age <= IMPORT_STALE_AFTER_HOURS * 3600 * 1000);
+  return !(age >= 0 && age <= scheduledJob_(key).staleAfterHours * 3600 * 1000);
 }
 
 /** Jedna linia statusu dla komórki konfiguracji. */
 function importStatusText_(source, now) {
-  const record = readImportRecord_(source);
+  const record = readJobRecord_(source);
   const lastRun = record.lastRun;
   // Rekord częściowy (np. ręcznie edytowany albo z wcześniejszej wersji): udany
   const lastOk = effectiveLastOk_(record);
@@ -358,7 +387,7 @@ function importStatusText_(source, now) {
     return 'BRAK IMPORTU – uruchom import z menu' + triggerPart;
   }
 
-  const stale = isImportStale_(lastOk, now);
+  const stale = isJobStale_(source, lastOk, now);
   let text;
 
   if (lastRun && !lastRun.ok) {
@@ -374,6 +403,78 @@ function importStatusText_(source, now) {
     text = 'NIEAKTUALNE – ' + text.replace(/^AKTYWNE – /, '');
   }
   return text + triggerPart;
+}
+
+/**
+ * Status zadania cyklicznego. Importy zachowują własną, bogatszą treść
+ * (liczba wierszy, anomalie, komórka konfiguracji); pozostałe zadania mają
+ * wersję neutralną, bo „ostatni import” nie opisuje inspekcji URL.
+ */
+function jobStatusText_(key, now) {
+  if (importSources_()[key]) return importStatusText_(key, now);
+
+  const record = readJobRecord_(key);
+  const lastRun = record.lastRun;
+  const lastOk = effectiveLastOk_(record);
+  const triggerPart = ' | trigger: ' + (hasImportTrigger_(key) ? 'TAK' : 'NIE');
+
+  if (!lastOk && !lastRun) {
+    return 'BRAK PRZEBIEGU – uruchom zadanie z menu' + triggerPart;
+  }
+
+  let text;
+  if (lastRun && !lastRun.ok) {
+    text = 'BŁĄD ' + formatImportTime_(lastRun.finishedAt) + ': ' + lastRun.error +
+      (lastOk ? ' | ostatni poprawny przebieg: ' + formatImportTime_(lastOk.finishedAt) : ' | brak poprawnego przebiegu');
+  } else {
+    text = 'AKTYWNE – ostatni przebieg: ' + formatImportTime_(lastOk.finishedAt) +
+      (lastOk.detail ? ' | ' + lastOk.detail : '');
+  }
+
+  if (isJobStale_(key, lastOk, now)) {
+    text = 'NIEAKTUALNE – ' + text.replace(/^AKTYWNE – /, '');
+  }
+  return text + triggerPart;
+}
+
+/**
+ * Zapisuje przebieg zadania monitorującego i aktualizuje jego incydent.
+ * Lżejsze niż recordImportRun_: bez IMPORT LOG, anomalii i komórki statusu,
+ * bo dla tych zadań liczy się fakt i czas ostatniego udanego przebiegu.
+ * Błąd jest zapisywany i rzucany dalej, żeby był widoczny w Apps Script.
+ */
+function recordJobRun_(key, trigger, fn) {
+  const startedAt = Date.now();
+  const record = readJobRecord_(key);
+  let result;
+
+  try {
+    result = fn();
+  } catch (e) {
+    record.lastRun = {
+      finishedAt: new Date().toISOString(),
+      ok: false,
+      trigger: Boolean(trigger),
+      error: String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300),
+      durationMs: Date.now() - startedAt
+    };
+    writeJobRecord_(key, record);
+    updateImportIncident_(key, record);
+    throw e;
+  }
+
+  const summary = result && typeof result === 'object' ? result : {};
+  record.lastRun = {
+    finishedAt: new Date().toISOString(),
+    ok: true,
+    trigger: Boolean(trigger),
+    detail: String(summary.detail || ''),
+    durationMs: Date.now() - startedAt
+  };
+  record.lastOk = record.lastRun;
+  writeJobRecord_(key, record);
+  updateImportIncident_(key, record);
+  return result;
 }
 
 /** Zapisuje linię statusu do komórki konfiguracji; brak arkusza nie przerywa importu. */
@@ -414,13 +515,16 @@ function showImportStatus() {
   const now = new Date();
   const lines = [];
 
-  Object.keys(importSources_()).forEach(source => {
-    const def = importSource_(source);
-    const record = readImportRecord_(source);
+  scheduledJobs_().forEach(job => {
+    const source = job.key;
+    const def = importSources_()[source];
+    const record = readJobRecord_(source);
     const lastRun = record.lastRun;
-    lines.push(def.label);
-    lines.push('  ' + importStatusText_(source, now));
-    lines.push('  Harmonogram: ' + def.schedule + ' (' + def.sheet + '!' + def.cell + ')');
+    lines.push(jobLabel_(source));
+    lines.push('  ' + jobStatusText_(source, now));
+    lines.push('  Harmonogram: ' + job.schedule +
+      (def ? ' (' + def.sheet + '!' + def.cell + ')' : '') +
+      ' | nieaktualne po ' + job.staleAfterHours + ' h');
     if (lastRun) {
       lines.push('  Ostatnie uruchomienie: ' + formatImportTime_(lastRun.finishedAt) +
         ' | ' + (lastRun.ok ? 'OK' : 'BŁĄD') +
@@ -431,7 +535,8 @@ function showImportStatus() {
     lines.push('');
   });
 
-  lines.push('Dane uznajemy za nieaktualne po ' + IMPORT_STALE_AFTER_HOURS + ' h od ostatniego poprawnego importu.');
+  lines.push('Zadanie jest nieaktualne po upływie własnego progu od ostatniego poprawnego przebiegu.');
+  lines.push('Zadanie monitorujące bez triggera, które nigdy nie działało, nie jest zgłaszane jako awaria.');
   lines.push(sitemapsStatusLine_());
   lines.push('Alerty e-mail: ' + alertRecipientText_() + ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));

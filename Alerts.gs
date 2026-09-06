@@ -20,6 +20,8 @@
  */
 
 const ALERT_GUARD_HANDLER = 'sprawdzAktualnoscImportow';
+/** Klucz strażnika w rejestrze zadań cyklicznych (Status.gs). */
+const ALERT_GUARD_JOB_KEY = 'ALERTS';
 const ALERT_GUARD_HOUR = 8;
 
 /** Ostatni powód niewysłania e-maila w tym uruchomieniu (dla okna strażnika). */
@@ -117,7 +119,7 @@ function sendIncidentOpenedAlert_(label, run, record, problem, now) {
 function updateImportIncident_(source, record) {
   const run = record.lastRun || {};
   const incident = record.incident && record.incident.open ? record.incident : null;
-  const label = importSource_(source).label;
+  const label = jobLabel_(source);
   const now = new Date().toISOString();
 
   let problem = null;
@@ -130,10 +132,10 @@ function updateImportIncident_(source, record) {
   if (problem && !incident) {
     // Najpierw zapis incydentu, potem e-mail: awaria wysyłki nie gubi stanu.
     record.incident = { open: true, reason: problem.reason, detail: problem.detail, openedAt: now, notifiedAt: '' };
-    writeImportRecord_(source, record);
+    writeJobRecord_(source, record);
     if (sendIncidentOpenedAlert_(label, run, record, problem, now)) {
       record.incident.notifiedAt = now;
-      writeImportRecord_(source, record);
+      writeJobRecord_(source, record);
     }
     return 'opened';
   }
@@ -145,18 +147,23 @@ function updateImportIncident_(source, record) {
     if (!incident.notifiedAt && sendIncidentOpenedAlert_(label, run, record, problem, now)) {
       record.incident.notifiedAt = now;
     }
-    writeImportRecord_(source, record);
+    writeJobRecord_(source, record);
     return '';
   }
 
   if (!problem && incident) {
     record.incident = Object.assign({}, incident, { open: false, closedAt: now });
-    writeImportRecord_(source, record);
+    writeJobRecord_(source, record);
     if (alertConfig_().recovery) {
-      sendImportAlert_('Import ponownie działa: ' + label, [
+      // Import raportuje liczbę wierszy; zadanie monitorujące nie ma wierszy,
+      // więc mówi tylko, co zrobiło.
+      const isImport = Boolean(importSources_()[source]);
+      sendImportAlert_((isImport ? 'Import ponownie działa: ' : 'Zadanie ponownie działa: ') + label, [
         'Źródło: ' + label,
         'Czas: ' + formatImportTime_(run.finishedAt || now),
-        'Wiersze: ' + (Number(run.rows) || 0) + (run.detail ? ' (' + run.detail + ')' : ''),
+        isImport
+          ? 'Wiersze: ' + (Number(run.rows) || 0) + (run.detail ? ' (' + run.detail + ')' : '')
+          : 'Szczegóły: ' + (run.detail || 'przebieg zakończony poprawnie'),
         'Incydent trwał od: ' + formatImportTime_(incident.openedAt) + ' (' + incident.reason + ')'
       ]);
     }
@@ -180,49 +187,71 @@ function sprawdzAktualnoscImportow() {
   const mail = [];
   const describeSend = (subject, sent) => mail.push(sent ? 'wysłany („' + subject + '”)' : 'nie wysłano („' + subject + '”): ' + ALERT_STATE_.lastError);
   const toNotify = []; // incydenty 'stale' bez wysłanego e-maila: nowe i te z dni bez ALERT_EMAIL
+  let checked = 0;
 
-  Object.keys(importSources_()).forEach(source => {
-    const record = readImportRecord_(source);
-    const stale = isImportStale_(effectiveLastOk_(record), now);
+  // Wszystkie zadania cykliczne, nie tylko importy: zadanie, które przestało
+  // działać, jest nieodróżnialne od zadania bez nowych zgłoszeń (#99).
+  //
+  // Poza samym strażnikiem: gdyby stanął, nie miałby jak zgłosić własnej awarii,
+  // a przy pierwszym uruchomieniu otwierałby incydent o sobie. Martwego
+  // strażnika wykrywa diagnostyka, sprawdzająca zainstalowane triggery (#100).
+  scheduledJobs_().filter(job => job.key !== ALERT_GUARD_JOB_KEY).map(job => job.key).forEach(source => {
+    const record = readJobRecord_(source);
+
+    // Opcjonalne zadanie bez triggera, które nigdy nie działało, jest
+    // nieużywane, a nie zepsute. Bez tego włączenie monitoringu zasypałoby
+    // skrzynkę alertami o zadaniach, których użytkownik świadomie nie
+    // uruchomił. Importu ten wyjątek nie obejmuje: brak importu to incydent.
+    if (scheduledJob_(source).optional && !record.lastRun && !effectiveLastOk_(record) && !hasImportTrigger_(source)) return;
+
+    checked++;
+    const stale = isJobStale_(source, effectiveLastOk_(record), now);
     const incident = record.incident && record.incident.open ? record.incident : null;
-    const label = importSource_(source).label;
+    const label = jobLabel_(source);
 
     if (stale && !incident) {
-      record.incident = { open: true, reason: 'stale', detail: importStatusText_(source, now), openedAt: now.toISOString(), notifiedAt: '' };
-      writeImportRecord_(source, record);
+      record.incident = { open: true, reason: 'stale', detail: jobStatusText_(source, now), openedAt: now.toISOString(), notifiedAt: '' };
+      writeJobRecord_(source, record);
       opened.push(label);
       toNotify.push({ source, record, line: label + ': ' + record.incident.detail });
     } else if (stale && incident && incident.reason === 'stale' && !incident.notifiedAt) {
       toNotify.push({ source, record, line: label + ': ' + incident.detail });
     } else if (!stale && incident && incident.reason === 'stale') {
       record.incident = Object.assign({}, incident, { open: false, closedAt: now.toISOString() });
-      writeImportRecord_(source, record);
-      closed.push(label + ': ' + importStatusText_(source, now));
+      writeJobRecord_(source, record);
+      closed.push(label + ': ' + jobStatusText_(source, now));
     }
   });
 
   if (toNotify.length) {
-    const subject = 'NIEAKTUALNE dane: ' + toNotify.length + ' źródło(a)';
+    const subject = 'NIEAKTUALNE: ' + toNotify.length + ' zadanie(a)';
     const sent = sendImportAlert_(subject, [
-      'Codzienny strażnik wykrył nieaktualne dane (starsze niż ' + IMPORT_STALE_AFTER_HOURS + ' h):',
+      'Codzienny strażnik wykrył zadania, które nie mają świeżego udanego przebiegu:',
       ''
-    ].concat(toNotify.map(n => '- ' + n.line)).concat(['', 'Kolejne dni nie będą zgłaszane, dopóki import nie wróci do normy.']));
+    ].concat(toNotify.map(n => '- ' + n.line)).concat(['', 'Kolejne dni nie będą zgłaszane, dopóki zadanie nie wróci do normy.']));
     describeSend(subject, sent);
     if (sent) {
       toNotify.forEach(n => {
         n.record.incident = Object.assign({}, n.record.incident, { notifiedAt: now.toISOString() });
-        writeImportRecord_(n.source, n.record);
+        writeJobRecord_(n.source, n.record);
       });
     }
   }
   if (closed.length) {
-    const subject = 'Dane znowu aktualne: ' + closed.length + ' źródło(a)';
+    const subject = 'Znowu aktualne: ' + closed.length + ' zadanie(a)';
     if (alertConfig_().recovery) {
       describeSend(subject, sendImportAlert_(subject, closed.map(c => '- ' + c)));
     } else {
       mail.push('pominięty („' + subject + '”): ALERT_RECOVERY=FALSE');
     }
   }
+
+  // Własny przebieg zapisujemy na końcu, żeby „Status danych” pokazywał, kiedy
+  // strażnik ostatnio działał.
+  const guard = readJobRecord_(ALERT_GUARD_JOB_KEY);
+  guard.lastRun = { finishedAt: now.toISOString(), ok: true, trigger: true, detail: 'sprawdzone zadania: ' + checked };
+  guard.lastOk = guard.lastRun;
+  writeJobRecord_(ALERT_GUARD_JOB_KEY, guard);
 
   return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
 }
@@ -231,9 +260,9 @@ function sprawdzAktualnoscImportow() {
 function sprawdzAktualnoscImportowZMenu() {
   const out = sprawdzAktualnoscImportow();
   const now = new Date();
-  const lines = ['Sprawdzono aktualność importów:'];
-  Object.keys(importSources_()).forEach(source => {
-    lines.push('- ' + importSource_(source).label + ': ' + importStatusText_(source, now));
+  const lines = ['Sprawdzono aktualność zadań cyklicznych:'];
+  scheduledJobs_().forEach(job => {
+    lines.push('- ' + jobLabel_(job.key) + ': ' + jobStatusText_(job.key, now));
   });
   lines.push('');
   lines.push('Otwarte incydenty (nieaktualne dane): ' + out.opened);
