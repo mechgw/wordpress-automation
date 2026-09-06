@@ -13,7 +13,7 @@
  *   1. `clasp pull` nadpisuje pliki źródłowe w katalogu roboczym.
  *   2. Normalizacja końcowego znaku nowej linii (edytor Apps Script go obcina).
  *   3. `Version.gs` wraca do wersji z gita (wdrożenie stempluje go celowo).
- *   4. `git status` ograniczony do *.gs i appsscript.json; cokolwiek innego
+ *   4. `git status` ograniczony do źródeł (src/*.gs, albo *.gs w starszych tagach);
  *      (np. .clasp.json) nie liczy się jako różnica.
  *   5. Różnica → lista plików, patch (opcjonalnie do pliku) i kod wyjścia 1.
  *
@@ -61,10 +61,26 @@ function pull(cwd) {
   return (r.stdout || '').trim();
 }
 
+/**
+ * Katalog ze źródłami wdrażanego refa. Od #105 to src/, ale rollback do
+ * wcześniejszego taga ma je w katalogu głównym, a to narzędzie zawsze pochodzi
+ * z main, więc musi obsłużyć oba układy.
+ */
+function sourceDir(cwd) {
+  return fs.existsSync(path.join(cwd, 'src', 'appsscript.json')) ? 'src' : '.';
+}
+
+/** Pathspec ograniczający git status/diff do samych źródeł Apps Script. */
+function sourcePathspec(cwd) {
+  const dir = sourceDir(cwd);
+  return dir === '.' ? ['*.gs', 'appsscript.json'] : [dir + '/*.gs', dir + '/appsscript.json'];
+}
+
 function normalizeTrailingNewline(cwd) {
-  for (const f of fs.readdirSync(cwd)) {
+  const dir = path.join(cwd, sourceDir(cwd));
+  for (const f of fs.readdirSync(dir)) {
     if (!/\.gs$/.test(f) && f !== 'appsscript.json') continue;
-    const p = path.join(cwd, f);
+    const p = path.join(dir, f);
     const s = fs.readFileSync(p, 'utf8');
     if (s.length && !s.endsWith('\n')) fs.writeFileSync(p, s + '\n');
   }
@@ -77,7 +93,7 @@ function normalizeTrailingNewline(cwd) {
  * roboczego katalogu; każda inna różnica zostaje widoczna w status/diff.
  */
 function normalizeIndexTrailingNewline(cwd) {
-  const tracked = git(cwd, ['ls-files', '--', '*.gs', 'appsscript.json']).split('\n').map(s => s.trim()).filter(Boolean);
+  const tracked = git(cwd, ['ls-files', '--', ...sourcePathspec(cwd)]).split('\n').map(s => s.trim()).filter(Boolean);
   for (const f of tracked) {
     const shown = spawnSync('git', ['show', ':' + f], { cwd, encoding: 'utf8' });
     if (shown.status !== 0) continue;
@@ -93,10 +109,11 @@ function compare(cwd) {
   normalizeTrailingNewline(cwd);
   normalizeIndexTrailingNewline(cwd);
   // Restore only when the ref tracks Version.gs (older tags do not have it).
-  if (git(cwd, ['ls-files', '--', 'Version.gs']).trim()) {
-    git(cwd, ['checkout', '--', 'Version.gs']);
+  const versionFile = sourceDir(cwd) === '.' ? 'Version.gs' : 'src/Version.gs';
+  if (git(cwd, ['ls-files', '--', versionFile]).trim()) {
+    git(cwd, ['checkout', '--', versionFile]);
   }
-  const pathspec = ['--', '*.gs', 'appsscript.json'];
+  const pathspec = ['--', ...sourcePathspec(cwd)];
   // Keep the leading status columns (" M", "??"); only strip trailing whitespace.
   // Lines with a change only in the index (e.g. "M  Kod.gs" after the trailing
   // newline normalisation above) are not drift: drift is worktree vs index.

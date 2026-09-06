@@ -5,7 +5,7 @@ Wskazówki dla agentów AI pracujących w tym repozytorium. Dla ludzi punktem we
 ## Co to jest
 
 Projekt Google Apps Script (przypięty do arkusza Google) automatyzujący zadania WordPress, Google
-Search Console i GA4. Źródła to pliki `*.gs` plus `appsscript.json`. Repozytorium jest **publiczne**:
+Search Console i GA4. Źródła to pliki `src/*.gs` plus `src/appsscript.json`; katalog główny trzyma wyłącznie konfigurację, dokumentację i licencję. Repozytorium jest **publiczne**:
 żadnych nazw firm, domen, identyfikatorów ani poświadczeń w kodzie, komentarzach, testach ani
 fixture'ach. Tożsamość witryny żyje w Script Properties (`WP_REST_NAMESPACE`, `SITE_DOMAIN`, `WP_*`).
 
@@ -41,13 +41,13 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 ## Bramki jakości
 
-- `npm run lint` — ESLint dla `*.gs` (globalne symbole Apps Script + funkcje między plikami),
+- `npm run lint` — ESLint dla `src/*.gs` (globalne symbole Apps Script + funkcje między plikami),
   `test/`, `scripts/`; w tym `eol-last` (znak nowej linii na końcu pliku, Apps Script go wymaga).
 - `npm test` — testy jednostkowe Node; pliki `.gs` działają w VM z zastubowanymi usługami Google
   (`test/helpers/gas.js`). Stub `Utilities.formatDate` formatuje w strefie maszyny: przed pushem
   uruchom też `TZ=UTC npm test`.
 - `npm run quality:gate -- --changed=base:origin/main` — progi per plik
-  (`.quality/coverage-policy.json`) i **100 % pokrycia zmienionych linii `*.gs`**; wyjątki
+  (`.quality/coverage-policy.json`) i **100 % pokrycia zmienionych linii `src/*.gs`**; wyjątki
   z uzasadnieniem w `.quality/changed-lines-ignore.json`.
 - Hook pre-commit (`.githooks/pre-commit`, instalowany przez `npm ci`) uruchamia to samo na plikach
   ze stage'a.
@@ -59,7 +59,7 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 - Rozszerzaj stuby harnessu zamiast rejestrować wyjątki pokrycia.
 - Trzymaj `Version.gs` jako placeholdery; workflow deployu go stempluje.
-- Nowy plik `*.gs`: dopisz do `SOURCES` w `test/helpers/gas.js` i do `.quality/coverage-policy.json`.
+- Nowy plik `*.gs`: załóż go w `src/`, dopisz do `SOURCES` w `test/helpers/gas.js` i do `.quality/coverage-policy.json` (wzorzec z prefiksem `src/`).
   Pilnuje tego `test/sources-completeness.test.js`; nie ładuj źródeł do kontekstu ręcznie w teście.
 - Nie uruchamiaj `clasp push` lokalnie; jedyną drogą do produkcji jest workflow deployu.
 - Nie dotykaj `.clasp.json` / `.clasprc.json` (ignorowane przez gita, poświadczenia).

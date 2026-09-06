@@ -46,7 +46,10 @@ jobs:
           umask 077
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           # scriptExtensions keeps clasp 3 on .gs (its default is .js).
-          printf '{"scriptId":"%s","rootDir":".","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" > .clasp.json
+          # Ten sam mechanizm co w deployu: src/ od #105, katalog główny wcześniej.
+          if [ -f src/appsscript.json ]; then ROOT_DIR=src; else ROOT_DIR=.; fi
+          echo "clasp rootDir: $ROOT_DIR"
+          printf '{"scriptId":"%s","rootDir":"%s","scriptExtensions":["gs"]}\n' "$APPS_SCRIPT_ID" "$ROOT_DIR" > .clasp.json
 
       # Shared with the deploy workflow: clasp pull, trailing-newline
       # normalisation, Version.gs restored from git, git status limited to the

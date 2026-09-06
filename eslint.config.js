@@ -13,9 +13,10 @@ const gas = require("eslint-plugin-googleappsscript");
 /** Top-level function / const / let / var names across all .gs files. */
 function projectGlobals() {
   const globals = {};
-  for (const file of fs.readdirSync(__dirname)) {
+  const sourceDir = path.join(__dirname, "src");
+  for (const file of fs.readdirSync(sourceDir)) {
     if (!file.endsWith(".gs")) continue;
-    const src = fs.readFileSync(path.join(__dirname, file), "utf8");
+    const src = fs.readFileSync(path.join(sourceDir, file), "utf8");
     for (const m of src.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) {
       globals[m[1]] = "readonly";
     }

@@ -18,8 +18,12 @@ const roots = [];
 
 after(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
 
-/** Repo z trzema źródłami; `fake` to skrypt symulujący clasp pull (mutacje w cwd). */
-function repo(fakePullBody) {
+/**
+ * Repo z trzema źródłami; `fake` to skrypt symulujący clasp pull (mutacje w cwd).
+ * `dir` wybiera układ: '.' to tagi sprzed #105, 'src' to układ bieżący.
+ */
+function repo(fakePullBody, dir) {
+  const sub = dir || '.';
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'asc-'));
   roots.push(root);
   const g = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -28,10 +32,12 @@ function repo(fakePullBody) {
   g(['config', 'user.name', 'test']);
   // Byte-exact comparisons regardless of the developer's global autocrlf.
   g(['config', 'core.autocrlf', 'false']);
-  fs.writeFileSync(path.join(root, 'Kod.gs'), 'function a() {}\n');
-  fs.writeFileSync(path.join(root, 'GA4.gs'), 'function b() {}\n');
-  fs.writeFileSync(path.join(root, 'Version.gs'), "const DEPLOYED_VERSION = { tag: 'dev' };\n");
-  fs.writeFileSync(path.join(root, 'appsscript.json'), '{"timeZone":"Europe/Warsaw"}\n');
+  const srcDir = path.join(root, sub);
+  if (sub !== '.') fs.mkdirSync(srcDir, { recursive: true });
+  fs.writeFileSync(path.join(srcDir, 'Kod.gs'), 'function a() {}\n');
+  fs.writeFileSync(path.join(srcDir, 'GA4.gs'), 'function b() {}\n');
+  fs.writeFileSync(path.join(srcDir, 'Version.gs'), "const DEPLOYED_VERSION = { tag: 'dev' };\n");
+  fs.writeFileSync(path.join(srcDir, 'appsscript.json'), '{"timeZone":"Europe/Warsaw"}\n');
   fs.writeFileSync(path.join(root, '.gitignore'), '.clasp.json\n');
   g(['add', '-A']);
   g(['commit', '-q', '-m', 'base']);
@@ -124,6 +130,37 @@ describe('apps-script-compare', () => {
     execFileSync('git', ['-c', 'user.email=t@e.pl', '-c', 'user.name=t', 'commit', '-q', '-m', 'no version file'], { cwd: root });
     const r = run(root, fake);
     assert.equal(r.status, 0, r.out);
+  });
+
+  test('#105: układ src — zgodny projekt to brak driftu', () => {
+    const { root, fake } = repo('', 'src');
+    const r = run(root, fake);
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /✅ Apps Script matches v9\.9\.9\./);
+  });
+
+  test('#105: układ src — zmiana źródła jest driftem i trafia do patcha', () => {
+    const { root, fake } = repo(`fs.writeFileSync('src/GA4.gs', 'function b() { return 1; }\\n');`, 'src');
+    const r = run(root, fake, ['--patch', 'drift.patch']);
+    assert.equal(r.status, 1);
+    assert.match(r.out, / M src\/GA4\.gs/);
+    assert.match(fs.readFileSync(path.join(root, 'drift.patch'), 'utf8'), /\+function b\(\) \{ return 1; \}/);
+  });
+
+  test('#105: układ src — stemplowany Version.gs i brak końcowej nowej linii nie są driftem', () => {
+    const { root, fake } = repo(`
+      fs.writeFileSync('src/Kod.gs', 'function a() {}');
+      fs.writeFileSync('src/appsscript.json', '{"timeZone":"Europe/Warsaw"}');
+      fs.writeFileSync('src/Version.gs', "const DEPLOYED_VERSION = { tag: 'v9.9.9', commit: 'abc' };\\n");
+    `, 'src');
+    const r = run(root, fake);
+    assert.equal(r.status, 0, r.out);
+  });
+
+  test('#105: układ src — plik w katalogu głównym nie jest źródłem i nie liczy się jako drift', () => {
+    const { root, fake } = repo(`fs.writeFileSync('Extra.gs', 'function extra() {}\\n');`, 'src');
+    const r = run(root, fake);
+    assert.equal(r.status, 0, 'poza src/ nic nie jest wdrażane, więc nie jest driftem');
   });
 
   test('a flag without a value fails fast with a clear message', () => {

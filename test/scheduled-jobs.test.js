@@ -7,6 +7,8 @@ const path = require('path');
 const { loadProject } = require('./helpers/gas');
 
 const ROOT = path.resolve(__dirname, '..');
+/** Źródła Apps Script mieszkają w src/ (#105). */
+const SOURCE_DIR = path.join(ROOT, 'src');
 
 /**
  * Statyczny skan źródeł: wyciąga handler z każdego `ScriptApp.newTrigger(...)`.
@@ -15,8 +17,8 @@ const ROOT = path.resolve(__dirname, '..');
  */
 function declaredTriggerHandlers() {
   const found = [];
-  for (const file of fs.readdirSync(ROOT).filter(f => f.endsWith('.gs'))) {
-    const code = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  for (const file of fs.readdirSync(SOURCE_DIR).filter(f => f.endsWith('.gs'))) {
+    const code = fs.readFileSync(path.join(SOURCE_DIR, file), 'utf8');
     const calls = code.match(/newTrigger\(\s*(?:'([^']+)'|([A-Za-z_$][\w$]*))\s*\)/g) || [];
     for (const call of calls) {
       const literal = /newTrigger\(\s*'([^']+)'/.exec(call);

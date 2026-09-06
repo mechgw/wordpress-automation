@@ -7,8 +7,8 @@
 #
 # Gates, in order:
 #   1. forbidden artifacts   – credentials and build output never enter the index
-#   2. ESLint (staged)       – *.gs, test/**/*.js, scripts/**/*.js, eslint.config.js
-#   3. unit tests + coverage – per-file thresholds and 100% of staged *.gs lines
+#   2. ESLint (staged)       – src/*.gs, test/**/*.js, scripts/**/*.js, eslint.config.js
+#   3. unit tests + coverage – per-file thresholds and 100% of staged src/*.gs lines
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

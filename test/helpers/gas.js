@@ -22,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', 'src');
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
 const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs'];
