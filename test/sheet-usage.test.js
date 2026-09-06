@@ -1,0 +1,189 @@
+'use strict';
+
+/**
+ * #101: pomiar zajętości arkusza i retencja zakładek dopisywanych wierszami.
+ * Arkusz ma twardy limit 10 mln komórek na cały plik; po jego przekroczeniu
+ * przestaje działać wszystko naraz, więc zajętość musi być widoczna wcześniej.
+ */
+
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const { loadProject, plain } = require('./helpers/gas');
+
+const SNAPSHOTS = 'WP SNAPSHOTS';
+const RESULTS = 'WP RESULTS';
+const SNAP_HEADER = ['snapshot_id', 'command_id', 'wp_id', 'slug', 'title', 'excerpt', 'content', 'status', 'modified', 'at', 'rm_title', 'rm_desc', 'rm_captured', 'snapshot_kind', 'media_before_json', 'rank_math_robots', 'rank_math_robots_captured'];
+const RES_HEADER = ['result_id', 'command_id', 'wp_id', 'slug', 'status', 'link', 'title', 'modified', 'content', 'at', 'rm_title', 'rm_desc', 'kind'];
+
+const daysAgo = d => new Date(Date.now() - d * 86400 * 1000);
+/** Wiersz snapshotu: liczy się kolumna 3 (wp_id) i 10 (at). */
+const snap = (id, page, days) => [id, 'CMD', page, 'slug', 'T', 'E', 'C', 'publish', '', daysAgo(days), '', '', 'TRUE', 'PAGE', '', '', 'FALSE'];
+const res = (id, days) => [id, 'CMD', 7, 'slug', 'publish', '', 'T', '', '', daysAgo(days), '', '', 'PAGE'];
+
+function project(snapshots = [], results = [], answer) {
+  const gas = loadProject({
+    sheets: {
+      [SNAPSHOTS]: [SNAP_HEADER, ...snapshots],
+      [RESULTS]: [RES_HEADER, ...results]
+    }
+  });
+  if (answer) gas.$ui.$answer = answer;
+  return gas;
+}
+
+describe('#101: pomiar zajętości arkusza', () => {
+  test('liczy całą siatkę każdej zakładki, sortuje malejąco i sumuje', () => {
+    const gas = project();
+    const usage = plain(gas.sheetUsage_());
+    // Nowa zakładka w stubie ma 1000 x 26 komórek, jak w Arkuszach.
+    assert.equal(usage.sheets.length, 2);
+    assert.equal(usage.sheets[0].cells, 1000 * 26);
+    assert.equal(usage.cells, 2 * 1000 * 26);
+    assert.equal(usage.limit, 10000000);
+  });
+
+  test('poziom rośnie dopiero po przekroczeniu progów, nie przy pierwszej zakładce', () => {
+    const gas = project();
+    assert.equal(plain(gas.sheetUsage_()).level, 'OK');
+
+    // 8 mln komórek to 80% limitu: ostrzeżenie, ale jeszcze nie stan krytyczny.
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(SNAPSHOTS);
+    sheet.insertRowsAfter(sheet.getMaxRows(), 8000000 / 26 - sheet.getMaxRows());
+    assert.equal(plain(gas.sheetUsage_()).level, 'UWAGA');
+
+    sheet.insertRowsAfter(sheet.getMaxRows(), 2000000 / 26);
+    assert.equal(plain(gas.sheetUsage_()).level, 'KRYTYCZNE');
+  });
+
+  test('linia statusu podaje poziom i procent limitu', () => {
+    const gas = project();
+    assert.match(gas.sheetUsageLine_(), /^Zajętość arkusza: OK – 0\.5% limitu \(52000 z 10000000 komórek\)\.$/);
+  });
+});
+
+describe('#101: plan czyszczenia snapshotów', () => {
+  test('zostaje pięć najnowszych na stronę; starsze ponad ten limit idą do usunięcia', () => {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push(snap('S' + i, 7, 200 - i));
+    const gas = project(rows);
+    const plan = plain(gas.planSnapshotCleanup_(new Date()));
+    assert.equal(plan.keep, 5);
+    assert.equal(plan.pages, 1);
+    // Do usunięcia najstarsze trzy, czyli wiersze 2, 3 i 4.
+    assert.deepEqual(plan.remove, [2, 3, 4]);
+  });
+
+  test('snapshot młodszy niż 30 dni nie jest usuwany, choćby był szósty z rzędu', () => {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push(snap('S' + i, 7, 3));
+    const gas = project(rows);
+    const plan = plain(gas.planSnapshotCleanup_(new Date()));
+    assert.deepEqual(plan.remove, [], 'świeże snapshoty są nietykalne');
+    assert.equal(plan.keep, 8);
+  });
+
+  test('limit działa osobno na każdą stronę', () => {
+    const rows = [];
+    for (let i = 1; i <= 6; i++) rows.push(snap('A' + i, 7, 100));
+    for (let i = 1; i <= 2; i++) rows.push(snap('B' + i, 9, 100));
+    const gas = project(rows);
+    const plan = plain(gas.planSnapshotCleanup_(new Date()));
+    assert.equal(plan.pages, 2);
+    assert.equal(plan.remove.length, 1, 'tylko nadmiarowy szósty snapshot strony 7');
+    assert.equal(plan.keep, 7);
+  });
+
+  test('wiersz bez czytelnej daty jest traktowany jak świeży', () => {
+    const rows = [];
+    for (let i = 1; i <= 7; i++) {
+      const row = snap('S' + i, 7, 100);
+      if (i === 1) row[9] = '';
+      rows.push(row);
+    }
+    const gas = project(rows);
+    const plan = plain(gas.planSnapshotCleanup_(new Date()));
+    assert.equal(plan.remove.includes(2), false, 'wiersz bez daty zostaje');
+  });
+
+  test('pusta zakładka i brak zakładki nie są błędem', () => {
+    assert.deepEqual(plain(project().planSnapshotCleanup_(new Date())).remove, []);
+    const bare = loadProject({ sheets: {} });
+    assert.deepEqual(plain(bare.planSnapshotCleanup_(new Date())).remove, []);
+    assert.deepEqual(plain(bare.planResultsCleanup_(new Date())).remove, []);
+  });
+});
+
+describe('#101: plan czyszczenia wyników', () => {
+  test('usuwa wyłącznie wyniki starsze niż 180 dni', () => {
+    const gas = project([], [res('R1', 200), res('R2', 179), res('R3', 400)]);
+    const plan = plain(gas.planResultsCleanup_(new Date()));
+    assert.deepEqual(plan.remove, [2, 4]);
+    assert.equal(plan.keep, 1);
+  });
+});
+
+describe('#101: czyszczenie wymaga potwierdzenia', () => {
+  const oldSnapshots = () => {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push(snap('S' + i, 7, 200 - i));
+    return rows;
+  };
+
+  test('odpowiedź NO nie usuwa niczego', () => {
+    const gas = project(oldSnapshots(), [res('R1', 400)], 'NO');
+    const out = plain(gas.wyczyscStareSnapshotyIWyniki());
+    assert.deepEqual(out, { snapshots: 0, results: 0 });
+    assert.equal(gas.$sheet(SNAPSHOTS).length, 9, 'wszystkie wiersze na miejscu');
+    assert.match(gas.$alerts[1][0], /Anulowano/);
+  });
+
+  test('odpowiedź YES usuwa dokładnie zaplanowane wiersze, licząc od dołu', () => {
+    const gas = project(oldSnapshots(), [res('R1', 400), res('R2', 10)], 'YES');
+    const out = plain(gas.wyczyscStareSnapshotyIWyniki());
+    assert.deepEqual(out, { snapshots: 3, results: 1 });
+    const left = gas.$sheet(SNAPSHOTS).slice(1).map(r => r[0]);
+    assert.deepEqual(left, ['S4', 'S5', 'S6', 'S7', 'S8'], 'zostają najnowsze, a nie przypadkowe');
+    assert.deepEqual(gas.$sheet(RESULTS).slice(1).map(r => r[0]), ['R2']);
+  });
+
+  test('dialog podaje liczby przed usunięciem, bo snapshotów nie da się odtworzyć', () => {
+    const gas = project(oldSnapshots(), [], 'NO');
+    gas.wyczyscStareSnapshotyIWyniki();
+    const question = gas.$alerts[0].join(' ');
+    assert.match(question, /Usunąć nieodwracalnie 3 snapshot\(ów\) i 0 wynik\(ów\)\?/);
+    assert.match(question, /Zostanie 5 snapshot\(ów\) dla 1 stron\(y\)/);
+    assert.equal(gas.$alerts[0][1], 'YES_NO', 'dialog z przyciskami TAK/NIE, nie zwykły komunikat');
+  });
+
+  test('gdy nie ma czego czyścić, nie pyta i nic nie rusza', () => {
+    const gas = project([snap('S1', 7, 1)], [res('R1', 1)], 'YES');
+    const out = plain(gas.wyczyscStareSnapshotyIWyniki());
+    assert.deepEqual(out, { snapshots: 0, results: 0 });
+    assert.equal(gas.$alerts.length, 1);
+    assert.match(gas.$alerts[0][0], /^Nie ma czego czyścić\./);
+  });
+});
+
+describe('#101: okno zajętości', () => {
+  test('przy wielu zakładkach okno pokazuje dwanaście największych i liczbę reszty', () => {
+    const sheets = {};
+    for (let i = 1; i <= 15; i++) sheets['Zakładka ' + i] = [['a']];
+    const gas = loadProject({ sheets: sheets });
+    gas.pokazZajetoscArkusza();
+    const text = gas.$alerts[0][0];
+    assert.match(text, /… i 3 mniejszych zakładek\./);
+    assert.equal(text.split('komórek (').length - 1, 12, 'wypisane dokładnie dwanaście zakładek');
+  });
+
+  test('wymienia zakładki, plan czyszczenia i zasadę retencji', () => {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push(snap('S' + i, 7, 200 - i));
+    const gas = project(rows, [res('R1', 400)]);
+    gas.pokazZajetoscArkusza();
+    const text = gas.$alerts[0][0];
+    assert.match(text, /^Zajętość arkusza: OK – /);
+    assert.match(text, /WP SNAPSHOTS: 26000 komórek \(1000 x 26\)/);
+    assert.match(text, /Do wyczyszczenia: 3 snapshot\(ów\) i 1 wynik\(ów\)\./);
+    assert.match(text, /Snapshot młodszy niż 30 dni zostaje zawsze, podobnie 5 najnowszych na stronę\./);
+  });
+});

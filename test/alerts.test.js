@@ -347,7 +347,7 @@ describe('#69: strażnik z menu pokazuje wynik', () => {
     const gas = loadProject({ sheets: sheets() });
     gas.onOpen();
     const dane = gas.$menus.find(m => m.title === 'Dane');
-    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells', 'sprawdzAktualnoscImportowZMenu', 'ustawCodzienneAlerty', 'diagnostykaSystemu', 'uporzadkujArkuszeZMenu', 'ukryjArkuszeTechniczne', 'pokazArkuszeTechniczne']);
+    assert.deepEqual(dane.items.map(i => i.fn), ['showImportStatus', 'refreshImportStatusCells', 'sprawdzAktualnoscImportowZMenu', 'ustawCodzienneAlerty', 'diagnostykaSystemu', 'pokazZajetoscArkusza', 'wyczyscStareSnapshotyIWyniki', 'uporzadkujArkuszeZMenu', 'ukryjArkuszeTechniczne', 'pokazArkuszeTechniczne']);
     gas.ustawCodzienneAlerty();
     assert.deepEqual(gas.$triggers.map(t => t.getHandlerFunction()), ['sprawdzAktualnoscImportow'], 'trigger stays on the silent handler');
   });

@@ -96,6 +96,11 @@
       "pattern": "FormSourcePageContext.gs",
       "threshold": 95,
       "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
+    },
+    {
+      "pattern": "SheetUsage.gs",
+      "threshold": 95,
+      "rationale": "Nowy w #101 z pełnym pokryciem: pomiar zajętości, plan retencji, ochrona najnowszych snapshotów, potwierdzenie i anulowanie."
     }
   ]
 }
