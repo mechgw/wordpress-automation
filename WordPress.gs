@@ -20,6 +20,38 @@ function addWpMenu_() {
     .addToUi();
 }
 
+/**
+ * Komórka Arkuszy Google mieści najwyżej 50 000 znaków; dłuższy tekst kończy się
+ * wyjątkiem. Treść strony z kreatora bywa dłuższa, a snapshot powstaje PRZED
+ * zapisem do WordPressa, więc bez obcięcia każda komenda zapisu do takiej strony
+ * byłaby trwale niewykonalna (#98).
+ */
+const WP_CELL_CHAR_LIMIT = 50000;
+const WP_TRUNCATION_MARK = ' [OBCIĘTO: treść dłuższa niż ' + WP_CELL_CHAR_LIMIT + ' znaków nie mieści się w komórce arkusza]';
+
+/**
+ * Skraca tekst do rozmiaru komórki. Zwraca { text, truncated }, żeby wywołujący
+ * mógł zapisać sam fakt obcięcia, zamiast zgadywać go po długości.
+ */
+function cellSafeText_(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (text.length <= WP_CELL_CHAR_LIMIT) return { text, truncated: false };
+  return {
+    text: text.slice(0, WP_CELL_CHAR_LIMIT - WP_TRUNCATION_MARK.length) + WP_TRUNCATION_MARK,
+    truncated: true
+  };
+}
+
+/**
+ * Dopisek do komunikatu komendy, gdy snapshot nie zmieścił się w komórce.
+ * Ostrzeżenie musi być przy zmianie, a nie dopiero przy próbie rollbacku.
+ */
+function snapshotWarningText_(snapshot) {
+  if (!snapshot || !snapshot.truncated) return '';
+  return ' UWAGA: treść strony była za długa na komórkę arkusza, więc snapshot jest niepełny' +
+    ' i nie posłuży do cofnięcia treści.';
+}
+
 /** Pola Rank Math, które most potrafi zapisać. Robots idzie osobnym endpointem. */
 const WP_RANK_MATH_FIELDS = ['rank_math_title', 'rank_math_description', 'rank_math_robots'];
 
@@ -790,7 +822,7 @@ function updateMediaField_(command) {
   saved.message =
     'Zaktualizowano ' + command.field +
     ' mediów ID ' + command.target +
-    '. Snapshot przed zmianą: ' + snapshot.snapshotId;
+    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;
 }
@@ -927,8 +959,8 @@ function savePageResult_(page, commandId) {
     Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss') +
     '-' + Utilities.getUuid().slice(0, 8);
 
-  const title = getRawValue_(page.title);
-  const content = getRawValue_(page.content);
+  const title = cellSafeText_(getRawValue_(page.title)).text;
+  const content = cellSafeText_(getRawValue_(page.content)).text;
   const rankMath = getRankMathData_(page);
 
   results.appendRow([
@@ -1111,7 +1143,7 @@ function updateRankMathField_(command) {
   saved.message =
     'Zaktualizowano ' + command.field +
     ' strony ID ' + command.target +
-    '. Snapshot przed zmianą: ' + snapshot.snapshotId;
+    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;
 }
@@ -1319,7 +1351,7 @@ function updatePageField_(command) {
   saved.message =
     'Zaktualizowano ' + command.field +
     ' strony ID ' + command.target +
-    '. Snapshot przed zmianą: ' + snapshot.snapshotId;
+    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;
 }
@@ -1389,7 +1421,7 @@ function replacePageContentText_(command) {
   saved.httpCode = response.code;
   saved.message =
     'Podmieniono dokładny fragment content strony ID ' + command.target +
-    '. Snapshot przed zmianą: ' + snapshot.snapshotId;
+    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;
 }
@@ -1409,21 +1441,28 @@ function saveSnapshot_(page, commandId) {
 
   const rankMath = getRankMathData_(page);
 
+  // Obcinamy każde pole tekstowe, ale o kompletności snapshotu decyduje treść:
+  // tylko ona jest wgrywana z powrotem przy rollbacku.
+  const title = cellSafeText_(getRawValue_(page.title));
+  const excerpt = cellSafeText_(getRawValue_(page.excerpt));
+  const content = cellSafeText_(getRawValue_(page.content));
+  const truncated = title.truncated || excerpt.truncated || content.truncated;
+
   sheet.appendRow([
     snapshotId,
     commandId || '',
     page.id || '',
     page.slug || '',
-    getRawValue_(page.title),
-    getRawValue_(page.excerpt),
-    getRawValue_(page.content),
+    title.text,
+    excerpt.text,
+    content.text,
     page.status || '',
     page.modified || '',
     new Date(),
     rankMath.title,
     rankMath.description,
     rankMath.available ? 'TRUE' : 'FALSE',
-    'PAGE',
+    truncated ? 'PAGE_TRUNCATED' : 'PAGE',
     '',
     rankMath.robots,
     rankMath.robotsAvailable ? 'TRUE' : 'FALSE'
@@ -1431,7 +1470,8 @@ function saveSnapshot_(page, commandId) {
 
   return {
     snapshotId,
-    row: sheet.getLastRow()
+    row: sheet.getLastRow(),
+    truncated
   };
 }
 
@@ -1560,6 +1600,16 @@ function restoreSnapshot_(command) {
     return restoreMediaSnapshot_(snapshot, command);
   }
 
+  // Odmowa PRZED snapshotem bezpieczeństwa i przed jakimkolwiek zapisem: wgranie
+  // uciętej treści zniszczyłoby stronę, a komenda raportowałaby sukces (#98).
+  if (snapshot.snapshotKind === 'PAGE_TRUNCATED') {
+    throw new Error(
+      'Snapshot ' + snapshot.snapshotId + ' jest niepełny: treść strony nie zmieściła się ' +
+      'w komórce arkusza, więc jej przywrócenie skasowałoby brakującą część. ' +
+      'Cofnij treść ręcznie z historii wersji WordPressa.'
+    );
+  }
+
   const wpId = snapshot.wpId;
 
   // Snapshot aktualnego stanu przed rollbackiem - rollback też można cofnąć.
@@ -1626,7 +1676,7 @@ function restoreSnapshot_(command) {
     (snapshot.robotsCaptured
       ? ' Robots przywrócone: "' + (snapshot.rankMathRobots || 'domyślne Rank Math') + '".'
       : ' UWAGA: snapshot powstał przed obsługą robots, więc ustawienie robots NIE zostało cofnięte.') +
-    ' Snapshot stanu sprzed rollbacku: ' + safetySnapshot.snapshotId;
+    ' Snapshot stanu sprzed rollbacku: ' + safetySnapshot.snapshotId + snapshotWarningText_(safetySnapshot);
 
   return saved;
 }

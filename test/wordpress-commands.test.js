@@ -9,7 +9,7 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadProject, plain } = require('./helpers/gas');
+const { loadProject, CELL_CHAR_LIMIT, plain } = require('./helpers/gas');
 const { fakeWordPress } = require('./helpers/wordpress');
 
 const PROPS = { WP_BASE_URL: 'https://www.example.pl', WP_USERNAME: 'bot', WP_APP_PASSWORD: 'pw', WP_REST_NAMESPACE: 'acme' };
@@ -502,6 +502,84 @@ describe('RESTORE_SNAPSHOT', () => {
     gas = project({ commands: [cmd('RESTORE_SNAPSHOT', 'WP-SM-3')], snapshots: [empty] });
     gas.processWpCommands();
     assert.match(message(gas), /nie zawiera prawidłowych danych/);
+  });
+});
+
+describe('#98: treść strony ponad limit komórki', () => {
+  // Komórka Arkuszy mieści 50 000 znaków. Strona z kreatora bywa dłuższa,
+  // a snapshot powstaje PRZED zapisem, więc bez obsługi limitu każda komenda
+  // zapisu do takiej strony jest trwale niewykonalna.
+  const hugeContent = 'x'.repeat(CELL_CHAR_LIMIT + 1234);
+  const hugePages = () => [Object.assign({}, SAMPLE_PAGES[0], { content: hugeContent })];
+
+  test('zapis do strony z ogromną treścią udaje się, a snapshot mieści się w komórce', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł')],
+      wp: fakeWordPress({ pages: hugePages() })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    const snapshot = snapshots(gas)[0];
+    assert.ok(String(snapshot[6]).length <= CELL_CHAR_LIMIT, 'treść w snapshocie mieści się w komórce');
+  });
+
+  test('snapshot niekompletnej treści jest oznaczony, a nie udaje pełnego', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł')],
+      wp: fakeWordPress({ pages: hugePages() })
+    });
+    gas.processWpCommands();
+    const snapshot = snapshots(gas)[0];
+    assert.equal(snapshot[13], 'PAGE_TRUNCATED', 'rodzaj snapshotu mówi, że treść jest niepełna');
+    assert.match(message(gas), /treść strony była za długa/i);
+  });
+
+  test('rollback niekompletnego snapshotu odmawia zamiast wgrać uciętą treść', () => {
+    const gas = project({
+      commands: [
+        cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł'),
+        cmd('RESTORE_SNAPSHOT', 'PLACEHOLDER', '', '', 'YES', 'PENDING', 'CMD-2')
+      ],
+      wp: fakeWordPress({ pages: hugePages() })
+    });
+    gas.processWpCommands();
+    const snapshotId = snapshots(gas)[0][0];
+    gas.$sheet('WP COMMANDS')[2][3] = snapshotId;
+    gas.$sheet('WP COMMANDS')[2][7] = 'PENDING';
+    gas.processWpCommands();
+    assert.equal(status(gas, 3), 'ERROR');
+    assert.match(message(gas, 3), /niepełn/i);
+    // Żadnego zapisu treści do WordPressa: odmowa musi nastąpić przed próbą.
+    assert.equal(writes(gas).filter(w => w.body && w.body.content !== undefined).length, 0);
+  });
+
+  test('rollback ostrzega, gdy snapshot bezpieczeństwa wyszedł niepełny', () => {
+    // Strona urosła po zrobieniu snapshotu: sam snapshot jest pełny, ale kopia
+    // stanu sprzed rollbacku już się nie mieści, więc tego rollbacku nie cofniemy.
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł')],
+      snapshots: [['WP-S-STARY', 'CMD-0', 7, 'home', 'Stary', 'Ex', 'krótka treść', 'publish',
+        '2026-09-01T00:00:00', '2026-09-01', 'RM', 'Opis', 'TRUE', 'PAGE', '', '', 'FALSE']],
+      wp: fakeWordPress({ pages: [Object.assign({}, SAMPLE_PAGES[0], { content: hugeContent })] })
+    });
+    gas.$sheet('WP COMMANDS')[1][2] = 'RESTORE_SNAPSHOT';
+    gas.$sheet('WP COMMANDS')[1][3] = 'WP-S-STARY';
+    gas.$sheet('WP COMMANDS')[1][4] = '';
+    gas.$sheet('WP COMMANDS')[1][5] = '';
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.match(message(gas), /snapshot jest niepełny/i);
+  });
+
+  test('strona mieszcząca się w limicie zapisuje pełną treść i normalny rodzaj snapshotu', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł')]
+    });
+    gas.processWpCommands();
+    const snapshot = snapshots(gas)[0];
+    assert.equal(snapshot[13], 'PAGE');
+    assert.equal(snapshot[6], SAMPLE_PAGES[0].content);
+    assert.doesNotMatch(message(gas), /za długa/i);
   });
 });
 
