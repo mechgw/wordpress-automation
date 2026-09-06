@@ -73,14 +73,16 @@ function parseA1(a1, gridRows = 1) {
  * A sheet is a 2D grid with 1-based semantics (grid[r-1][c-1]); the fixture
  * rows start at row 1. Cells outside the grid read as ''.
  */
-function makeSheet(name, initialRows, sheetId = 0) {
+function makeSheet(name, initialRows, sheetId = 0, limits = null) {
   const grid = initialRows.map(r => r.slice());
   // Arkusz Google ma skończoną siatkę: nowy ma 1000 wierszy i 26 kolumn, a zapis
   // poza nią rzuca wyjątkiem zamiast ją powiększyć. Stub to odwzorowuje, bo
   // inaczej „zapis 5000 wierszy do nowego arkusza” przechodzi w teście i pada
   // dopiero u użytkownika.
-  let maxRows = Math.max(1000, grid.length);
-  let maxCols = Math.max(26, ...grid.map(r => r.length), 1);
+  let maxRows = (limits && limits.maxRows) || Math.max(1000, grid.length);
+  // Arkusz przycięty do kilkunastu kolumn to realny przypadek (użytkownik usunął
+  // nadmiar), a wtedy zapis szerszego wiersza wymaga wcześniejszego dołożenia kolumn.
+  let maxCols = (limits && limits.maxColumns) || Math.max(26, ...grid.map(r => r.length), 1);
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
@@ -195,6 +197,16 @@ function makeSheet(name, initialRows, sheetId = 0) {
 /** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
 function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   const instances = new Map();
+  // Fixture może podać { rows, maxRows, maxColumns } zamiast samej tablicy wierszy,
+  // żeby odwzorować arkusz o ograniczonej siatce.
+  const limits = {};
+  Object.keys(sheets).forEach(name => {
+    const value = sheets[name];
+    if (value && !Array.isArray(value) && typeof value === 'object') {
+      limits[name] = { maxRows: value.maxRows, maxColumns: value.maxColumns };
+      sheets[name] = value.rows || [];
+    }
+  });
   // Tab order, like the real spreadsheet: insertion order, mutated by moveActiveSheet.
   const order = Object.keys(sheets);
   let nextId = 100;
@@ -203,7 +215,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
     if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
     if (!instances.has(name)) {
       if (!ids.has(name)) ids.set(name, nextId++);
-      instances.set(name, makeSheet(name, sheets[name], ids.get(name)));
+      instances.set(name, makeSheet(name, sheets[name], ids.get(name), limits[name]));
     }
     return instances.get(name);
   };

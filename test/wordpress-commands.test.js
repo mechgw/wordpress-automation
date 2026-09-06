@@ -326,6 +326,21 @@ describe('UPDATE_RANK_MATH_FIELD i UPDATE_MEDIA_FIELD', () => {
     assert.match(message(gas), /Snapshot przed zmianą: WP-S-/);
   });
 
+  test('#88: arkusz snapshotów sprzed robots jest poszerzany o brakujące kolumny', () => {
+    // Istniejący arkusz ma dokładnie 15 kolumn nagłówka, więc zapis 17-kolumnowego
+    // wiersza wymaga najpierw dołożenia kolumn — inaczej setValues rzuca wyjątkiem.
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex')],
+      sheets: { 'WP SNAPSHOTS': { rows: [SNAPSHOTS_HEADER], maxColumns: SNAPSHOTS_HEADER.length } }
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    const header = gas.$sheet('WP SNAPSHOTS')[0];
+    assert.equal(header[15], 'rank_math_robots');
+    assert.equal(header[16], 'rank_math_robots_captured');
+    assert.equal(snapshots(gas)[0][16], 'TRUE');
+  });
+
   test('#88: pusta wartość czyści robots, kolejność dyrektyw nie powoduje fałszywego rozjazdu', () => {
     const pages = [Object.assign({}, SAMPLE_PAGES[0], { robots: 'noindex,follow' })];
     const cleared = project({ commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', '')], wp: fakeWordPress({ pages }) });
@@ -420,7 +435,7 @@ describe('RESTORE_SNAPSHOT', () => {
     assert.equal(gas.$wp.pages.get(7).title, 'Stary tytuł');
     assert.equal(snapshots(gas).length, 2, 'safety snapshot appended');
     assert.equal(snapshots(gas)[1][4], 'Home', 'safety snapshot holds the pre-rollback title');
-    assert.match(message(gas), /Przywrócono snapshot WP-S-1 dla strony ID 7 wraz z polami Rank Math\. Snapshot stanu sprzed rollbacku: WP-S-/);
+    assert.match(message(gas), /wraz z polami Rank Math\. UWAGA: snapshot powstał przed obsługą robots.*Snapshot stanu sprzed rollbacku: WP-S-/);
   });
 
   test('bez Rank Math w snapshocie pola SEO nie są dotykane', () => {
@@ -428,7 +443,38 @@ describe('RESTORE_SNAPSHOT', () => {
     const gas = project({ commands: [cmd('RESTORE_SNAPSHOT', 'WP-S-1')], snapshots: [snap] });
     gas.processWpCommands();
     assert.equal(writes(gas).length, 1);
-    assert.match(message(gas), /dla strony ID 7\. Snapshot stanu sprzed rollbacku/);
+    assert.match(message(gas), /dla strony ID 7\. UWAGA: snapshot powstał przed obsługą robots/);
+  });
+
+  test('#88: snapshot z robots cofa też robots i potwierdza to odczytem kontrolnym', () => {
+    const snap = pageSnapshot.slice().concat(['noindex,follow', 'TRUE']);
+    const pages = [Object.assign({}, SAMPLE_PAGES[0], { robots: 'index' })];
+    const gas = project({ commands: [cmd('RESTORE_SNAPSHOT', 'WP-S-1')], snapshots: [snap], wp: fakeWordPress({ pages }) });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    const robotsWrite = writes(gas).find(w => w.path.endsWith('/seo-robots'));
+    assert.deepEqual(robotsWrite.body, { post_id: 7, value: 'noindex,follow' });
+    assert.equal(gas.$wp.pages.get(7).robots, 'noindex,follow', 'ustawienie faktycznie cofnięte');
+    assert.match(message(gas), /Robots przywrócone: "noindex,follow"/);
+  });
+
+  test('#88: pusty robots w snapshocie też jest cofany, jako powrót do domyślnych', () => {
+    const snap = pageSnapshot.slice().concat(['', 'TRUE']);
+    const pages = [Object.assign({}, SAMPLE_PAGES[0], { robots: 'noindex' })];
+    const gas = project({ commands: [cmd('RESTORE_SNAPSHOT', 'WP-S-1')], snapshots: [snap], wp: fakeWordPress({ pages }) });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.equal(gas.$wp.pages.get(7).robots, '');
+    assert.match(message(gas), /Robots przywrócone: "domyślne Rank Math"/);
+  });
+
+  test('#88: rollback, który nie cofnął robots, jest błędem, a nie cichym sukcesem', () => {
+    const snap = pageSnapshot.slice().concat(['noindex', 'TRUE']);
+    const pages = [Object.assign({}, SAMPLE_PAGES[0], { robots: 'index' })];
+    const gas = project({ commands: [cmd('RESTORE_SNAPSHOT', 'WP-S-1')], snapshots: [snap], wp: fakeWordPress({ pages, readBackLies: true }) });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'ERROR');
+    assert.match(message(gas), /Rollback zapisał robots, ale odczyt kontrolny nie zgadza się ze snapshotem/);
   });
 
   test('przywraca snapshot MEDIA pole po polu z kontrolą', () => {

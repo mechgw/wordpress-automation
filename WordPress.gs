@@ -800,8 +800,8 @@ function ensureSnapshotMediaColumns_() {
   const sheet = ss.getSheetByName(WP_SNAPSHOTS_SHEET);
   if (!sheet) throw new Error('Brak arkusza ' + WP_SNAPSHOTS_SHEET);
 
-  if (sheet.getMaxColumns() < 15) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), 15 - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < 17) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), 17 - sheet.getMaxColumns());
   }
 
   if (!sheet.getRange(1, 14).getValue()) {
@@ -809,6 +809,12 @@ function ensureSnapshotMediaColumns_() {
   }
   if (!sheet.getRange(1, 15).getValue()) {
     sheet.getRange(1, 15).setValue('media_before_json');
+  }
+  if (!sheet.getRange(1, 16).getValue()) {
+    sheet.getRange(1, 16).setValue('rank_math_robots');
+  }
+  if (!sheet.getRange(1, 17).getValue()) {
+    sheet.getRange(1, 17).setValue('rank_math_robots_captured');
   }
 }
 
@@ -1418,7 +1424,9 @@ function saveSnapshot_(page, commandId) {
     rankMath.description,
     rankMath.available ? 'TRUE' : 'FALSE',
     'PAGE',
-    ''
+    '',
+    rankMath.robots,
+    rankMath.robotsAvailable ? 'TRUE' : 'FALSE'
   ]);
 
   return {
@@ -1590,7 +1598,24 @@ function restoreSnapshot_(command) {
     );
   }
 
+  // Robots trzeba cofnąć razem z resztą, inaczej rollback po pomyłkowym noindex
+  // zgłasza sukces, a strona zostaje wyłączona z indeksu.
+  if (snapshot.robotsCaptured) {
+    writeRankMathField_(Number(wpId), 'rank_math_robots', snapshot.rankMathRobots);
+  }
+
   const restored = getPageRawById_(wpId, snapshot.rankMathCaptured);
+
+  if (snapshot.robotsCaptured) {
+    const robotsAfter = getRankMathData_(restored);
+    if (!robotsEqual_(robotsAfter.robots, snapshot.rankMathRobots)) {
+      throw new Error(
+        'Rollback zapisał robots, ale odczyt kontrolny nie zgadza się ze snapshotem. ' +
+        'Oczekiwano: "' + snapshot.rankMathRobots + '", jest: "' + robotsAfter.robots + '".'
+      );
+    }
+  }
+
   const saved = savePageResult_(restored, command.id);
 
   saved.httpCode = response.code;
@@ -1598,6 +1623,9 @@ function restoreSnapshot_(command) {
     'Przywrócono snapshot ' + snapshotId +
     ' dla strony ID ' + wpId +
     (snapshot.rankMathCaptured ? ' wraz z polami Rank Math.' : '.') +
+    (snapshot.robotsCaptured
+      ? ' Robots przywrócone: "' + (snapshot.rankMathRobots || 'domyślne Rank Math') + '".'
+      : ' UWAGA: snapshot powstał przed obsługą robots, więc ustawienie robots NIE zostało cofnięte.') +
     ' Snapshot stanu sprzed rollbacku: ' + safetySnapshot.snapshotId;
 
   return saved;
@@ -1652,7 +1680,7 @@ function findSnapshot_(snapshotId) {
   if (!finder) return null;
 
   const row = finder.getRow();
-  const values = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  const values = sheet.getRange(row, 1, 1, 17).getValues()[0];
   const snapshotKind = String(values[13] || '').toUpperCase() || 'PAGE';
 
   let mediaBefore = null;
@@ -1678,6 +1706,10 @@ function findSnapshot_(snapshotId) {
     rankMathTitle: String(values[10] || ''),
     rankMathDescription: String(values[11] || ''),
     rankMathCaptured: String(values[12] || '').toUpperCase() === 'TRUE',
+    rankMathRobots: String(values[15] || ''),
+    // Starsze snapshoty (15 kolumn) nie mają robots; rollback ma o tym powiedzieć,
+    // zamiast po cichu zostawić zmienione ustawienie i zgłosić sukces.
+    robotsCaptured: String(values[16] || '').toUpperCase() === 'TRUE',
     snapshotKind,
     mediaBefore,
     row
