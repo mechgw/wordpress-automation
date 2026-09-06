@@ -29,7 +29,10 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
     return {
       id: Number(p.id), slug: p.slug || '', status: p.status || 'draft', link: p.link || `https://www.example.pl/${p.slug || ''}/`,
       title: p.title || '', excerpt: p.excerpt || '', content: p.content || '', modified: p.modified || '2026-09-01T00:00:00',
-      rankMath: Object.assign({ title: '', description: '' }, p.rankMath || {}), hasRankMath: p.hasRankMath !== false
+      rankMath: Object.assign({ title: '', description: '' }, p.rankMath || {}), hasRankMath: p.hasRankMath !== false,
+      // Robots wystawia osobne pole REST z page-layout-rest-bridge.php; hasRobots:false
+      // odwzorowuje instalację ze starym snippetem, bez obsługi robots.
+      robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false
     };
   }
   function normalizeMedia(m) {
@@ -42,7 +45,8 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
   const pageJson = p => ({
     id: p.id, slug: p.slug, status: p.status, link: p.link,
     title: { raw: p.title, rendered: p.title }, excerpt: { raw: p.excerpt, rendered: p.excerpt }, content: { raw: p.content, rendered: p.content },
-    modified: p.modified, ...(p.hasRankMath ? { cc_rank_math: { title: p.rankMath.title, description: p.rankMath.description } } : {})
+    modified: p.modified, ...(p.hasRankMath ? { cc_rank_math: { title: p.rankMath.title, description: p.rankMath.description } } : {}),
+    ...(p.hasRobots ? { cc_rank_math_robots: p.robots } : {})
   });
   const mediaJson = m => ({
     id: m.id, slug: m.slug, status: m.status, link: m.source_url, title: { raw: m.title, rendered: m.title }, alt_text: m.alt_text,
@@ -103,6 +107,21 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       const list = [...state.media.values()].filter(x => !search || x.title.toLowerCase().includes(search) || x.slug.includes(search));
       return ok(list.map(mediaJson));
     }
+    if (/^\/wp-json\/[a-z0-9_-]+\/v1\/seo-robots$/.test(u.pathname)) {
+      if (method === 'POST') {
+        const page = state.pages.get(Number(body.post_id));
+        if (!page) return notFound();
+        const list = String(body.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const allowed = ['index', 'noindex', 'follow', 'nofollow', 'noarchive', 'noimageindex', 'nosnippet'];
+        const bad = list.find(d => !allowed.includes(d));
+        if (bad) return { code: 400, text: JSON.stringify({ code: 'wp_automation_invalid_robots', message: 'Unsupported robots directive: ' + bad }) };
+        const before = page.robots;
+        if (!readBackLies) page.robots = list.join(',');
+        return ok({ post_id: page.id, before, robots: page.robots, changed: before !== page.robots });
+      }
+      return ok({ ok: true });
+    }
+
     if (/^\/wp-json\/[a-z0-9_-]+\/v1\/seo-meta$/.test(u.pathname)) {
       if (method === 'POST') {
         const page = state.pages.get(Number(body.post_id));

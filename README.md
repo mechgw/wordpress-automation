@@ -49,6 +49,12 @@ Opcjonalne:
 
 `WP_ALLOW_WRITES` powinno pozostać wyłączone, chyba że celowo wykonujesz operację zapisu.
 
+### Pola Rank Math, które most potrafi zapisać
+
+`UPDATE_RANK_MATH_FIELD` obsługuje `rank_math_title`, `rank_math_description` i `rank_math_robots`. Dwa pierwsze idą przez most `seo-meta`, robots przez endpoint `seo-robots` ze snippetu `wordpress/page-layout-rest-bridge.php` (wersja 1.1.0 i nowsza). Wartość robots wpisuje się jako listę po przecinku, na przykład `noindex,follow`; pusta wartość przywraca domyślne ustawienia Rank Math.
+
+Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
+
 ### Współbieżność i idempotencja
 
 - **Jeden lock skryptu** (`Lock.gs`, `LockService.getScriptLock`) obejmuje każdy import GSC/GA4 i całą pętlę *Wykonaj polecenia*. To krótkie `tryLock` (5 s) bez kolejkowania: drugie uruchomienie, które zastanie lock zajęty, kończy się komunikatem `Inne uruchomienie jeszcze trwa (…)`. Przy importach odmowa jest zapisywana jako nieudane uruchomienie w komórce statusu, więc utracony przebieg jest widoczny, zamiast dwóch przebiegów zapisujących ten sam arkusz albo tę samą stronę WordPressa.
