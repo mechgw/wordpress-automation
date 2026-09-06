@@ -101,6 +101,11 @@
       "pattern": "src/SheetUsage.gs",
       "threshold": 95,
       "rationale": "Nowy w #101 z pełnym pokryciem: pomiar zajętości, plan retencji, ochrona najnowszych snapshotów, potwierdzenie i anulowanie."
+    },
+    {
+      "pattern": "src/Payloads.gs",
+      "threshold": 95,
+      "rationale": "Nowy w #109 z pełnym pokryciem: sklejanie części, walidacja kompletności i rozmiaru, skrót treści, normalizacja przed porównaniem."
     }
   ]
 }
