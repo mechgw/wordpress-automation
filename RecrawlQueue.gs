@@ -325,7 +325,7 @@ function kolejkaRecrawl() {
  * te same puste znaczniki i wysłały tę samą listę dwa razy.
  */
 function kolejkaRecrawlTrigger() {
-  return withScriptLock_('kolejka recrawl', () => {
+  return recordJobRun_('RECRAWL', true, () => withScriptLock_('kolejka recrawl', () => {
     const summary = refreshRecrawlQueue_();
     Logger.log(recrawlSummaryText_(summary));
     if (!summary.newRecommended.length) return summary;
@@ -353,7 +353,7 @@ function kolejkaRecrawlTrigger() {
     if (sent) markRecrawlNotified_(summary, batch);
     summary.emailed = sent ? batch.length : 0;
     return summary;
-  });
+  }));
 }
 
 /** Instaluje codzienne przeliczanie kolejki (ok. 10:00, po live checku). */

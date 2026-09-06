@@ -176,7 +176,7 @@ function sprawdzIndeksowanie() {
 
 /** Handler triggera tygodniowego: bez okna, wynik w arkuszu i w logu. */
 function sprawdzIndeksowanieTrigger() {
-  const summary = withScriptLock_('inspekcja URL', runUrlInspection_);
+  const summary = recordJobRun_('URL_INSPECTION', true, () => withScriptLock_('inspekcja URL', runUrlInspection_));
   Logger.log(urlInspectionSummaryText_(summary));
   return summary;
 }

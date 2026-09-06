@@ -189,7 +189,7 @@ describe('strażnik nieaktualnych danych', () => {
     const out = gas.sprawdzAktualnoscImportow();
     assert.deepEqual(counts(out), { opened: 2, closed: 0 });
     assert.equal(gas.$mails.length, 1);
-    assert.equal(gas.$mails[0].subject, '[wordpress-automation] NIEAKTUALNE dane: 2 źródło(a)');
+    assert.equal(gas.$mails[0].subject, '[wordpress-automation] NIEAKTUALNE: 2 zadanie(a)');
     assert.match(gas.$mails[0].body, /- Search Console \(GSC\): NIEAKTUALNE – ostatni import/);
     assert.match(gas.$mails[0].body, /- Google Analytics 4 \(GA4\): BRAK IMPORTU/);
     assert.equal(record(gas, 'GSC').incident.reason, 'stale');
@@ -220,7 +220,7 @@ describe('strażnik nieaktualnych danych', () => {
     const out = gas.sprawdzAktualnoscImportow();
     assert.deepEqual(counts(out), { opened: 0, closed: 1 });
     assert.equal(gas.$mails.length, 1);
-    assert.match(gas.$mails[0].subject, /Dane znowu aktualne: 1 źródło\(a\)/);
+    assert.match(gas.$mails[0].subject, /Znowu aktualne: 1 zadanie\(a\)/);
     assert.equal(record(gas, 'GSC').incident.open, false);
     assert.equal(record(gas, 'GA4').incident.open, true, 'error incident belongs to the import path');
   });
@@ -236,7 +236,7 @@ describe('strażnik nieaktualnych danych', () => {
     const again = gas.sprawdzAktualnoscImportow();
     assert.deepEqual(counts(again), { opened: 0, closed: 0 }, 'no new incident');
     assert.equal(gas.$mails.length, 1);
-    assert.match(gas.$mails[0].subject, /NIEAKTUALNE dane: 1 źródło\(a\)/);
+    assert.match(gas.$mails[0].subject, /NIEAKTUALNE: 1 zadanie\(a\)/);
     assert.ok(record(gas, 'GSC').incident.notifiedAt);
 
     gas.sprawdzAktualnoscImportow();
@@ -352,38 +352,45 @@ describe('#69: strażnik z menu pokazuje wynik', () => {
     assert.deepEqual(gas.$triggers.map(t => t.getHandlerFunction()), ['sprawdzAktualnoscImportow'], 'trigger stays on the silent handler');
   });
 
-  test('wszystko aktualne → okno ze stanem obu źródeł, zerowymi licznikami i „e-mail niepotrzebny”', () => {
+  test('wszystko aktualne → okno ze stanem wszystkich zadań, zerowymi licznikami i „e-mail niepotrzebny”', () => {
     const gas = withRecords(fresh, fresh);
     gas.sprawdzAktualnoscImportowZMenu();
     const text = gas.$alerts[0][0];
-    assert.match(text, /^Sprawdzono aktualność importów:\n- Search Console \(GSC\): AKTYWNE – ostatni import: .*\n- Google Analytics 4 \(GA4\): AKTYWNE – .*\n\nOtwarte incydenty \(nieaktualne dane\): 0\nZamknięte incydenty \(dane znowu aktualne\): 0\nE-mail: niepotrzebny \(bez zmian\)\nAdresat: alerty@example\.pl$/);
+    assert.match(text, /^Sprawdzono aktualność zadań cyklicznych:\n- Search Console \(GSC\): AKTYWNE – ostatni import: /);
+    assert.match(text, /\n- Google Analytics 4 \(GA4\): AKTYWNE – /);
+    // Zadania monitorujące, których użytkownik nie włączył, są wymienione ze
+    // swoim stanem, ale nie są incydentem (#99).
+    for (const label of ['adresy z sitemap', 'inspekcja URL', 'live check SEO', 'kolejka recrawl']) {
+      assert.match(text, new RegExp('\\n- ' + label + ': BRAK PRZEBIEGU – uruchom zadanie z menu \\| trigger: NIE'));
+    }
+    assert.match(text, /\nOtwarte incydenty \(nieaktualne dane\): 0\nZamknięte incydenty \(dane znowu aktualne\): 0\nE-mail: niepotrzebny \(bez zmian\)\nAdresat: alerty@example\.pl$/);
     assert.equal(gas.$mails.length, 0);
   });
 
   test('nieaktualne źródło → okno mówi, że e-mail wyszedł i jaki', () => {
     const gas = withRecords(stale, fresh);
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /Otwarte incydenty \(nieaktualne dane\): 1\n.*\nE-mail: wysłany \(„NIEAKTUALNE dane: 1 źródło\(a\)”\)/);
+    assert.match(gas.$alerts[0][0], /Otwarte incydenty \(nieaktualne dane\): 1\n.*\nE-mail: wysłany \(„NIEAKTUALNE: 1 zadanie\(a\)”\)/);
     assert.equal(gas.$mails.length, 1);
   });
 
   test('nieaktualne źródło bez adresu → okno podaje powód niewysłania', () => {
     const gas = withRecords(stale, fresh, {});
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE dane: 1 źródło\(a\)”\): brak Script Property ALERT_EMAIL\nAdresat: wyłączone \(brak ALERT_EMAIL\)/);
+    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE: 1 zadanie\(a\)”\): brak Script Property ALERT_EMAIL\nAdresat: wyłączone \(brak ALERT_EMAIL\)/);
   });
 
   test('błędny adres → okno podaje nieprawidłowy adres jako powód', () => {
     const gas = withRecords(stale, fresh, { ALERT_EMAIL: 'TRUE' });
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE dane: 1 źródło\(a\)”\): nieprawidłowy adres w ALERT_EMAIL \(„TRUE”\)/);
+    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE: 1 zadanie\(a\)”\): nieprawidłowy adres w ALERT_EMAIL \(„TRUE”\)/);
   });
 
   test('awaria MailApp → okno cytuje komunikat błędu', () => {
     const gas = withRecords(stale, fresh);
     gas.MailApp.sendEmail = () => { throw new Error('Service invoked too many times: email'); };
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE dane: 1 źródło\(a\)”\): Service invoked too many times: email/);
+    assert.match(gas.$alerts[0][0], /E-mail: nie wysłano \(„NIEAKTUALNE: 1 zadanie\(a\)”\): Service invoked too many times: email/);
   });
 
   test('zamknięcie incydentu stale przy ALERT_RECOVERY=FALSE → okno mówi, że mail o powrocie został pominięty', () => {
@@ -393,7 +400,7 @@ describe('#69: strażnik z menu pokazuje wynik', () => {
       { ...MAIL, ALERT_RECOVERY: 'FALSE' }
     );
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /Zamknięte incydenty \(dane znowu aktualne\): 1\nE-mail: pominięty \(„Dane znowu aktualne: 1 źródło\(a\)”\): ALERT_RECOVERY=FALSE\n/);
+    assert.match(gas.$alerts[0][0], /Zamknięte incydenty \(dane znowu aktualne\): 1\nE-mail: pominięty \(„Znowu aktualne: 1 zadanie\(a\)”\): ALERT_RECOVERY=FALSE\n/);
     assert.equal(gas.$mails.length, 0);
     assert.equal(record(gas).incident.open, false);
   });
@@ -404,7 +411,7 @@ describe('#69: strażnik z menu pokazuje wynik', () => {
       stale
     );
     gas.sprawdzAktualnoscImportowZMenu();
-    assert.match(gas.$alerts[0][0], /Otwarte incydenty \(nieaktualne dane\): 1\nZamknięte incydenty \(dane znowu aktualne\): 1\nE-mail: wysłany \(„NIEAKTUALNE dane: 1 źródło\(a\)”\); wysłany \(„Dane znowu aktualne: 1 źródło\(a\)”\)/);
+    assert.match(gas.$alerts[0][0], /Otwarte incydenty \(nieaktualne dane\): 1\nZamknięte incydenty \(dane znowu aktualne\): 1\nE-mail: wysłany \(„NIEAKTUALNE: 1 zadanie\(a\)”\); wysłany \(„Znowu aktualne: 1 zadanie\(a\)”\)/);
     assert.equal(gas.$mails.length, 2);
   });
 });

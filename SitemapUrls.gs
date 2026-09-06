@@ -237,7 +237,7 @@ function odswiezMonitoringZSitemap() {
 
 /** Handler triggera tygodniowego: bez okna, wynik w arkuszach i w logu. */
 function odswiezMonitoringZSitemapTrigger() {
-  const out = withScriptLock_('adresy z sitemap', refreshSitemapMonitoring_);
+  const out = recordJobRun_('SITEMAP_URLS', true, () => withScriptLock_('adresy z sitemap', refreshSitemapMonitoring_));
   Logger.log(sitemapMonitoringSummaryText_(out));
   return out;
 }

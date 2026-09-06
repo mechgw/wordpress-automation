@@ -68,7 +68,7 @@ describe('Status.gs recordImportRun_', () => {
 
   test('unknown source is rejected', () => {
     const gas = loadProject({ sheets: statusSheets() });
-    assert.throws(() => gas.recordImportRun_('ADS', false, () => ({})), /Nieznane źródło importu: ADS/);
+    assert.throws(() => gas.recordImportRun_('ADS', false, () => ({})), /Nieznane zadanie cykliczne: ADS/);
   });
 });
 
@@ -112,10 +112,10 @@ describe('Status.gs importStatusText_', () => {
     const edge = gas.$get('IMPORT_STALE_AFTER_HOURS') * 3600 * 1000;
     const now = new gas.$Date(2026, 8, 5, 12, 0, 0);
     const okAt = { finishedAt: new Date(now.getTime() - edge).toISOString() };
-    assert.equal(gas.isImportStale_(okAt, now), false);
-    assert.equal(gas.isImportStale_({ finishedAt: new Date(now.getTime() - edge - 1000).toISOString() }, now), true);
-    assert.equal(gas.isImportStale_({ finishedAt: new Date(now.getTime() + 60000).toISOString() }, now), true, 'a future timestamp is not trusted');
-    assert.equal(gas.isImportStale_(null, now), true);
+    assert.equal(gas.isJobStale_('GSC', okAt, now), false);
+    assert.equal(gas.isJobStale_('GSC', { finishedAt: new Date(now.getTime() - edge - 1000).toISOString() }, now), true);
+    assert.equal(gas.isJobStale_('GSC', { finishedAt: new Date(now.getTime() + 60000).toISOString() }, now), true, 'a future timestamp is not trusted');
+    assert.equal(gas.isJobStale_('GSC', null, now), true);
   });
 
   test('failed run after an old success combines both flags', () => {
@@ -152,7 +152,7 @@ describe('Status.gs cells, menu and dialog', () => {
     assert.deepEqual(gas.$menus.map(m => m.title), ['SEO / GSC', 'GA4 / Ads', 'WordPress', 'Dane', 'dev']);
   });
 
-  test('showImportStatus lists both sources with schedule, last run and the staleness rule', () => {
+  test('showImportStatus lists every scheduled job with schedule, last run and the staleness rule', () => {
     const gas = loadProject({
       sheets: statusSheets(),
       triggers: ['importDzienny'],
@@ -160,9 +160,11 @@ describe('Status.gs cells, menu and dialog', () => {
     });
     gas.showImportStatus();
     const text = gas.$alerts[0][0];
-    assert.match(text, /^Search Console \(GSC\)\n {2}AKTYWNE – ostatni import: .* \| 3 wierszy \| trigger: TAK\n {2}Harmonogram: codziennie ok\. 05:00 \(Konfiguracja GSC!B8\)\n {2}Ostatnie uruchomienie: .* \| OK \| trigger \| 4 s\n/);
-    assert.match(text, /Google Analytics 4 \(GA4\)\n {2}BRAK IMPORTU – uruchom import z menu \| trigger: NIE\n {2}Harmonogram: codziennie ok\. 06:00 \(Konfiguracja GA4!B9\)\n/);
-    assert.match(text, /nieaktualne po 36 h/);
+    assert.match(text, /^Search Console \(GSC\)\n {2}AKTYWNE – ostatni import: .* \| 3 wierszy \| trigger: TAK\n {2}Harmonogram: codziennie ok\. 05:00 \(Konfiguracja GSC!B8\) \| nieaktualne po 36 h\n {2}Ostatnie uruchomienie: .* \| OK \| trigger \| 4 s\n/);
+    assert.match(text, /Google Analytics 4 \(GA4\)\n {2}BRAK IMPORTU – uruchom import z menu \| trigger: NIE\n {2}Harmonogram: codziennie ok\. 06:00 \(Konfiguracja GA4!B9\) \| nieaktualne po 36 h\n/);
+    // Zadania monitorujące są w tym samym oknie, z własnym progiem (#99).
+    assert.match(text, /kolejka recrawl\n {2}BRAK PRZEBIEGU – uruchom zadanie z menu \| trigger: NIE\n {2}Harmonogram: codziennie ok\. 10:00 \| nieaktualne po 36 h\n/);
+    assert.match(text, /inspekcja URL\n {2}BRAK PRZEBIEGU – uruchom zadanie z menu \| trigger: NIE\n {2}Harmonogram: poniedziałek ok\. 07:00 \| nieaktualne po 192 h\n/);
   });
 });
 
