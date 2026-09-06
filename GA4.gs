@@ -15,6 +15,7 @@ function addGa4Menu_() {
     .addItem('Importuj dzień', 'importGA4Dzienny')
     .addItem('Diagnozuj zdarzenia GA4', 'diagnozujZdarzeniaGA4')
     .addItem('Skonfiguruj główne key events', 'konfigurujGlowneKeyEventsGA4')
+    .addItem('Eksperyment: koszty Ads z GA4 Data API', 'eksperymentKosztyAds')
     .addSeparator()
     .addItem('Włącz codzienny import', 'ustawAutomatycznyImportGA4')
     .addToUi();
