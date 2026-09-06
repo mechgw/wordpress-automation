@@ -199,7 +199,13 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
     insertRowsAfter(after, howMany = 1) { maxRows += howMany; return sheet; },
     insertRowBefore(row) { grid.splice(row - 1, 0, []); return this; },
     insertColumnsAfter(after, howMany = 1) { maxCols += howMany; return sheet; },
-    deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
+    // Usunięcie wierszy zmniejsza też siatkę, tak jak w Arkuszach; bez tego
+    // przycinanie pustego przydziału (#118) wyglądałoby w testach na nieskuteczne.
+    deleteRows(row, n = 1) {
+      grid.splice(row - 1, n);
+      maxRows = Math.max(1, maxRows - n);
+      return this;
+    },
     setFrozenRows() { return this; },
     setColumnWidth() { return this; },
     appendRow(row) {

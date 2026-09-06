@@ -123,6 +123,99 @@ function deleteSheetRows_(sheet, rows) {
   return rows.length;
 }
 
+/**
+ * Przycinanie pustego przydziału wierszy (#118).
+ *
+ * Google liczy do limitu całą siatkę, nie wypełnione komórki, więc zakładka
+ * z 6,5 tys. wierszy danych rozciągnięta na 100 tys. wierszy zajmuje
+ * piętnastokrotnie więcej, niż powinna. Usunięcie pustych wierszy PONIŻEJ
+ * ostatniego wypełnionego nie dotyka żadnej danej.
+ *
+ * Zapas: zostawiamy TRIM_SPARE_ROWS wolnych wierszy, żeby najbliższe importy
+ * miały gdzie pisać, a i tak każdy zapis powiększa siatkę, gdy zabraknie
+ * miejsca (ensureSheetRows_).
+ */
+const TRIM_SPARE_ROWS = 2000;
+/** Poniżej tylu zbędnych wierszy przycinanie nie jest warte zachodu. */
+const TRIM_MIN_GAIN_ROWS = 1000;
+
+/** Plan przycięcia: ile wierszy da się usunąć w każdej zakładce i ile to komórek. */
+function planRowTrim_() {
+  const sheets = [];
+  let cells = 0;
+
+  SpreadsheetApp.getActive().getSheets().forEach(function (sheet) {
+    const maxRows = sheet.getMaxRows();
+    const lastRow = sheet.getLastRow();
+    const keep = lastRow + TRIM_SPARE_ROWS;
+    const removable = maxRows - keep;
+    if (removable < TRIM_MIN_GAIN_ROWS) return;
+    const cols = sheet.getMaxColumns();
+    sheets.push({
+      name: sheet.getName(),
+      maxRows: maxRows,
+      lastRow: lastRow,
+      keep: keep,
+      remove: removable,
+      cells: removable * cols
+    });
+    cells += removable * cols;
+  });
+
+  sheets.sort(function (a, b) { return b.cells - a.cells; });
+  return { sheets: sheets, cells: cells };
+}
+
+/**
+ * Menu: przycięcie po potwierdzeniu. Usuwa wyłącznie wiersze poniżej ostatniego
+ * wypełnionego, więc nie kasuje danych. Może natomiast zepsuć formułę, która
+ * odwołuje się wprost do komórki w usuwanym zakresie, i dialog o tym mówi.
+ */
+function przytnijPusteWiersze() {
+  const ui = SpreadsheetApp.getUi();
+  const plan = planRowTrim_();
+
+  if (!plan.sheets.length) {
+    ui.alert('Nie ma czego przycinać. ' + sheetUsageLine_());
+    return { sheets: 0, rows: 0, cells: 0 };
+  }
+
+  const detail = plan.sheets.map(function (s) {
+    return '• ' + s.name + ': ' + s.maxRows + ' → ' + s.keep + ' wierszy (dane do ' + s.lastRow + ')';
+  }).join('\n');
+
+  const answer = ui.alert(
+    'Przyciąć puste wiersze w ' + plan.sheets.length + ' zakładce(ach)?\n\n' + detail +
+    '\n\nZwolni to ' + plan.cells + ' komórek. Usuwane są wyłącznie wiersze poniżej ostatniego ' +
+    'wypełnionego, więc żadna dana nie ginie, a w każdej zakładce zostaje ' + TRIM_SPARE_ROWS +
+    ' wolnych wierszy zapasu.\n\n' +
+    'UWAGA: formuła odwołująca się wprost do komórki z usuwanego zakresu (np. A50000) ' +
+    'pokaże po tym #REF!. Zakresy typu A2:A pozostają poprawne.',
+    ui.ButtonSet.YES_NO
+  );
+  if (answer !== ui.Button.YES) {
+    ui.alert('Anulowano. Nic nie zostało usunięte.');
+    return { sheets: 0, rows: 0, cells: 0 };
+  }
+
+  const ss = SpreadsheetApp.getActive();
+  let rows = 0;
+  plan.sheets.forEach(function (entry) {
+    const sheet = ss.getSheetByName(entry.name);
+    if (!sheet) return;
+    // Liczymy jeszcze raz na świeżo: między podglądem a potwierdzeniem mógł
+    // wejść import i dopisać wiersze.
+    const keep = sheet.getLastRow() + TRIM_SPARE_ROWS;
+    const removable = sheet.getMaxRows() - keep;
+    if (removable < 1) return;
+    sheet.deleteRows(keep + 1, removable);
+    rows += removable;
+  });
+
+  ui.alert('Przycięto ' + rows + ' pustych wierszy w ' + plan.sheets.length + ' zakładce(ach).\n' + sheetUsageLine_());
+  return { sheets: plan.sheets.length, rows: rows, cells: plan.cells };
+}
+
 /** Menu: zajętość arkusza, największe zakładki i plan czyszczenia. */
 function pokazZajetoscArkusza() {
   const usage = sheetUsage_();

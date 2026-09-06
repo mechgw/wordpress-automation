@@ -85,6 +85,8 @@ Czyszczenie nie jest automatyczne i nie ma triggera. Snapshot jest siatką bezpi
 
 `SEO LIVE`, `URL INSPEKCJA` i `RECRAWL QUEUE` mają jeden wiersz na adres, aktualizowany w miejscu. Rosną więc razem z serwisem i retencji nie potrzebują.
 
+Osobnym i zwykle większym problemem jest pusty przydział. Google liczy do limitu całą siatkę, nie wypełnione komórki, więc zakładka z kilkoma tysiącami wierszy danych rozciągnięta na sto tysięcy wierszy zajmuje kilkanaście razy więcej, niż powinna. *Dane → Przytnij puste wiersze* usuwa wyłącznie wiersze poniżej ostatniego wypełnionego, zostawiając dwa tysiące wolnych na zapas, i pokazuje przed usunięciem, co dokładnie zniknie. Żadna dana przy tym nie ginie, ale formuła odwołująca się wprost do komórki z usuwanego zakresu pokaże potem #REF!, i dialog o tym uprzedza.
+
 ### Monitoring zadań cyklicznych
 
 Wszystkie zadania cykliczne, nie tylko importy GSC i GA4, zapisują czas ostatniego udanego przebiegu i podlegają temu samemu modelowi incydentów: jeden e-mail przy otwarciu, cisza w trakcie, e-mail przy powrocie do normy. Bez tego zadanie, które przestało działać, byłoby nieodróżnialne od zadania, które nie ma nic do zgłoszenia, bo kolejka recrawl i live check SEO piszą maila tylko wtedy, gdy coś znajdą.
