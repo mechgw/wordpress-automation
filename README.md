@@ -19,6 +19,7 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `UrlInspection.gs` — Google index status of key URLs from the Search Console URL Inspection API, written into the `URL INSPEKCJA` sheet.
 - `SeoLive.gs` — live SEO regression check: fetches key URLs and compares status, redirect target, title, H1, canonical, robots and schema with the expectations in the `SEO LIVE` sheet.
 - `Sitemaps.gs` — sitemap status from the Search Console Sitemaps API, written into the `SITEMAPY` sheet and summarised in *Status danych*.
+- `Diagnostics.gs` — read-only smoke test from the menu: Script Properties, sheets, GSC / GA4 / WordPress access, triggers, alert configuration, one report per step.
 - `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
@@ -101,6 +102,10 @@ The result is the state **in Google's index**, not the live page: after changing
 ### Sitemaps (what Search Console knows about them)
 
 *SEO / GSC → Sprawdź sitemapy (SITEMAPY)* lists the sitemaps of the configured property through the Search Console Sitemaps API and rewrites the `SITEMAPY` sheet: path, type (index or plain sitemap), submitted and last-downloaded time, pending flag, submitted URL count, warnings, errors, state and check time. The sheet is a snapshot of the API, not an editable list. The state is `OK` or `UWAGA` for exactly these cases: `errors > 0`, a sitemap still pending more than 7 days after submission, a sitemap listed in the optional Script Property `EXPECTED_SITEMAPS` (comma-separated URLs) that Search Console does not have (it gets its own row), or an API error. The last-download time is informational only; Google does not treat an old download as a fault, so the script does not either. The summary is stored in `SITEMAPS_STATUS` and shown as one line in *Dane → Status danych*, including the API error if the last check failed.
+
+### System diagnostics (why does something not work?)
+
+*Dane → Diagnostyka systemu (tylko odczyt)* runs `smokeTest()` and shows one line per step: required Script Properties (and which optional ones are set; the value of `ALERT_EMAIL` is never printed, valid or not, only whether it is configured and whether it parses as an address), configuration sheets and expected tabs, a Search Console read (site list, is `siteUrl` among the properties and with which permission), a GA4 Data API read (property metadata), a WordPress read (`/wp/v2/users/me`: who the application password logs in as and whether it can edit pages, plus the write and dry-run switches), installed triggers, alert recipient (configured / invalid / absent, never the address itself) and sitemap state. Every step runs even when an earlier one fails, errors keep their HTTP code, and nothing is written anywhere: no sheet, no Script Property, no WordPress call other than GET, no lock. It does not run from CI (see #54: `clasp run` and reading a cell were rejected as too expensive to configure); the deploy verification (#44) proves the right files are live, the status model (#43, #42) tells whether the real processes work, and this dialog tells why they do not.
 
 ### GitHub repository secrets
 
