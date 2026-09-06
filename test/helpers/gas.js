@@ -25,7 +25,7 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..', '..', 'src');
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -353,6 +353,10 @@ function createStubs(opts) {
       formatDate,
       base64Encode: s => Buffer.from(String(s), 'utf8').toString('base64'),
       ungzip: blob => ({ getDataAsString: () => (blob && blob.$gzip !== undefined ? blob.$gzip : '') }),
+      // Skrót treści: prawdziwe computeDigest zwraca bajty ze znakiem, więc
+      // stub robi to samo, żeby konwersja na hex była testowana naprawdę (#109).
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      computeDigest: (_alg, value) => Array.from(require('crypto').createHash('sha256').update(String(value), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
       getUuid: () => '00000000-0000-4000-8000-000000000000',
       sleep() {}
     },

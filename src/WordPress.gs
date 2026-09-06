@@ -17,6 +17,7 @@ function addWpMenu_() {
     .addItem('Test biblioteki mediów', 'testWpMediaAccess')
     .addItem('Wykonaj polecenia', 'processWpCommands')
     .addItem('Wykonaj wiersze DRY_RUN naprawdę', 'executeDryRunCommands')
+    .addItem('Przygotuj zakładkę payloadów', 'przygotujZakladkePayloadow')
     .addToUi();
 }
 
@@ -162,8 +163,21 @@ function wpDryRunSignal_(request) {
   return signal;
 }
 
+/**
+ * Opis żądania w trybie próbnym. Duży payload jest opisywany rozmiarem
+ * i skrótem zamiast treścią (#109): wklejanie setek kilobajtów HTML do komórki
+ * wyniku i tak by się nie udało, a przy okazji zaśmiecałoby arkusz.
+ */
+const DRY_RUN_PAYLOAD_PREVIEW = 3000;
+
 function describeDryRunRequest_(request) {
-  const payload = request.payload === null ? '' : ' | payload: ' + String(request.payload).slice(0, 3000);
+  let payload = '';
+  if (request.payload !== null) {
+    const text = String(request.payload);
+    payload = text.length > DRY_RUN_PAYLOAD_PREVIEW
+      ? ' | payload: ' + text.length + ' znaków, skrót ' + contentDigest_(text) + ' (za duży, żeby go tu wypisać)'
+      : ' | payload: ' + text;
+  }
   return 'DRY RUN – nie wysłano. ' + request.method + ' ' + request.url + payload;
 }
 
@@ -1346,6 +1360,13 @@ function updatePageField_(command) {
     );
   }
 
+  // 0. Duża treść przychodzi referencją do zakładki payloadów, bo komórka
+  //    mieści 50 000 znaków (#109). Sklejamy i walidujemy PRZED snapshotem:
+  //    niekompletny payload ma zatrzymać komendę, zanim cokolwiek się zmieni.
+  const usesPayload = command.field === 'content' && isPayloadReference_(command.value);
+  const payloadSource = usesPayload ? resolvePayload_(command.value) : null;
+  const value = payloadSource ? payloadSource.text : command.value;
+
   // 1. Zawsze pobieramy aktualny stan bezpośrednio przed zapisem.
   const before = getPageRawById_(command.target);
 
@@ -1354,7 +1375,7 @@ function updatePageField_(command) {
 
   // 3. Dopiero potem wykonujemy zmianę.
   const payload = {};
-  payload[command.field] = command.value;
+  payload[command.field] = value;
 
   const response = wpFetch_(
     '/wp-json/wp/v2/pages/' + encodeURIComponent(command.target),
@@ -1370,12 +1391,29 @@ function updatePageField_(command) {
 
   // 4. Odczyt kontrolny po zapisie.
   const after = getPageRawById_(command.target);
+
+  // Przy payloadzie porównujemy skrótem, a nie treścią: cały HTML i tak nie
+  // zmieściłby się w komórce wyniku, a skrót wystarczy, żeby wykryć rozjazd.
+  if (payloadSource) {
+    const actual = normalizeContentForCompare_(getRawValue_(after.content));
+    const expected = normalizeContentForCompare_(payloadSource.text);
+    if (contentDigest_(actual) !== contentDigest_(expected)) {
+      throw new Error(
+        'WordPress przyjął zapis, ale odczyt kontrolny nie zgadza się z payloadem. ' +
+        'Wysłano ' + expected.length + ' znaków (skrót ' + contentDigest_(expected) + '), ' +
+        'odczytano ' + actual.length + ' znaków (skrót ' + contentDigest_(actual) + '). ' +
+        'Najczęstsza przyczyna to filtrowanie treści przez WordPressa przy braku uprawnienia unfiltered_html.'
+      );
+    }
+  }
+
   const saved = savePageResult_(after, command.id);
 
   saved.httpCode = response.code;
   saved.message =
     'Zaktualizowano ' + command.field +
     ' strony ID ' + command.target +
+    (payloadSource ? ' z ' + payloadSummaryText_(payloadSource) : '') +
     '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;

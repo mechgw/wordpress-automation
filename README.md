@@ -97,6 +97,16 @@ Próg nieaktualności jest ustawiany per zadanie: doba z okładem dla zadań cod
 
 Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorujące bez zainstalowanego triggera, które nigdy nie działało, jest nieużywane, a nie zepsute, i milczy. Zadanie z triggerem, które jeszcze nie zapisało przebiegu, dostaje swój własny próg na pierwsze uruchomienie: tak wygląda instalacja tuż po włączeniu monitoringu, gdzie trigger jest od dawna, a znacznik dopiero się pojawił. Dopiero gdy próg minie bez ani jednego przebiegu, otwiera się incydent. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
 
+### Duża treść strony
+
+Komórka arkusza mieści 50 000 znaków, więc pełna wymiana treści długiej strony nie mieściła się w kolumnie `value` polecenia. Treść przychodzi wtedy z zakładki `WP PAYLOADS`, podzielona na części, a w `WP COMMANDS` zostaje sama referencja `payload:<identyfikator>`.
+
+*WordPress → Przygotuj zakładkę payloadów* tworzy zakładkę z właściwymi nagłówkami i tłumaczy sposób użycia. Części są sklejane w kolejności kolumny `part`, która musi iść od 1 bez luk i duplikatów; niekompletny payload zatrzymuje polecenie **przed** snapshotem i przed jakimkolwiek zapisem, bo strona z dziurą w treści jest gorsza niż polecenie, które się nie wykonało.
+
+Nośnikiem jest zakładka, a nie plik na Dysku. Dysk wymagałby nowego zakresu OAuth i ponownej autoryzacji projektu, a treść strony i tak należy do tego samego arkusza co reszta pracy.
+
+Cały model bezpieczeństwa działa bez zmian: `WP_ALLOW_WRITES`, `WP_DRY_RUN`, `confirm=YES`, snapshot przed zmianą, idempotencja po `command_id`. Po zapisie treść jest porównywana skrótem SHA-256 zamiast kopiowaniem HTML-a do komórki wyniku, a rozjazd kończy się błędem wskazującym najczęstszą przyczynę, czyli filtrowanie treści przez WordPressa przy braku uprawnienia `unfiltered_html`. Tryb próbny opisuje duży payload rozmiarem i skrótem, nie treścią.
+
 ### Współbieżność i idempotencja
 
 - **Jeden lock skryptu** (`Lock.gs`, `LockService.getScriptLock`) obejmuje każdy import GSC/GA4 i całą pętlę *Wykonaj polecenia*. To krótkie `tryLock` (5 s) bez kolejkowania: drugie uruchomienie, które zastanie lock zajęty, kończy się komunikatem `Inne uruchomienie jeszcze trwa (…)`. Przy importach odmowa jest zapisywana jako nieudane uruchomienie w komórce statusu, więc utracony przebieg jest widoczny, zamiast dwóch przebiegów zapisujących ten sam arkusz albo tę samą stronę WordPressa.
