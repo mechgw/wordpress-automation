@@ -19,8 +19,8 @@
     },
     {
       "pattern": "Kod.gs",
-      "threshold": 95,
-      "rationale": "RATCHET 2026-09-06: testPolaczenia and showDeployedVersion are now covered end to end (97%). Remaining: error branches of importRange_ and the sheet-formatting tail of replaceRange_."
+      "threshold": 96,
+      "rationale": "ZAPADKA 2026-09-07: pokrycie 96,88%. Poza zasięgiem zostają gałęzie błędów importRange_ i formatujący ogon replaceRange_."
     },
     {
       "pattern": "GA4.gs",
@@ -74,8 +74,28 @@
     },
     {
       "pattern": "WordPress.gs",
-      "threshold": 94,
-      "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94.7%). RATCHET 2026-09-06: threshold raised to match. Remaining lines are alert texts of the menu tests."
+      "threshold": 95,
+      "rationale": "ZAPADKA 2026-09-07 (#88): snapshoty z robots i rollback domknęły plik do 95,13%. Poza zasięgiem zostają teksty alertów w testach menu."
+    },
+    {
+      "pattern": "ForminatorHistory.gs",
+      "threshold": 95,
+      "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
+    },
+    {
+      "pattern": "GlobalFooterMigration.gs",
+      "threshold": 95,
+      "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
+    },
+    {
+      "pattern": "CodeSnippets.gs",
+      "threshold": 95,
+      "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
+    },
+    {
+      "pattern": "FormSourcePageContext.gs",
+      "threshold": 95,
+      "rationale": "ZAPADKA 2026-09-07: plik ma 100% pokrycia, a stał na progu domyślnym 80%. Próg 95% jak dla pozostałych plików funkcyjnych."
     }
   ]
 }
