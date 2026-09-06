@@ -285,6 +285,86 @@ describe('#118: przycinanie pustego przydziału wierszy', () => {
   });
 });
 
+describe('#118: wykrywanie odwołań do usuwanego obszaru', () => {
+  const limits = { 'GSC RAW': { keep: 8545 }, 'GA4 RAW': { keep: 3315 } };
+  const risky = f => plain(loadProject({}).riskyReferences_(f, limits));
+
+  test('zakres z wpisanym numerem wiersza poza granicą jest zgłaszany', () => {
+    // Realna formuła z produkcji, która przeżyłaby przycięcie i dopiero po
+    // kilku tygodniach zaczęłaby po cichu gubić nowe dni.
+    const found = risky("=MAP(A2:A;LAMBDA(d;JEŻELI(d=\"\";\"\";SUMA.JEŻELI('GSC RAW'!L2:L100000;d;'GSC RAW'!F2:F100000))))");
+    assert.equal(found.length, 2, 'oba zakresy w jednej formule');
+    assert.deepEqual(found[0], { target: 'GSC RAW', bound: 100000, keep: 8545 });
+  });
+
+  test('zakres otwarty jest bezpieczny i nie jest zgłaszany', () => {
+    assert.deepEqual(risky("=SUMA.JEŻELI('GSC RAW'!L2:L;d;'GSC RAW'!F2:F)"), []);
+    assert.deepEqual(risky("=SUMA('GSC RAW'!F:F)"), []);
+  });
+
+  test('zakres mieszczący się w tym, co zostaje, nie jest zgłaszany', () => {
+    assert.deepEqual(risky("=SUMA('GSC RAW'!F2:F8000)"), [], 'poniżej granicy 8545');
+  });
+
+  test('odwołanie do pojedynczej komórki poza granicą jest zgłaszane', () => {
+    const found = risky("='GA4 RAW'!B90000");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].bound, 90000);
+  });
+
+  test('nazwa bez apostrofów też jest rozpoznawana', () => {
+    const gas = loadProject({});
+    const found = plain(gas.riskyReferences_('=SUM(Dane!A2:A99999)', { Dane: { keep: 100 } }));
+    assert.equal(found.length, 1);
+    assert.equal(found[0].target, 'Dane');
+  });
+
+  test('odwołanie do zakładki, której nie przycinamy, jest ignorowane', () => {
+    assert.deepEqual(risky("=SUMA('SEO Calc'!F2:F100000)"), [], 'ta zakładka nie jest w planie');
+  });
+
+  test('plan wskazuje konkretną komórkę z ryzykownym odwołaniem', () => {
+    const rows = [['nagłówek', 'nagłówek'], ['x', '']];
+    const formulas = [['', ''], ['', "=SUMA.JEŻELI('GSC RAW'!L2:L100000;A2;'GSC RAW'!F2:F100000)"]];
+    const gas = loadProject({
+      sheets: {
+        'GSC RAW': { rows: [['a']], maxRows: 100000, maxColumns: 12 },
+        'SEO Calc': { rows: rows, formulas: formulas, maxRows: 5000, maxColumns: 2 }
+      }
+    });
+    const risks = plain(gas.planReferenceRisks_(plain(gas.planRowTrim_())));
+    assert.equal(risks.length, 2);
+    assert.equal(risks[0].where, 'SEO Calc!B2');
+    assert.equal(risks[0].target, 'GSC RAW');
+  });
+
+  test('dialog wymienia znalezione odwołania i mówi, że nic nie pęknie od razu', () => {
+    const formulas = [['', ''], ['', "=SUMA('GSC RAW'!F2:F100000)"]];
+    const gas = loadProject({
+      sheets: {
+        'GSC RAW': { rows: [['a']], maxRows: 100000, maxColumns: 12 },
+        'SEO Calc': { rows: [['n', 'n'], ['x', '']], formulas: formulas, maxRows: 5000, maxColumns: 2 }
+      }
+    });
+    gas.$ui.$answer = 'NO';
+    gas.przytnijPusteWiersze();
+    const text = gas.$alerts[0][0];
+    assert.match(text, /ZNALEZIONO 1 ODWOŁANIE\(A\) DO USUWANEGO OBSZARU/);
+    assert.match(text, /• SEO Calc!B2 → GSC RAW do wiersza 100000 \(zostanie 2001\)/);
+    assert.match(text, /nic od razu nie pęknie/);
+    assert.match(text, /najpierw zamień te zakresy na otwarte/);
+  });
+
+  test('bez ryzykownych odwołań dialog zachowuje krótkie ostrzeżenie', () => {
+    const gas = loadProject({ sheets: { 'GSC RAW': { rows: [['a']], maxRows: 100000, maxColumns: 12 } } });
+    gas.$ui.$answer = 'NO';
+    gas.przytnijPusteWiersze();
+    const text = gas.$alerts[0][0];
+    assert.doesNotMatch(text, /ZNALEZIONO/);
+    assert.match(text, /Zakresy typu A2:A pozostają poprawne/);
+  });
+});
+
 describe('#101: okno zajętości', () => {
   test('przy wielu zakładkach okno pokazuje dwanaście największych i liczbę reszty', () => {
     const sheets = {};

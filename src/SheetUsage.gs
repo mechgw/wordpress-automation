@@ -205,10 +205,95 @@ function planRowTrim_() {
   return { sheets: sheets, cells: cells };
 }
 
+/** Ile wierszy formuł skanujemy w jednej zakładce, szukając ryzykownych odwołań. */
+const REFERENCE_SCAN_MAX_ROWS = 20000;
+/** Ile ryzykownych odwołań wypisujemy w dialogu, zanim przejdziemy na licznik. */
+const REFERENCE_RISK_LIST_LIMIT = 10;
+
+/**
+ * Odwołanie do arkusza: 'Nazwa z odstępem'!A2:B100 albo Nazwa!A2. Interesuje nas
+ * nazwa zakładki i numer wiersza, na którym odwołanie się kończy.
+ */
+const REFERENCE_PATTERN = /(?:'([^']+)'|([A-Za-z0-9_]+))!\$?[A-Z]{1,3}\$?(\d+)?(?::\$?[A-Z]{1,3}\$?(\d+)?)?/g;
+
+/** Numer kolumny na literę, do wskazania komórki w komunikacie. */
+function columnLetter_(index) {
+  let n = index;
+  let out = '';
+  while (n > 0) {
+    const rest = (n - 1) % 26;
+    out = String.fromCharCode(65 + rest) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out || 'A';
+}
+
+/**
+ * Odwołania z wpisanym na sztywno numerem wiersza, sięgające obszaru, który ma
+ * zostać usunięty (#118).
+ *
+ * To jest cicha pułapka, a nie zwykły błąd. Arkusze przepiszą przy usuwaniu
+ * `'GSC RAW'!F2:F100000` na `F2:F8545` i nic wtedy nie pęknie. Dopiero gdy
+ * zakładka znowu urośnie ponad 8545 wierszy, nowe dane wypadną poza zakres
+ * formuły i przestaną być liczone, bez błędu i bez żadnego sygnału.
+ *
+ * Zakres otwarty (`F2:F`) jest bezpieczny i nie jest zgłaszany.
+ */
+function riskyReferences_(formula, limits) {
+  const found = [];
+  const text = String(formula || '');
+  REFERENCE_PATTERN.lastIndex = 0;
+
+  let match = REFERENCE_PATTERN.exec(text);
+  while (match) {
+    const name = match[1] || match[2];
+    const limit = limits[name];
+    if (limit) {
+      const isRange = match[0].indexOf(':') !== -1;
+      const bound = isRange ? match[4] : match[3];
+      if (bound && Number(bound) > limit.keep) {
+        found.push({ target: name, bound: Number(bound), keep: limit.keep });
+      }
+    }
+    match = REFERENCE_PATTERN.exec(text);
+  }
+  return found;
+}
+
+/**
+ * Skanuje formuły we wszystkich zakładkach i zwraca odwołania, które przycięcie
+ * po cichu ograniczy. Skan obejmuje wiersze do ostatniej realnej treści, więc
+ * zakładka RAW z formatowaniem po dawnych importach nie kosztuje pełnej siatki.
+ */
+function planReferenceRisks_(plan) {
+  const limits = {};
+  plan.sheets.forEach(function (s) { limits[s.name] = s; });
+
+  const risks = [];
+  SpreadsheetApp.getActive().getSheets().forEach(function (sheet) {
+    const rows = Math.min(lastContentRow_(sheet), REFERENCE_SCAN_MAX_ROWS);
+    if (rows < 1) return;
+    const formulas = sheet.getRange(1, 1, rows, sheet.getMaxColumns()).getFormulas();
+    formulas.forEach(function (line, r) {
+      line.forEach(function (formula, c) {
+        riskyReferences_(formula, limits).forEach(function (hit) {
+          risks.push({
+            where: sheet.getName() + '!' + columnLetter_(c + 1) + (r + 1),
+            target: hit.target,
+            bound: hit.bound,
+            keep: hit.keep
+          });
+        });
+      });
+    });
+  });
+  return risks;
+}
+
 /**
  * Menu: przycięcie po potwierdzeniu. Usuwa wyłącznie wiersze poniżej ostatniego
- * wypełnionego, więc nie kasuje danych. Może natomiast zepsuć formułę, która
- * odwołuje się wprost do komórki w usuwanym zakresie, i dialog o tym mówi.
+ * wypełnionego, więc nie kasuje danych. Przed pytaniem sprawdza jeszcze, czy
+ * któraś formuła nie odwołuje się do usuwanego obszaru numerem wiersza.
  */
 function przytnijPusteWiersze() {
   const ui = SpreadsheetApp.getUi();
@@ -223,13 +308,31 @@ function przytnijPusteWiersze() {
     return '• ' + s.name + ': ' + s.maxRows + ' → ' + s.keep + ' wierszy (dane do ' + s.lastRow + ')';
   }).join('\n');
 
+  const risks = planReferenceRisks_(plan);
+  let warning =
+    '\n\nUWAGA: formuła odwołująca się wprost do komórki z usuwanego zakresu (np. A50000) ' +
+    'pokaże po tym #REF!. Zakresy typu A2:A pozostają poprawne.';
+
+  if (risks.length) {
+    const listed = risks.slice(0, REFERENCE_RISK_LIST_LIMIT).map(function (r) {
+      return '• ' + r.where + ' → ' + r.target + ' do wiersza ' + r.bound + ' (zostanie ' + r.keep + ')';
+    }).join('\n');
+    warning =
+      '\n\nZNALEZIONO ' + risks.length + ' ODWOŁANIE(A) DO USUWANEGO OBSZARU:\n' + listed +
+      (risks.length > REFERENCE_RISK_LIST_LIMIT
+        ? '\n… i ' + (risks.length - REFERENCE_RISK_LIST_LIMIT) + ' kolejnych.'
+        : '') +
+      '\n\nArkusze przepiszą te zakresy po usunięciu wierszy i nic od razu nie pęknie. ' +
+      'Dopiero gdy zakładka znowu urośnie ponad nową granicę, nowe dane wypadną poza ' +
+      'zakres i przestaną być liczone, bez błędu i bez żadnego sygnału.\n\n' +
+      'Zalecenie: najpierw zamień te zakresy na otwarte (F2:F zamiast F2:F100000), potem przytnij.';
+  }
+
   const answer = ui.alert(
     'Przyciąć puste wiersze w ' + plan.sheets.length + ' zakładce(ach)?\n\n' + detail +
     '\n\nZwolni to ' + plan.cells + ' komórek. Usuwane są wyłącznie wiersze poniżej ostatniego ' +
     'wypełnionego, więc żadna dana nie ginie, a w każdej zakładce zostaje ' + TRIM_SPARE_ROWS +
-    ' wolnych wierszy zapasu.\n\n' +
-    'UWAGA: formuła odwołująca się wprost do komórki z usuwanego zakresu (np. A50000) ' +
-    'pokaże po tym #REF!. Zakresy typu A2:A pozostają poprawne.',
+    ' wolnych wierszy zapasu.' + warning,
     ui.ButtonSet.YES_NO
   );
   if (answer !== ui.Button.YES) {
