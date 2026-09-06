@@ -146,7 +146,9 @@ function seoLiveQuote_(value) {
 /** Oczekiwania wiersza (kolumny B..H) w jednym obiekcie. */
 function seoLiveExpectations_(line) {
   return {
-    status: Number(line[1]) || 200,
+    // Pusty = 200; liczba = ta liczba; cokolwiek innego zostaje tekstem i da różnicę,
+    // żeby literówka w oczekiwaniu nie udawała zgodności.
+    status: String(line[1] || '').trim() === '' ? 200 : (/^\d{3}$/.test(String(line[1]).trim()) ? Number(line[1]) : String(line[1]).trim()),
     target: String(line[2] || '').trim(),
     title: String(line[3] || '').trim(),
     h1: String(line[4] || '').trim(),
@@ -159,7 +161,11 @@ function seoLiveExpectations_(line) {
 /** Lista różnic „co jest (oczekiwano co)”; pusta = strona zgodna. */
 function seoLiveCompare_(url, expect, fetched, page) {
   const diffs = [];
-  if (fetched.code !== expect.status) diffs.push('status: ' + fetched.code + ' (oczekiwano ' + expect.status + ')');
+  if (typeof expect.status !== 'number') {
+    diffs.push('status: ' + fetched.code + ' (oczekiwany status „' + expect.status + '” nie jest kodem HTTP; wpisz liczbę albo zostaw puste = 200)');
+  } else if (fetched.code !== expect.status) {
+    diffs.push('status: ' + fetched.code + ' (oczekiwano ' + expect.status + ')');
+  }
 
   const expectedTarget = expect.target || url;
   if (seoLiveNormalizeUrl_(fetched.finalUrl) !== seoLiveNormalizeUrl_(expectedTarget)) {
@@ -195,7 +201,9 @@ function seoLiveIndexLookup_() {
   if (!sheet || sheet.getLastRow() < 2) return map;
   sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues().forEach(line => {
     const key = seoLiveNormalizeUrl_(line[0]);
-    if (key && line[1]) map[key] = String(line[1]) + (line[7] ? ' (sprawdzono ' + line[7] + ')' : '');
+    // Sheets zamienia zapisany tekst daty na wartość typu Date: formatujemy zamiast rzutować.
+    const checked = line[7] instanceof Date ? formatImportTime_(line[7].toISOString()) : String(line[7] || '');
+    if (key && line[1]) map[key] = String(line[1]) + (checked ? ' (sprawdzono ' + checked + ')' : '');
   });
   return map;
 }
