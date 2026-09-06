@@ -223,6 +223,22 @@ describe('live check: błędy, lista, indeks', () => {
     assert.equal(result(gas, 2)[3], 'brak w URL INSPEKCJA');
   });
 
+  test('#75: komórka „Sprawdzono” zamieniona przez Sheets na datę jest formatowana, nie wypisywana surowo', () => {
+    const gas = project([row(A)], { [A]: html(page()) }, { sheets: { 'URL INSPEKCJA': [['URL']] } });
+    const when = new gas.$Date(2026, 8, 6, 9, 7, 0);
+    gas.$sheet('URL INSPEKCJA').push([A, 'ZAINDEKSOWANY (PASS)', '', '', '', '', '', when, '', '']);
+    gas.sprawdzStronyLive();
+    assert.equal(result(gas, 1)[3], 'ZAINDEKSOWANY (PASS) (sprawdzono ' + gas.Utilities.formatDate(new Date(2026, 8, 6, 9, 7, 0), 'Europe/Warsaw', 'yyyy-MM-dd HH:mm') + ')');
+    assert.doesNotMatch(result(gas, 1)[3], /GMT/);
+  });
+
+  test('#75: nieliczbowy oczekiwany status daje różnicę zamiast udawać 200; liczba jako tekst działa', () => {
+    const gas = project([row(A, { status: 'test' }), row(B, { status: '200' })], { [A]: html(page()), [B]: html(page({ canonical: null })) });
+    gas.sprawdzStronyLive();
+    assert.equal(result(gas, 1)[1], 'status: 200 (oczekiwany status „test” nie jest kodem HTTP; wpisz liczbę albo zostaw puste = 200)');
+    assert.equal(result(gas, 2)[0], 'OK');
+  });
+
   test('przebieg pod wspólnym lockiem; zajęty lock → odmowa bez zapytań', () => {
     const gas = project([row(A)], { [A]: html(page()) });
     gas.sprawdzStronyLive();
