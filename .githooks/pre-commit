@@ -36,10 +36,10 @@ if [ -n "$lintable" ]; then
 fi
 
 # --- 3. tests + coverage gate --------------------------------------------------
-sources_or_tests="$(printf '%s\n' "$staged" | grep -E '(^[^/]+\.gs$|^test/|^eslint\.config\.js$|^package(-lock)?\.json$|^\.quality/)' || true)"
+sources_or_tests="$(printf '%s\n' "$staged" | grep -E '(^src/[^/]+\.gs$|^test/|^eslint\.config\.js$|^package(-lock)?\.json$|^\.quality/)' || true)"
 if [ -n "$sources_or_tests" ]; then
   step "Unit tests + coverage gate (staged lines must be 100% covered)"
-  partial="$(git diff --name-only -- $(printf '%s\n' "$staged" | grep -E '^[^/]+\.gs$' || true) 2>/dev/null || true)"
+  partial="$(git diff --name-only -- $(printf '%s\n' "$staged" | grep -E '^src/[^/]+\.gs$' || true) 2>/dev/null || true)"
   if [ -n "$partial" ]; then
     echo "WARNING: partially staged sources ($partial) – coverage is measured on the working tree."
   fi
