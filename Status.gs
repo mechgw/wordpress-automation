@@ -492,6 +492,85 @@ function refreshImportStatusCells() {
   return Object.keys(importSources_()).map(source => writeImportStatusCell_(source));
 }
 
+/**
+ * Widoczność flag zapisu (#104).
+ *
+ * WP_ALLOW_WRITES jest jedynym wyłącznikiem chroniącym produkcyjny WordPress
+ * przed niezamierzonym zapisem, ale zostaje włączony na stałe, bo tak jest
+ * wygodniej. Wyłącznik zawsze włączony nie chroni przed niczym. WP_DRY_RUN daje
+ * problem odwrotny: zapomniany sprawia, że komendy tylko udają zapis.
+ *
+ * Świadomie NIE wyłączamy niczego automatycznie. Flaga gasnąca sama w losowym
+ * momencie zamieniłaby przewidywalny system w taki, który odmawia zapisu
+ * w środku pracy. Pokazujemy stan i czas jego trwania, decyzję zostawiamy
+ * człowiekowi.
+ */
+const WRITE_FLAGS = [
+  { key: 'WP_ALLOW_WRITES', label: 'Zapisy do WordPressa', on: 'WŁĄCZONE', off: 'wyłączone', warn: 'wyłącznik chroni tylko wtedy, gdy bywa wyłączany' },
+  { key: 'WP_DRY_RUN', label: 'Tryb próbny', on: 'WŁĄCZONY', off: 'wyłączony', warn: 'komendy tylko udają zapis' }
+];
+const WRITE_FLAG_WARN_DAYS = 7;
+const WRITE_FLAG_STATE_PROP = 'WRITE_FLAGS_SINCE';
+
+function readWriteFlagState_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(WRITE_FLAG_STATE_PROP);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
+ * Zapamiętuje moment włączenia każdej flagi. Flagi zmienia człowiek wprost
+ * w Script Properties, więc nie ma zdarzenia, na którym można by się oprzeć:
+ * stan obserwujemy przy okazji uruchomień, które i tak zapisują.
+ * Zapis następuje wyłącznie przy zmianie.
+ */
+function observeWriteFlags_(now) {
+  const props = PropertiesService.getScriptProperties();
+  const state = readWriteFlagState_();
+  const stamp = (now || new Date()).toISOString();
+  let changed = false;
+
+  WRITE_FLAGS.forEach(function (flag) {
+    const isOn = props.getProperty(flag.key) === 'TRUE';
+    if (isOn && !state[flag.key]) { state[flag.key] = stamp; changed = true; }
+    if (!isOn && state[flag.key]) { delete state[flag.key]; changed = true; }
+  });
+
+  if (changed) props.setProperty(WRITE_FLAG_STATE_PROP, JSON.stringify(state));
+  return state;
+}
+
+/** Pełne dni od podanej chwili; ujemna różnica (zegar) liczy się jako zero. */
+function daysSince_(iso, now) {
+  const start = new Date(iso).getTime();
+  if (!start || isNaN(start)) return 0;
+  return Math.max(0, Math.floor(((now || new Date()).getTime() - start) / 86400000));
+}
+
+/** Po jednej linii na flagę: stan, czas trwania i ostrzeżenie po progu. */
+function writeFlagsStatusLines_(now) {
+  const props = PropertiesService.getScriptProperties();
+  const state = readWriteFlagState_();
+
+  return WRITE_FLAGS.map(function (flag) {
+    if (props.getProperty(flag.key) !== 'TRUE') {
+      return flag.label + ' (' + flag.key + '): ' + flag.off + '.';
+    }
+    if (!state[flag.key]) {
+      return flag.label + ' (' + flag.key + '): ' + flag.on + ', czas włączenia nieznany (pierwsza obserwacja).';
+    }
+    const days = daysSince_(state[flag.key], now);
+    const duration = days === 0 ? 'od dziś' : 'od ' + days + ' dni';
+    const warning = days >= WRITE_FLAG_WARN_DAYS ? ' UWAGA: ' + flag.warn + '.' : '';
+    return flag.label + ' (' + flag.key + '): ' + flag.on + ' ' + duration + '.' + warning;
+  });
+}
+
 /** Menu „Dane” obok pozostałych menu projektu. */
 function addStatusMenu_() {
   SpreadsheetApp.getUi()
@@ -541,6 +620,8 @@ function showImportStatus() {
   lines.push('Zadanie jest nieaktualne po upływie własnego progu od ostatniego poprawnego przebiegu.');
   lines.push('Zadanie monitorujące bez triggera, które nigdy nie działało, nie jest zgłaszane jako awaria.');
   lines.push(sheetUsageLine_());
+  observeWriteFlags_(now);
+  writeFlagsStatusLines_(now).forEach(function (line) { lines.push(line); });
   lines.push(sitemapsStatusLine_());
   lines.push('Alerty e-mail: ' + alertRecipientText_() + ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));

@@ -55,6 +55,14 @@ Opcjonalne:
 
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
+### Widoczność flag zapisu
+
+`WP_ALLOW_WRITES` to jedyny wyłącznik chroniący produkcyjny WordPress przed niezamierzonym zapisem. W praktyce zostaje włączony na stałe, bo tak jest wygodniej przy częstych zmianach, a wyłącznik zawsze włączony nie chroni przed niczym. `WP_DRY_RUN` daje problem odwrotny: zapomniany sprawia, że komendy tylko udają zapis.
+
+*Status danych* pokazuje więc obie flagi wraz z czasem, przez jaki są w tym stanie, a po tygodniu dokłada ostrzeżenie nazywające problem. Moment włączenia jest odnotowywany przy okazji uruchomień, które i tak zapisują: codziennego strażnika alertów oraz otwarcia okna statusu. Wyłączenie flagi kasuje znacznik, więc ponowne włączenie liczy się od nowa.
+
+Nic nie zmienia wartości flagi automatycznie. Flaga gasnąca sama w losowym momencie zamieniłaby przewidywalny system w taki, który odmawia zapisu w środku pracy.
+
 ### Identyfikatory instalacji
 
 Repozytorium jest publiczne, więc slug strony ze źródłem stopki, identyfikator bloku stylów i klasa stopki nie są zaszyte w kodzie. Migracja stopki czyta je ze Script Properties `WP_GLOBAL_FOOTER_SOURCE_SLUG`, `WP_GLOBAL_FOOTER_STYLE_ID` i `WP_GLOBAL_FOOTER_CLASS`. Brak którejkolwiek kończy się jasnym błędem, a nie cichym podstawieniem. Dozwolone są wyłącznie małe litery, cyfry i myślnik, dzięki czemu wartość jest bezpieczna zarówno w wyrażeniu regularnym, jak i we wstrzykiwanym kodzie PHP.
