@@ -65,14 +65,26 @@ function checkTestMatrix(lines, problems) {
   }
   const tableRows = lines.filter(l => /^\s*\|/.test(l));
   const dataRows = tableRows.filter(l => !/^\s*\|\s*-{2,}/.test(l) && !/^\s*\|\s*ID\s*\|/i.test(l));
-  const filled = dataRows.filter(l => {
+  // Kompletny wiersz = ID + scenariusz + krytyczność + warstwa + test (5 komórek z treścią);
+  // pojedyncza wypełniona komórka w wierszu z szablonu nie wystarcza.
+  const complete = dataRows.filter(l => {
     const cells = l.split('|').slice(1, -1).map(c => c.trim());
-    return cells.length >= 2 && cells.slice(1).some(Boolean);
+    return cells.length >= TEST_MATRIX_COLUMNS && cells.slice(0, TEST_MATRIX_COLUMNS).every(Boolean);
   });
-  if (!filled.length) {
-    problems.push('Matryca testów nie ma żadnego wypełnionego wiersza (scenariusz, krytyczność, warstwa, test).');
+  if (!complete.length) {
+    problems.push('Matryca testów nie ma żadnego kompletnego wiersza (ID, scenariusz, krytyczność, warstwa, test – wszystkie komórki wypełnione).');
   }
 }
+
+/** Kategorie macierzy dowodów z szablonu; każda musi wystąpić (etykieta EN albo PL). */
+const EVIDENCE_CATEGORIES = [
+  { name: 'Unit (VM)', match: /\bunit\b/i },
+  { name: 'Coverage / Pokrycie', match: /coverage|pokrycie/i },
+  { name: 'Sheet manual test / Test ręczny w arkuszu', match: /\bsheet\b|arkusz/i },
+  { name: 'Runtime', match: /runtime/i },
+  { name: 'Security / Bezpieczeństwo', match: /security|bezpiecze/i }
+];
+const TEST_MATRIX_COLUMNS = 5;
 
 function checkEvidence(lines, problems) {
   if (!lines) {
@@ -83,6 +95,16 @@ function checkEvidence(lines, problems) {
   if (!items.length) {
     problems.push('Macierz dowodów nie ma żadnej pozycji listy `- [ ]` / `- [x]`.');
   }
+  // Każda kategoria z szablonu musi być obecna: usunięcie wiersza nie może zwolnić z dowodu.
+  const labels = items.map(item => {
+    const bold = item.match(/\*\*([^*]+)\*\*/);
+    return bold ? bold[1] : item;
+  });
+  EVIDENCE_CATEGORIES.forEach(cat => {
+    if (!labels.some(label => cat.match.test(label))) {
+      problems.push('Macierz dowodów nie ma pozycji „' + cat.name + '” (usunięta z szablonu?).');
+    }
+  });
   items.forEach(item => {
     const checked = /^\s*[-*]\s*\[[xX]\]/.test(item);
     if (checked) return;

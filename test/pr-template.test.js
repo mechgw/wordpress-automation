@@ -108,7 +108,7 @@ describe('pr-template: braki', () => {
   test('nietknięty szablon z repozytorium → FAIL z trzema rodzajami braków', () => {
     const out = evaluate(TEMPLATE);
     assert.equal(out.ok, false);
-    assert.ok(out.problems.some(p => /Matryca testów nie ma żadnego wypełnionego wiersza/.test(p)), 'empty table');
+    assert.ok(out.problems.some(p => /Matryca testów nie ma żadnego kompletnego wiersza/.test(p)), 'empty table');
     assert.ok(out.problems.some(p => /nie jest odhaczona/.test(p)), 'unchecked evidence');
     assert.ok(out.problems.some(p => /placeholder `<nr>`/.test(p)), 'links placeholder');
   });
@@ -117,7 +117,25 @@ describe('pr-template: braki', () => {
     const body = GOOD_EN.replace('| T1  | happy path | P1 | Unit | foo.test.js |', '| T1  |  |  |  |  |');
     const out = evaluate(body);
     assert.equal(out.ok, false);
-    assert.deepEqual(out.problems, ['Matryca testów nie ma żadnego wypełnionego wiersza (scenariusz, krytyczność, warstwa, test).']);
+    assert.deepEqual(out.problems, ['Matryca testów nie ma żadnego kompletnego wiersza (ID, scenariusz, krytyczność, warstwa, test – wszystkie komórki wypełnione).']);
+  });
+
+  test('T1b: wiersz z jedną wypełnioną komórką (np. tylko krytyczność) nie liczy się jako kompletny', () => {
+    const body = GOOD_EN.replace('| T1  | happy path | P1 | Unit | foo.test.js |', '| T1  |  | P1 |  |  |');
+    assert.equal(evaluate(body).ok, false);
+    const partial = GOOD_EN.replace('| T1  | happy path | P1 | Unit | foo.test.js |', '| T1  | scenario | P1 | Unit |  |');
+    assert.equal(evaluate(partial).ok, false, 'missing test cell');
+    const twoRows = GOOD_EN.replace('| T1  | happy path | P1 | Unit | foo.test.js |', '| T1  |  | P1 |  |  |\n| T2  | full row | P2 | Sheet | manual |');
+    assert.equal(evaluate(twoRows).ok, true, 'one complete row is enough');
+  });
+
+  test('T2b: usunięta kategoria dowodów (np. Coverage) → FAIL z nazwą kategorii, także po polsku', () => {
+    const noCoverage = GOOD_EN.replace('- [x] **Coverage:** 100%\n', '');
+    assert.deepEqual(evaluate(noCoverage).problems, ['Macierz dowodów nie ma pozycji „Coverage / Pokrycie” (usunięta z szablonu?).']);
+    const noSecurityPl = GOOD_PL.replace('- [x] **Bezpieczeństwo:** brak identyfikatorów witryny\n', '');
+    assert.deepEqual(evaluate(noSecurityPl).problems, ['Macierz dowodów nie ma pozycji „Security / Bezpieczeństwo” (usunięta z szablonu?).']);
+    const onlyOne = GOOD_EN.replace(/- \[[ x]\] \*\*(Coverage|Sheet manual test|Runtime|Security)[^\n]*\n/g, '');
+    assert.equal(evaluate(onlyOne).problems.length, 4, 'four missing categories reported');
   });
 
   test('T2: pozycja dowodów bez [x] i bez N/A → FAIL z nazwą pozycji', () => {
