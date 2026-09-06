@@ -164,6 +164,85 @@ describe('#101: czyszczenie wymaga potwierdzenia', () => {
   });
 });
 
+describe('#118: przycinanie pustego przydziału wierszy', () => {
+  /** Zakładka z `filled` wierszami danych w siatce na `maxRows`. */
+  function wide(filled, maxRows, cols) {
+    const rows = [];
+    for (let i = 0; i < filled; i++) rows.push(new Array(cols || 10).fill('x'));
+    return { rows: rows, maxRows: maxRows, maxColumns: cols || 10 };
+  }
+
+  const project = (sheets, answer) => {
+    const gas = loadProject({ sheets: sheets });
+    if (answer) gas.$ui.$answer = answer;
+    return gas;
+  };
+
+  test('plan wskazuje zakładki z dużym pustym przydziałem i liczy zysk w komórkach', () => {
+    const gas = project({ 'GSC RAW': wide(6545, 100000, 12), 'START': wide(50, 1000, 26) });
+    const plan = plain(gas.planRowTrim_());
+    assert.equal(plan.sheets.length, 1, 'zakładka bez nadmiaru nie trafia do planu');
+    assert.equal(plan.sheets[0].name, 'GSC RAW');
+    assert.equal(plan.sheets[0].lastRow, 6545);
+    assert.equal(plan.sheets[0].keep, 8545, 'dane plus 2000 wierszy zapasu');
+    assert.equal(plan.sheets[0].remove, 91455);
+    assert.equal(plan.cells, 91455 * 12);
+  });
+
+  test('problem nie dotyczy jednej zakładki: plan obejmuje wszystkie i sortuje po zysku', () => {
+    const gas = project({
+      'GSC RAW': wide(6545, 100000, 12),
+      'GA4 RAW': wide(4000, 100000, 16),
+      'GA4 ADS RAW': wide(0, 100000, 14)
+    });
+    const plan = plain(gas.planRowTrim_());
+    assert.deepEqual(plan.sheets.map(s => s.name), ['GA4 RAW', 'GA4 ADS RAW', 'GSC RAW'], 'najpierw największy zysk');
+    assert.equal(plan.cells, 3973460, 'razem blisko cztery miliony komórek do odzyskania');
+  });
+
+  test('zakładka bez nadmiaru i zakładka ciasno zapełniona są pomijane', () => {
+    const gas = project({ 'Mała': wide(50, 1000, 26), 'Pełna': wide(9000, 10000, 12) });
+    assert.deepEqual(plain(gas.planRowTrim_()).sheets, [], 'poniżej 1000 zbędnych wierszy nie warto ruszać');
+  });
+
+  test('odpowiedź NIE nie usuwa niczego', () => {
+    const gas = project({ 'GSC RAW': wide(100, 100000, 12) }, 'NO');
+    const out = plain(gas.przytnijPusteWiersze());
+    assert.deepEqual(out, { sheets: 0, rows: 0, cells: 0 });
+    assert.equal(gas.SpreadsheetApp.getActive().getSheetByName('GSC RAW').getMaxRows(), 100000);
+  });
+
+  test('odpowiedź TAK przycina siatkę i nie rusza ani jednego wiersza z danymi', () => {
+    const gas = project({ 'GSC RAW': wide(6545, 100000, 12) }, 'YES');
+    const before = gas.$sheet('GSC RAW').length;
+    const out = plain(gas.przytnijPusteWiersze());
+    assert.equal(out.rows, 91455);
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName('GSC RAW');
+    assert.equal(sheet.getMaxRows(), 8545, 'zostaje ostatni wiersz danych plus zapas');
+    assert.equal(gas.$sheet('GSC RAW').length, before, 'żaden wiersz z danymi nie zniknął');
+    assert.equal(sheet.getLastRow(), 6545);
+  });
+
+  test('dialog wymienia zakładki, zysk i ostrzega o formułach', () => {
+    const gas = project({ 'GSC RAW': wide(6545, 100000, 12) }, 'NO');
+    gas.przytnijPusteWiersze();
+    const question = gas.$alerts[0][0];
+    assert.match(question, /GSC RAW: 100000 → 8545 wierszy \(dane do 6545\)/);
+    assert.match(question, /Zwolni to 1097460 komórek/);
+    assert.match(question, /żadna dana nie ginie/);
+    assert.match(question, /pokaże po tym #REF!/);
+    assert.equal(gas.$alerts[0][1], 'YES_NO');
+  });
+
+  test('gdy nie ma czego przycinać, nie pyta i nic nie rusza', () => {
+    const gas = project({ 'START': wide(50, 1000, 26) }, 'YES');
+    const out = plain(gas.przytnijPusteWiersze());
+    assert.deepEqual(out, { sheets: 0, rows: 0, cells: 0 });
+    assert.equal(gas.$alerts.length, 1);
+    assert.match(gas.$alerts[0][0], /^Nie ma czego przycinać\./);
+  });
+});
+
 describe('#101: okno zajętości', () => {
   test('przy wielu zakładkach okno pokazuje dwanaście największych i liczbę reszty', () => {
     const sheets = {};

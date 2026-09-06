@@ -593,6 +593,7 @@ function addStatusMenu_() {
     .addSeparator()
     .addItem('Zajętość arkusza', 'pokazZajetoscArkusza')
     .addItem('Wyczyść stare snapshoty i wyniki', 'wyczyscStareSnapshotyIWyniki')
+    .addItem('Przytnij puste wiersze', 'przytnijPusteWiersze')
     .addSeparator()
     .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')
     .addItem('Ukryj arkusze techniczne', 'ukryjArkuszeTechniczne')
