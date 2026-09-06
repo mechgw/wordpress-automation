@@ -8,7 +8,7 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadProject, plain, fetchRouter } = require('./helpers/gas');
+const { loadProject, plain, fetchRouter, freezeClock } = require('./helpers/gas');
 
 const GSC_SHEET = 'Konfiguracja GSC';
 const GA4_SHEET = 'Konfiguracja GA4';
@@ -27,25 +27,6 @@ function ga4Sheets() {
 }
 
 const cell = (gas, sheet, a1) => gas.$cell(sheet, a1);
-
-/**
- * Zamraża zegar w VM: `new Date()` bez argumentów zawsze zwraca ten sam moment,
- * a `new Date(...)` z argumentami działa normalnie. Bez tego test zależny od
- * „dzisiaj” potrafi paść raz na jakiś czas, gdy między dwoma pomiarami minie północ.
- * Składowe podajemy w czasie lokalnym, bo stub `Utilities.formatDate` formatuje
- * w strefie maszyny (Warszawa lokalnie, UTC w CI).
- */
-function freezeClock(gas, y, monthIndex, d) {
-  const Real = gas.$Date;
-  const fixed = new Real(y, monthIndex, d, 10, 0, 0).getTime();
-  function Frozen(...args) { return args.length ? new Real(...args) : new Real(fixed); }
-  Frozen.prototype = Real.prototype;
-  Frozen.now = () => fixed;
-  Frozen.parse = Real.parse;
-  Frozen.UTC = Real.UTC;
-  gas.Date = Frozen;
-  return gas;
-}
 
 describe('Kod.gs showDeployedVersion', () => {
   test('ostemplowany Version.gs → okno z tagiem, commitem, czasem i autorem wdrożenia', () => {

@@ -270,7 +270,10 @@ describe('#89: menu i trigger', () => {
     const gas = project({ files: {} });
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn).slice(-2), ['odswiezMonitoringZSitemap', 'ustawTygodnioweOdswiezanieSitemap']);
+    const fns = seo.items.map(i => i.fn);
+    const at = fns.indexOf('odswiezMonitoringZSitemap');
+    assert.ok(at > 0, 'refresh item present');
+    assert.equal(fns[at + 1], 'ustawTygodnioweOdswiezanieSitemap', 'trigger item right after it');
   });
 
   test('trigger tygodniowy: poniedziałek 06:00, godzinę przed inspekcją URL, zastępuje stary', () => {

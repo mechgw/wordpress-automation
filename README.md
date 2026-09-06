@@ -20,6 +20,7 @@ Merge do `main` **niczego nie wdraża**. Publikacja wydania w GitHubie uruchamia
 - `SeoLive.gs` — live SEO regression check: pobiera kluczowe adresy i porównuje status, cel przekierowania, title, H1, canonical, robots i schema z oczekiwaniami z arkusza `SEO LIVE`.
 - `Sitemaps.gs` — stan map witryny z API Sitemaps w Search Console, zapisywany do arkusza `SITEMAPY` i podsumowany w *Status danych*.
 - `SitemapUrls.gs` — adresy wyczytane z XML sitemap do arkusza `SITEMAP URLS` i automatyczne dosypywanie brakujących adresów do `SEO LIVE` oraz `URL INSPEKCJA`.
+- `RecrawlQueue.gs` — kolejka stron, które Google powinien odwiedzić ponownie: klasyfikacja w arkuszu `RECRAWL QUEUE` i e-mail o nowych rekomendacjach.
 - `Diagnostics.gs` — smoke test z menu, wyłącznie odczyt: Script Properties, zakładki, dostęp do GSC / GA4 / WordPressa, triggery, konfiguracja alertów, jedna linia raportu na krok.
 - `SheetCatalog.gs` — katalog arkuszy tworzonych przez skrypt: kolory zakładek, kolejność, generowany spis `START` i ukrywanie zakładek z danymi surowymi.
 - `Version.gs` — same placeholdery; workflow deployu nadpisuje go tagiem wydania, commitem i czasem przed `clasp push`, a arkusz pokazuje ten tag jako menu (*Szczegóły wdrożenia*). Drift check ignoruje ten plik.
@@ -43,6 +44,7 @@ Opcjonalne:
 - `SITE_DOMAIN` — domena używana do automatycznego wyboru właściwości GA4 po URL-u strumienia web. Fallbackiem jest host z `WP_BASE_URL`; bez obu właściwość trzeba wskazać ręcznie w arkuszu konfiguracji.
 - `ALERT_EMAIL` — adresat alertów importu (jeden adres albo lista po przecinku). Bez niego nic nie jest wysyłane i nic nie pada; incydenty są nadal śledzone i widoczne w *Status danych*. Wartość, która nie jest adresem (na przykład `TRUE`), nigdy nie zostanie użyta: *Status danych* i okno strażnika pokazują ją jako `NIEPRAWIDŁOWY ADRES`, dopóki nie zostanie poprawiona.
 - `ALERT_RECOVERY` — `FALSE` wyłącza e-mail „import ponownie działa”; incydent i tak jest zamykany. Domyślnie włączone.
+- `RECRAWL_STALE_DAYS` — po ilu dniach od zmiany strona bez nowego crawla trafia do rekomendacji ręcznego zgłoszenia. Domyślnie 7.
 - `EXPECTED_SITEMAPS` — lista adresów sitemap po przecinku, których brak w Search Console ma być zgłaszany.
 
 `WP_ALLOW_WRITES` powinno pozostać wyłączone, chyba że celowo wykonujesz operację zapisu.
@@ -115,6 +117,25 @@ Z tej listy brakujące adresy trafiają do `SEO LIVE` i `URL INSPEKCJA`, po jedn
 **Synchronizacja tylko dopisuje.** Sitemapa jest listą adresów kanonicznych przeznaczonych do indeksowania, a nie listą wszystkich stron: celowe przekierowania, `noindex` i strony techniczne są poza nią i to często właśnie je trzeba pilnować. Adres monitorowany, którego nie ma w sitemapie, nigdy nie jest usuwany; okno wypisuje go jako „monitorowany mimo braku w sitemapie” i decyzję zostawia człowiekowi. Ręcznie dopisany wyjątek jest więc trwały i nie potrzebuje osobnej listy. Istniejące wiersze zachowują oczekiwania i wyniki, a drugie uruchomienie niczego nie dopisuje.
 
 *Włącz cotygodniowe odświeżanie z sitemap* instaluje trigger w poniedziałki około 06:00, godzinę przed inspekcją URL, więc nowe adresy trafiają do inspekcji w tym samym przebiegu tygodnia. Podział ról zostaje bez zmian: `SEO LIVE` mówi, co strona serwuje teraz, a `URL INSPEKCJA`, co Google ma w indeksie.
+
+### Kolejka recrawl (którą stronę zgłosić ręcznie w Search Console)
+
+Zmieniona strona jest widoczna dla użytkowników od razu, ale w wynikach Google dopiero po ponownym crawlu. *SEO / GSC → Kolejka recrawl (RECRAWL QUEUE)* zestawia datę zmiany z datą ostatniego crawla i mówi, co z tego wynika. Nic nie jest zgłaszane do Google automatycznie: dla zwykłych stron nie ma publicznego API odpowiadającego przyciskowi *Poproś o zindeksowanie*, a Indexing API jest przeznaczone dla innych typów treści. To narzędzie tylko wskazuje, którą stronę zgłosić ręcznie.
+
+Wszystko liczone jest z danych, które już są w pliku, bez ani jednego zapytania do API: `lastmod` z `SITEMAP URLS`, ręczny arkusz `Dziennik zmian` (jeśli ma kolumnę z adresem i kolumnę z datą; nowsza data wygrywa z `lastmod`), ostatni crawl i werdykt z `URL INSPEKCJA`, stan produkcyjny z `SEO LIVE`.
+
+| Status | Kiedy |
+| --- | --- |
+| `AKTUALNE` | Google odwiedził stronę po ostatniej zmianie |
+| `OCZEKUJE NA RECRAWL` | zmiana nowsza niż crawl, ale próg oczekiwania jeszcze nie minął |
+| `WARTO POPROSIĆ RĘCZNIE` | minął próg (domyślnie 7 dni, `RECRAWL_STALE_DAYS`), albo strona działa, a Google nie ma jej w indeksie |
+| `BRAK CRAWLA` | Google nigdy nie odwiedził tego adresu |
+| `BRAK DATY ZMIANY` | ani `lastmod`, ani wpis w dzienniku, więc nie ma na czym oprzeć rekomendacji |
+| `WYKLUCZONA / NIE DOTYCZY` | adres spoza sitemapy, celowy `noindex`, przekierowanie albo ręczne wyciszenie |
+
+Rekomendacje dostają wyłącznie adresy z sitemapy, czyli te przeznaczone do indeksowania. Celowe przekierowania i strony z `noindex` są monitorowane, ale nigdy nie trafiają na listę do zgłoszenia. Wpisanie `TAK` w kolumnie *Wyciszone* wyłącza adres na stałe i przetrwa przepisanie arkusza.
+
+*Włącz codzienną kolejkę recrawl* instaluje trigger około 10:00, po live checku. E-mail wychodzi wyłącznie o **nowych** rekomendacjach: strona, która czeka od tygodnia, nie wraca codziennie w kolejnej wiadomości. Znacznik powiadomienia czyści się, gdy Google w końcu odwiedzi stronę, więc następny taki przypadek zostanie zgłoszony ponownie.
 
 ### Diagnostyka systemu (dlaczego coś nie działa?)
 

@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -175,6 +175,7 @@ function makeSheet(name, initialRows, sheetId = 0) {
       return rangeOf(args[0], args[1], args[2] ?? 1, args[3] ?? 1);
     },
     getLastRow: () => grid.length,
+    getLastColumn: () => Math.max(0, ...grid.map(r => r.length)),
     getMaxRows: () => maxRows,
     getMaxColumns: () => maxCols,
     insertRowsAfter(after, howMany = 1) { maxRows += howMany; return sheet; },
@@ -402,4 +403,23 @@ function fetchRouter(routes) {
   };
 }
 
-module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter };
+/**
+ * Zamraża zegar w kontekście VM: `new Date()` bez argumentów zwraca zawsze ten
+ * sam moment, `new Date(...)` z argumentami działa normalnie. Bez tego test
+ * liczący „ile dni temu” potrafi paść raz na jakiś czas, gdy między pomiarami
+ * minie północ. Składowe podaje się w czasie lokalnym, bo stub
+ * `Utilities.formatDate` formatuje w strefie maszyny (Warszawa lokalnie, UTC w CI).
+ */
+function freezeClock(gas, y, monthIndex, d, hour = 10) {
+  const Real = gas.$Date;
+  const fixed = new Real(y, monthIndex, d, hour, 0, 0).getTime();
+  function Frozen(...args) { return args.length ? new Real(...args) : new Real(fixed); }
+  Frozen.prototype = Real.prototype;
+  Frozen.now = () => fixed;
+  Frozen.parse = Real.parse;
+  Frozen.UTC = Real.UTC;
+  gas.Date = Frozen;
+  return gas;
+}
+
+module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter, freezeClock };

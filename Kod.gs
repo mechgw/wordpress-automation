@@ -19,6 +19,9 @@ function onOpen() {
     .addItem('Sprawdź sitemapy (SITEMAPY)', 'sprawdzSitemapy')
     .addItem('Odśwież adresy z sitemap (SITEMAP URLS)', 'odswiezMonitoringZSitemap')
     .addItem('Włącz cotygodniowe odświeżanie z sitemap', 'ustawTygodnioweOdswiezanieSitemap')
+    .addSeparator()
+    .addItem('Kolejka recrawl (RECRAWL QUEUE)', 'kolejkaRecrawl')
+    .addItem('Włącz codzienną kolejkę recrawl', 'ustawCodziennaKolejkeRecrawl')
     .addToUi();
 
     addGa4Menu_();

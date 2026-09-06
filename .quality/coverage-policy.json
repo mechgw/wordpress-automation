@@ -68,6 +68,11 @@
       "rationale": "New in #89 with full coverage: XML parsing, index expansion, dedupe, sync, limits, errors."
     },
     {
+      "pattern": "RecrawlQueue.gs",
+      "threshold": 95,
+      "rationale": "New in #92 with full coverage: classification, change-date sources, exclusions, muting, new-only e-mail."
+    },
+    {
       "pattern": "WordPress.gs",
       "threshold": 94,
       "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94.7%). RATCHET 2026-09-06: threshold raised to match. Remaining lines are alert texts of the menu tests."
