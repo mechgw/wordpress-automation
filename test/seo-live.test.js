@@ -278,7 +278,7 @@ describe('live check: menu, trigger, e-mail o nowych rozbieżnościach', () => {
     const gas = project(null, {});
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn).slice(-4), ['sprawdzIndeksowanie', 'ustawTygodniowaInspekcje', 'sprawdzStronyLive', 'ustawCodziennyLiveCheck']);
+    assert.deepEqual(seo.items.map(i => i.fn).slice(4, 8), ['sprawdzIndeksowanie', 'ustawTygodniowaInspekcje', 'sprawdzStronyLive', 'ustawCodziennyLiveCheck']);
   });
 
   test('ustawCodziennyLiveCheck instaluje trigger codziennie 09:00, zastępuje stary, pokazuje adresata', () => {

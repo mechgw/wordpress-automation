@@ -18,6 +18,7 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `Alerts.gs` — e-mail alerts on the incident model (open once, silent while open, close on recovery) and the daily freshness guard.
 - `UrlInspection.gs` — Google index status of key URLs from the Search Console URL Inspection API, written into the `URL INSPEKCJA` sheet.
 - `SeoLive.gs` — live SEO regression check: fetches key URLs and compares status, redirect target, title, H1, canonical, robots and schema with the expectations in the `SEO LIVE` sheet.
+- `Sitemaps.gs` — sitemap status from the Search Console Sitemaps API, written into the `SITEMAPY` sheet and summarised in *Status danych*.
 - `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
@@ -96,6 +97,10 @@ The result is the state **in Google's index**, not the live page: after changing
 `SEO LIVE` sheet: URL in column A, expectations in B..H (created with its header on first run). *SEO / GSC → Sprawdź strony live (SEO LIVE)* fetches every address with `UrlFetchApp` (no login, redirects followed by hand up to 5 hops) and compares it with the expectations: final HTTP status (blank = 200), final URL after redirects (blank = the address itself, so any redirect is a difference), `<title>`, first `<h1>`, `<link rel="canonical">`, robots (`index` by default or `noindex`; meta `robots`/`googlebot` and the `X-Robots-Tag` header both count) and JSON-LD `@type` values listed comma-separated. Blank expectations are skipped except status and robots. The row gets `OK`, `UWAGA: n różnic(e)` with every difference spelled out as `what is (oczekiwano what was expected)`, or `BŁĄD` with the network error; one failing address never stops the others. Column L repeats the Google index verdict from `URL INSPEKCJA` for the same address, so the live state and the indexed state sit side by side and are labelled as such.
 
 *Włącz codzienny live check SEO* installs a daily trigger (around 09:00). The trigger run sends one e-mail (to `ALERT_EMAIL`, best-effort) listing only **new** differences, that is rows that were `OK` or empty on the previous run; a difference that persists is not repeated, the sheet is the full picture.
+
+### Sitemaps (what Search Console knows about them)
+
+*SEO / GSC → Sprawdź sitemapy (SITEMAPY)* lists the sitemaps of the configured property through the Search Console Sitemaps API and rewrites the `SITEMAPY` sheet: path, type (index or plain sitemap), submitted and last-downloaded time, pending flag, submitted URL count, warnings, errors, state and check time. The sheet is a snapshot of the API, not an editable list. The state is `OK` or `UWAGA` for exactly these cases: `errors > 0`, a sitemap still pending more than 7 days after submission, a sitemap listed in the optional Script Property `EXPECTED_SITEMAPS` (comma-separated URLs) that Search Console does not have (it gets its own row), or an API error. The last-download time is informational only; Google does not treat an old download as a fault, so the script does not either. The summary is stored in `SITEMAPS_STATUS` and shown as one line in *Dane → Status danych*, including the API error if the last check failed.
 
 ### GitHub repository secrets
 

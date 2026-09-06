@@ -15,6 +15,8 @@ function onOpen() {
     .addItem('Włącz cotygodniową inspekcję URL', 'ustawTygodniowaInspekcje')
     .addItem('Sprawdź strony live (SEO LIVE)', 'sprawdzStronyLive')
     .addItem('Włącz codzienny live check SEO', 'ustawCodziennyLiveCheck')
+    .addSeparator()
+    .addItem('Sprawdź sitemapy (SITEMAPY)', 'sprawdzSitemapy')
     .addToUi();
 
     addGa4Menu_();
