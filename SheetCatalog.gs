@@ -12,6 +12,8 @@
  */
 
 const START_SHEET = 'START';
+/** Podpis w A1 dowodzący, że arkusz START wygenerował skrypt. */
+const START_SIGNATURE = 'START – spis arkuszy';
 const START_HEADER = ['Arkusz', 'Kategoria', 'Prowadzi', 'Co tu jest'];
 
 /** Kategorie w kolejności wyświetlania. `color: null` = nie zmieniaj koloru zakładki. */
@@ -24,8 +26,31 @@ const SHEET_CATEGORIES = [
   { key: 'dane', label: 'Dane surowe i logi', color: '#434343' }
 ];
 
+/**
+ * Nazwy arkuszy GA4 zgodne z konfiguracją: `Konfiguracja GA4` pozwala nadpisać
+ * landingSheet / eventsSheet / businessEventsSheet / adsSheet, a import zapisuje
+ * pod tymi nazwami. Katalog musi patrzeć na to samo, inaczej nadpisane arkusze
+ * uchodziłyby za własne użytkownika. Brak arkusza konfiguracji = wartości domyślne.
+ */
+function ga4SheetNames_() {
+  const fallback = { landingSheet: GA4_RAW_SHEET, eventsSheet: GA4_EVENTS_SHEET, businessEventsSheet: GA4_BUSINESS_SHEET, adsSheet: GA4_ADS_SHEET };
+  let cfg;
+  try {
+    cfg = getGa4Config_();
+  } catch (e) {
+    return fallback;
+  }
+  return {
+    landingSheet: String(cfg.landingSheet || fallback.landingSheet),
+    eventsSheet: String(cfg.eventsSheet || fallback.eventsSheet),
+    businessEventsSheet: String(cfg.businessEventsSheet || fallback.businessEventsSheet),
+    adsSheet: String(cfg.adsSheet || fallback.adsSheet)
+  };
+}
+
 /** Arkusze tworzone przez skrypt. Nowa funkcja = jeden wpis tutaj. */
 function sheetCatalog_() {
+  const ga4 = ga4SheetNames_();
   return [
     { name: URL_INSPECTION_SHEET, category: 'monitoring', owner: 'człowiek + skrypt', description: 'Adresy do monitorowania w kolumnie A; skrypt dopisuje stan w indeksie Google.' },
     { name: SEO_LIVE_SHEET, category: 'monitoring', owner: 'człowiek + skrypt', description: 'Adresy i oczekiwania w B..H; skrypt dopisuje wynik porównania ze stanem live.' },
@@ -38,10 +63,10 @@ function sheetCatalog_() {
     { name: CONFIG_SHEET, category: 'konfiguracja', owner: 'człowiek', description: 'Konfiguracja Search Console; B8 pokazuje status importu.' },
     { name: GA4_CONFIG_SHEET, category: 'konfiguracja', owner: 'człowiek', description: 'Konfiguracja GA4; B9 pokazuje status importu.' },
     { name: RAW_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe dane Search Console. Nie edytuj ręcznie.' },
-    { name: GA4_RAW_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: strony docelowe. Nie edytuj ręcznie.' },
-    { name: GA4_EVENTS_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: key events. Nie edytuj ręcznie.' },
-    { name: GA4_BUSINESS_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: zdarzenia biznesowe. Nie edytuj ręcznie.' },
-    { name: GA4_ADS_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
+    { name: ga4.landingSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: strony docelowe. Nie edytuj ręcznie.' },
+    { name: ga4.eventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: key events. Nie edytuj ręcznie.' },
+    { name: ga4.businessEventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: zdarzenia biznesowe. Nie edytuj ręcznie.' },
+    { name: ga4.adsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
     { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' }
   ];
 }
@@ -80,7 +105,7 @@ function startSheetRows_(plan) {
   const url = spreadsheetUrl_().replace(/#.*$/, '').replace(/\/edit.*$/, '/edit');
   const ss = SpreadsheetApp.getActive();
   const rows = [
-    ['START – spis arkuszy (wersja skryptu: ' + versionLabel_() + ')'],
+    [START_SIGNATURE + ' (wersja skryptu: ' + versionLabel_() + ')'],
     ['Odświeżany przez Dane → Uporządkuj arkusze. Stan danych: Dane → Status danych.'],
     [],
     START_HEADER
@@ -88,10 +113,22 @@ function startSheetRows_(plan) {
   plan.forEach(item => {
     if (item.name === START_SHEET) return;
     const sheet = ss.getSheetByName(item.name);
-    const link = sheet ? '=HYPERLINK("' + url + '#gid=' + sheet.getSheetId() + '","' + item.name + '")' : item.name;
+    // Cudzysłów w nazwie arkusza podwajamy, jak każdy tekst w formule Sheets.
+    const label = String(item.name).replace(/"/g, '""');
+    const link = sheet ? '=HYPERLINK("' + url + '#gid=' + sheet.getSheetId() + '","' + label + '")' : item.name;
     rows.push([link, sheetCategory_(item.category).label, item.owner, item.description]);
   });
   return rows;
+}
+
+/**
+ * Czy arkusz START jest tym, który wygenerował skrypt. Pusty arkusz przechodzi
+ * (świeżo wstawiony); arkusz z treścią musi mieć w A1 podpis z START_SIGNATURE.
+ * Bez tego cudza zakładka o tej nazwie zostałaby wyczyszczona bez ostrzeżenia.
+ */
+function isGeneratedStartSheet_(sheet) {
+  if (sheet.getLastRow() < 1) return true;
+  return String(sheet.getRange(1, 1).getValue() || '').indexOf(START_SIGNATURE) === 0;
 }
 
 function writeStartSheet_(plan) {
@@ -104,6 +141,10 @@ function writeStartSheet_(plan) {
       sheet = ss.getSheetByName(START_SHEET);
       if (!sheet) throw e;
     }
+  }
+  if (!isGeneratedStartSheet_(sheet)) {
+    throw new Error('Arkusz „' + START_SHEET + '” istnieje i nie został utworzony przez skrypt (A1 nie zaczyna się od „' +
+      START_SIGNATURE + '”). Zmień jego nazwę albo opróżnij go, potem uruchom porządkowanie ponownie. Nic nie zostało zmienione.');
   }
   const rows = startSheetRows_(plan);
   const width = START_HEADER.length;
@@ -124,7 +165,7 @@ function writeStartSheet_(plan) {
 function uporzadkujArkusze() {
   const ss = SpreadsheetApp.getActive();
   const plan = sheetPlan_();
-  const summary = { recolored: [], moved: [], startRows: 0, own: 0, known: 0 };
+  const summary = { recolored: [], moved: [], startRows: 0, own: 0, known: 0, rehidden: 0 };
 
   summary.startRows = writeStartSheet_(plan);
 
@@ -140,16 +181,32 @@ function uporzadkujArkusze() {
     }
   });
 
-  plan.forEach((item, index) => {
+  // Ukrytej zakładki nie da się uaktywnić, a bez aktywacji nie da się jej
+  // przenieść: na czas porządkowania pokazujemy ją i przywracamy ukrycie.
+  const hiddenAgain = [];
+  plan.forEach(item => {
     const sheet = ss.getSheetByName(item.name);
-    if (!sheet) return;
-    const current = ss.getSheets().map(s => s.getName()).indexOf(item.name);
-    if (current === index) return;
-    ss.setActiveSheet(sheet);
-    ss.moveActiveSheet(index + 1);
-    summary.moved.push(item.name);
+    if (sheet && sheet.isSheetHidden()) {
+      sheet.showSheet();
+      hiddenAgain.push(sheet);
+    }
   });
 
+  try {
+    plan.forEach((item, index) => {
+      const sheet = ss.getSheetByName(item.name);
+      if (!sheet) return;
+      const current = ss.getSheets().map(s => s.getName()).indexOf(item.name);
+      if (current === index) return;
+      ss.setActiveSheet(sheet);
+      ss.moveActiveSheet(index + 1);
+      summary.moved.push(item.name);
+    });
+  } finally {
+    hiddenAgain.forEach(sheet => sheet.hideSheet());
+  }
+
+  summary.rehidden = hiddenAgain.length;
   return summary;
 }
 

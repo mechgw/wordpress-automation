@@ -10,6 +10,7 @@ const { loadProject, plain } = require('./helpers/gas');
 
 const START = 'START';
 const HEADER = ['Arkusz', 'Kategoria', 'Prowadzi', 'Co tu jest'];
+const SIGNATURE = 'START – spis arkuszy';
 
 /** Plik zbliżony do produkcyjnego: arkusze własne wymieszane z arkuszami skryptu. */
 function sheets(extra = {}) {
@@ -126,17 +127,38 @@ describe('#78: arkusz START', () => {
     assert.ok(!second.some(r => String(r[0]).includes('"Quick wins"')));
   });
 
-  test('istniejący START jest ponownie użyty, a wyścig o insertSheet kończy się użyciem istniejącego', () => {
-    const gas = project({ [START]: [['stara treść', 'x', 'y', 'z'], ['śmieci']] });
+  test('wygenerowany wcześniej START jest przepisywany: stara treść znika, arkusz zostaje pierwszy', () => {
+    const gas = project({ [START]: [[SIGNATURE + ' (wersja skryptu: v1.0.0)'], ['nieaktualny wiersz']] });
     gas.uporzadkujArkusze();
     const grid = plain(gas.$sheet(START));
-    assert.match(grid[0][0], /^START – spis arkuszy/);
-    assert.ok(!grid.some(r => r.some(v => String(v).includes('śmieci'))), 'old content cleared');
+    assert.match(grid[0][0], /^START – spis arkuszy \(wersja skryptu: dev\)$/);
+    assert.ok(!grid.some(r => r.some(v => String(v).includes('nieaktualny wiersz'))), 'old content cleared');
     assert.equal(names(gas)[0], START);
   });
 
+  test('#78/Codex: cudzy arkusz START nie jest kasowany – porządkowanie odmawia z instrukcją', () => {
+    const gas = project({ [START]: [['Moje notatki'], ['ważne dane']] });
+    assert.throws(() => gas.uporzadkujArkusze(), /Arkusz „START” istnieje i nie został utworzony przez skrypt/);
+    assert.throws(() => gas.uporzadkujArkusze(), /Nic nie zostało zmienione/);
+    assert.deepEqual(plain(gas.$sheet(START)), [['Moje notatki'], ['ważne dane']], 'contents untouched');
+    assert.equal(names(gas)[0], 'Kierunki SEO', 'no reordering happened either');
+
+    const empty = project({ [START]: [] });
+    empty.uporzadkujArkusze();
+    assert.match(plain(empty.$sheet(START))[0][0], /^START – spis arkuszy/, 'an empty START is adopted');
+  });
+
+  test('#78/Codex: cudzysłów w nazwie arkusza jest podwajany w formule HYPERLINK', () => {
+    const gas = project({ 'Raport "roczny"': [['a']] });
+    gas.uporzadkujArkusze();
+    const row = plain(gas.$sheet(START)).find(r => String(r[0]).includes('roczny'));
+    const label = String(row[0]).slice(String(row[0]).indexOf(',') + 1, -1);
+    assert.equal(label, '"Raport ""roczny"""');
+    assert.equal((String(row[0]).match(/"/g) || []).length % 2, 0, 'quotes stay balanced');
+  });
+
   test('wyścig o insertSheet: duplikat kończy się użyciem istniejącego arkusza, inny błąd nie jest ukrywany', () => {
-    const gas = project({ [START]: [['istniejący']] });
+    const gas = project({ [START]: [[SIGNATURE + ' (wersja skryptu: v1.0.0)']] });
     const ss = gas.SpreadsheetApp.getActive();
     const realGet = ss.getSheetByName;
     let lookups = 0;
@@ -177,12 +199,21 @@ describe('#78: ukrywanie arkuszy technicznych', () => {
     assert.match(gas.$alerts[3][0], /Żaden arkusz z danymi surowymi nie był ukryty\.$/);
   });
 
-  test('porządkowanie nie zmienia widoczności: ukryte arkusze zostają ukryte', () => {
-    const gas = project();
+  test('#78/Codex: ukryte arkusze da się przenieść – są pokazywane na czas porządkowania i znów ukrywane', () => {
+    // Kolejność odwrotna do docelowej wymusza przeniesienie każdej ukrytej zakładki.
+    const gas = loadProject({ sheets: { 'IMPORT LOG': [['Czas']], 'GA4 RAW': [['date']], 'GSC RAW': [['date']], 'Konfiguracja GSC': [['Klucz']], 'Analiza': [['a']] } });
     gas.ukryjArkuszeTechniczne();
-    gas.uporzadkujArkusze();
-    assert.equal(gas.SpreadsheetApp.getActive().getSheetByName('GSC RAW').isSheetHidden(), true);
-    assert.equal(names(gas).indexOf('GSC RAW') > names(gas).indexOf('Konfiguracja GA4'), true, 'hidden sheets are still ordered');
+    const ss = gas.SpreadsheetApp.getActive();
+    const activated = [];
+    const realActivate = ss.setActiveSheet;
+    ss.setActiveSheet = sh => { activated.push({ name: sh.getName(), hidden: sh.isSheetHidden() }); return realActivate(sh); };
+
+    const out = plain(gas.uporzadkujArkusze());
+    assert.ok(activated.length > 0, 'sheets were moved');
+    assert.ok(!activated.some(a => a.hidden), 'no hidden sheet was ever activated');
+    assert.equal(out.rehidden, 3);
+    ['GSC RAW', 'GA4 RAW', 'IMPORT LOG'].forEach(name => assert.equal(ss.getSheetByName(name).isSheetHidden(), true, name + ' hidden again'));
+    assert.deepEqual(names(gas), ['START', 'Analiza', 'Konfiguracja GSC', 'GSC RAW', 'GA4 RAW', 'IMPORT LOG']);
   });
 });
 
@@ -202,6 +233,29 @@ describe('#78: katalog i menu', () => {
       seen[entry.name] = true;
     });
     assert.equal(catalog.length, 16);
+  });
+
+  test('#78/Codex: nadpisane w konfiguracji nazwy arkuszy GA4 trafiają do kategorii „dane”, nie do arkuszy własnych', () => {
+    const gas = loadProject({ sheets: {
+      'Konfiguracja GA4': [['Klucz', 'Wartość'], ['propertyId', 'properties/111'], ['landingSheet', 'GA4 LANDING'], ['adsSheet', 'GA4 ADS']],
+      'GA4 LANDING': [['date']],
+      'GA4 ADS': [['date']],
+      'Analiza': [['a']]
+    } });
+    gas.uporzadkujArkusze();
+    const c = colors(gas);
+    assert.equal(c['GA4 LANDING'], '#434343');
+    assert.equal(c['GA4 ADS'], '#434343');
+    assert.equal(c['Analiza'], null);
+    assert.deepEqual(names(gas), ['START', 'Analiza', 'Konfiguracja GA4', 'GA4 LANDING', 'GA4 ADS']);
+    const rows = plain(gas.$sheet(START)).slice(4);
+    assert.equal(rows.find(r => String(r[0]).includes('"GA4 LANDING"'))[1], 'Dane surowe i logi');
+    assert.deepEqual(plain(gas.ukryjArkuszeTechniczne()), ['GA4 LANDING', 'GA4 ADS']);
+
+    // Bez arkusza konfiguracji katalog wraca do nazw domyślnych zamiast paść.
+    const noConfig = loadProject({ sheets: { 'GA4 RAW': [['date']], 'Analiza': [['a']] } });
+    noConfig.uporzadkujArkusze();
+    assert.equal(colors(noConfig)['GA4 RAW'], '#434343');
   });
 
   test('menu Dane ma trzy pozycje porządkowe na końcu', () => {
