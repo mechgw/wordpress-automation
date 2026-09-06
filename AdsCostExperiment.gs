@@ -36,12 +36,18 @@ function checkAdsVariant_(propertyId, variant) {
     dimensions: variant.dimensions.map(name => ({ name })),
     metrics: ADS_EXPERIMENT_METRICS.map(name => ({ name }))
   });
+  // API opisuje zgodność CAŁEGO schematu GA4 względem podanych pól, nie tylko
+  // pól z żądania; liczą się wyłącznie wymiary i metryki, o które pytamy.
   const fields = [];
   (response.dimensionCompatibilities || []).forEach(d => {
-    fields.push({ name: (d.dimensionMetadata && d.dimensionMetadata.apiName) || '?', kind: 'wymiar', compatibility: String(d.compatibility || 'UNKNOWN') });
+    const name = (d.dimensionMetadata && d.dimensionMetadata.apiName) || '';
+    if (variant.dimensions.indexOf(name) < 0) return;
+    fields.push({ name, kind: 'wymiar', compatibility: String(d.compatibility || 'UNKNOWN') });
   });
   (response.metricCompatibilities || []).forEach(m => {
-    fields.push({ name: (m.metricMetadata && m.metricMetadata.apiName) || '?', kind: 'metryka', compatibility: String(m.compatibility || 'UNKNOWN') });
+    const name = (m.metricMetadata && m.metricMetadata.apiName) || '';
+    if (ADS_EXPERIMENT_METRICS.indexOf(name) < 0) return;
+    fields.push({ name, kind: 'metryka', compatibility: String(m.compatibility || 'UNKNOWN') });
   });
   const missing = variant.dimensions.concat(ADS_EXPERIMENT_METRICS).filter(name => !fields.some(f => f.name === name));
   missing.forEach(name => fields.push({ name, kind: ADS_EXPERIMENT_METRICS.indexOf(name) >= 0 ? 'metryka' : 'wymiar', compatibility: 'BRAK W ODPOWIEDZI' }));
@@ -56,14 +62,19 @@ function sampleAdsVariant_(propertyId, variant, cfg) {
     dateRanges: [{ startDate: dateKey_(start), endDate: dateKey_(end) }],
     dimensions: variant.dimensions.map(name => ({ name })),
     metrics: ADS_EXPERIMENT_METRICS.map(name => ({ name })),
+    // TOTAL liczy koszt po wszystkich wierszach raportu, nie po stronie ograniczonej limitem.
+    metricAggregations: ['TOTAL'],
     limit: ADS_EXPERIMENT_SAMPLE_LIMIT
   });
   const rows = response.rows || [];
-  const cost = rows.reduce((sum, r) => sum + num_(metric_(r, 0)), 0);
+  const totals = response.totals && response.totals[0];
+  const totalCost = totals ? num_(metric_(totals, 0)) : null;
+  const sampleCost = rows.reduce((sum, r) => sum + num_(metric_(r, 0)), 0);
   return {
     range: dateKey_(start) + ' – ' + dateKey_(end),
     rowCount: Number(response.rowCount) || rows.length,
-    cost: Math.round(cost * 100) / 100,
+    cost: Math.round((totalCost === null ? sampleCost : totalCost) * 100) / 100,
+    costLabel: totalCost === null ? 'koszt w próbce (' + rows.length + ' wierszy, bez TOTAL z API)' : 'koszt łącznie (TOTAL z API)',
     sample: rows.slice(0, 5).map(r => variant.dimensions.map((_, i) => dim_(r, i)).concat(ADS_EXPERIMENT_METRICS.map((_, i) => num_(metric_(r, i)))))
   };
 }
@@ -92,7 +103,7 @@ function runAdsCostExperiment_() {
       try {
         winner.sample = sampleAdsVariant_(cfg.propertyId, variant, cfg);
         rows.push([now, variant.name, '(runReport)', 'próbka', 'OK',
-          winner.sample.range + ' | wiersze: ' + winner.sample.rowCount + ' | koszt: ' + winner.sample.cost]);
+          winner.sample.range + ' | wiersze: ' + winner.sample.rowCount + ' | ' + winner.sample.costLabel + ': ' + winner.sample.cost]);
         winner.sample.sample.forEach(s => rows.push([now, variant.name, '(wiersz)', 'próbka', '', s.join(' | ')]));
       } catch (e) {
         winner.sampleError = String(e && e.message ? e.message : e);
@@ -120,7 +131,7 @@ function adsExperimentSummaryText_(out) {
   if (out.winner) {
     const s = out.winner.sample;
     if (s) {
-      lines.push('Próbka (' + s.range + '): ' + s.rowCount + ' wierszy, koszt łącznie ' + s.cost + '.');
+      lines.push('Próbka (' + s.range + '): ' + s.rowCount + ' wierszy, ' + s.costLabel + ' ' + s.cost + '.');
       lines.push(s.rowCount > 0
         ? 'Rekomendacja: krok 2 na GA4 Data API, poziom „' + out.winner.variant + '”; Google Ads API i developer token nie są potrzebne.'
         : 'Kombinacja zgodna, ale bez danych w próbce: sprawdź, czy konto Ads jest połączone z GA4 i czy w tym okresie były wydatki.');

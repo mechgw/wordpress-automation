@@ -20,33 +20,42 @@ function sheets() {
   };
 }
 
-/** Odpowiedź checkCompatibility: wszystko zgodne poza polami z `incompatible`. */
+/**
+ * Odpowiedź checkCompatibility jak w prawdziwym API: opisuje CAŁY schemat
+ * (tu: żądane pola plus niezwiązane, niezgodne pola schematu), nie tylko pola
+ * z żądania. Żądane pola są zgodne poza tymi z `incompatible`.
+ */
 function compat(incompatible = []) {
   return (url, params) => {
     const req = JSON.parse(params.payload);
     return {
       code: 200,
       json: {
-        dimensionCompatibilities: req.dimensions.map(d => ({ dimensionMetadata: { apiName: d.name }, compatibility: incompatible.includes(d.name) ? 'INCOMPATIBLE' : 'COMPATIBLE' })),
+        dimensionCompatibilities: req.dimensions.map(d => ({ dimensionMetadata: { apiName: d.name }, compatibility: incompatible.includes(d.name) ? 'INCOMPATIBLE' : 'COMPATIBLE' }))
+          .concat([{ dimensionMetadata: { apiName: 'city' }, compatibility: 'INCOMPATIBLE' }, { dimensionMetadata: { apiName: 'sessionSource' }, compatibility: 'INCOMPATIBLE' }]),
         metricCompatibilities: req.metrics.map(m => ({ metricMetadata: { apiName: m.name }, compatibility: incompatible.includes(m.name) ? 'INCOMPATIBLE' : 'COMPATIBLE' }))
+          .concat([{ metricMetadata: { apiName: 'sessions' }, compatibility: 'INCOMPATIBLE' }])
       }
     };
   };
 }
 
-function report(rows) {
+/** runReport: strona wierszy (do limitu) plus TOTAL po wszystkich wierszach, jak w API. */
+function report(rows, opts = {}) {
   return (url, params) => {
     const req = JSON.parse(params.payload);
-    return {
-      code: 200,
-      json: {
-        rowCount: rows.length,
-        rows: rows.map(r => ({
-          dimensionValues: req.dimensions.map((_, i) => ({ value: String(r[i]) })),
-          metricValues: METRICS.map((_, i) => ({ value: String(r[req.dimensions.length + i]) }))
-        }))
-      }
+    const page = rows.slice(0, req.limit);
+    const json = {
+      rowCount: rows.length,
+      rows: page.map(r => ({
+        dimensionValues: req.dimensions.map((_, i) => ({ value: String(r[i]) })),
+        metricValues: METRICS.map((_, i) => ({ value: String(r[req.dimensions.length + i]) }))
+      }))
     };
+    if (!opts.noTotals) {
+      json.totals = [{ metricValues: METRICS.map((_, i) => ({ value: String(rows.reduce((s, r) => s + Number(r[req.dimensions.length + i]), 0)) })) }];
+    }
+    return { code: 200, json };
   };
 }
 
@@ -63,6 +72,8 @@ describe('eksperyment kosztów Ads', () => {
     assert.equal(out.results.length, 1, 'stops at the first compatible variant');
     assert.deepEqual(out.winner.sample.rowCount, 2);
     assert.equal(out.winner.sample.cost, 19.75);
+    assert.equal(out.winner.fields.length, 9, 'only the 6 requested dimensions and 3 metrics, unrelated schema fields ignored');
+    assert.ok(!out.winner.fields.some(f => f.name === 'city' || f.name === 'sessions'));
 
     const check = gas.$fetchCalls[0];
     assert.match(check.url, /analyticsdata\.googleapis\.com\/v1beta\/properties\/111:checkCompatibility$/);
@@ -72,18 +83,19 @@ describe('eksperyment kosztów Ads', () => {
     });
     const sample = JSON.parse(gas.$fetchCalls[1].params.payload);
     assert.equal(sample.limit, 20);
+    assert.deepEqual(sample.metricAggregations, ['TOTAL']);
     assert.match(sample.dateRanges[0].startDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(sample.dimensions.length, 6);
 
     const text = gas.$alerts[0][0];
-    assert.match(text, /^Eksperyment #46: koszty Google Ads z GA4 Data API \(właściwość 111\)\n\n- słowo kluczowe: ZGODNE\n\nPróbka \(\d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}\): 2 wierszy, koszt łącznie 19\.75\.\nRekomendacja: krok 2 na GA4 Data API, poziom „słowo kluczowe”; Google Ads API i developer token nie są potrzebne\./);
+    assert.match(text, /^Eksperyment #46: koszty Google Ads z GA4 Data API \(właściwość 111\)\n\n- słowo kluczowe: ZGODNE\n\nPróbka \(\d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}\): 2 wierszy, koszt łącznie \(TOTAL z API\) 19\.75\.\nRekomendacja: krok 2 na GA4 Data API, poziom „słowo kluczowe”; Google Ads API i developer token nie są potrzebne\./);
 
     const grid = plain(gas.$sheet(SHEET));
     assert.deepEqual(grid[0], HEADER);
     assert.deepEqual(grid[1].slice(1, 5), ['słowo kluczowe', 'date', 'wymiar', 'COMPATIBLE']);
     assert.deepEqual(grid[9].slice(1, 5), ['słowo kluczowe', 'advertiserAdImpressions', 'metryka', 'COMPATIBLE']);
     assert.equal(grid[10][2], '(runReport)');
-    assert.match(grid[10][5], /wiersze: 2 \| koszt: 19\.75$/);
+    assert.match(grid[10][5], /wiersze: 2 \| koszt łącznie \(TOTAL z API\): 19\.75$/);
     assert.equal(grid[11][2], '(wiersz)');
     assert.equal(grid[11][5], '20260901 | 1 | Brand | 11 | Grupa A | kurier warszawa | 12.5 | 30 | 900');
   });
@@ -111,10 +123,24 @@ describe('eksperyment kosztów Ads', () => {
     assert.match(gas.$alerts[0][0], /Rekomendacja: żadna kombinacja nie jest zgodna w GA4 Data API; krok 2 wymaga Google Ads API do osobnego arkusza GOOGLE ADS RAW\./);
   });
 
+  test('raport dłuższy niż limit: koszt z TOTAL po wszystkich wierszach, nie z 20-wierszowej strony; bez TOTAL koszt jawnie opisany jako próbka', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ['2026090' + (i % 7 + 1), '1', 'Brand', '11', 'Grupa A', 'kw' + i, '1.5', '1', '10']);
+    const gas = project([[':checkCompatibility', compat()], [':runReport', report(rows)]]);
+    const out = plain(gas.eksperymentKosztyAds());
+    assert.equal(out.winner.sample.rowCount, 30);
+    assert.equal(out.winner.sample.cost, 45, '30 × 1.5 from TOTAL, not 20 × 1.5');
+    assert.match(gas.$alerts[0][0], /30 wierszy, koszt łącznie \(TOTAL z API\) 45\./);
+
+    const noTotals = project([[':checkCompatibility', compat()], [':runReport', report(rows, { noTotals: true })]]);
+    const out2 = plain(noTotals.eksperymentKosztyAds());
+    assert.equal(out2.winner.sample.cost, 30, '20 × 1.5 of the returned page');
+    assert.match(noTotals.$alerts[0][0], /30 wierszy, koszt w próbce \(20 wierszy, bez TOTAL z API\) 30\./);
+  });
+
   test('zgodne, ale próbka pusta → rekomendacja sprawdzenia połączenia Ads z GA4; brak pola w odpowiedzi → „BRAK W ODPOWIEDZI”', () => {
     const gas = project([[':checkCompatibility', compat()], [':runReport', () => ({ code: 200, json: { rowCount: 0, rows: [] } })]]);
     gas.eksperymentKosztyAds();
-    assert.match(gas.$alerts[0][0], /0 wierszy, koszt łącznie 0\.\nKombinacja zgodna, ale bez danych w próbce: sprawdź, czy konto Ads jest połączone z GA4/);
+    assert.match(gas.$alerts[0][0], /0 wierszy, koszt w próbce \(0 wierszy, bez TOTAL z API\) 0\.\nKombinacja zgodna, ale bez danych w próbce: sprawdź, czy konto Ads jest połączone z GA4/);
 
     const partial = project([
       [':checkCompatibility', () => ({ code: 200, json: { dimensionCompatibilities: [{ dimensionMetadata: { apiName: 'date' }, compatibility: 'COMPATIBLE' }], metricCompatibilities: [] } })]
