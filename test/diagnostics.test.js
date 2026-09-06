@@ -179,6 +179,6 @@ describe('smokeTest: menu', () => {
     const gas = project();
     gas.onOpen();
     const dane = gas.$menus.find(m => m.title === 'Dane');
-    assert.equal(dane.items[dane.items.length - 1].fn, 'diagnostykaSystemu');
+    assert.ok(dane.items.map(i => i.fn).includes('diagnostykaSystemu'));
   });
 });

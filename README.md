@@ -20,6 +20,7 @@ Merging into `main` does **not** deploy anything. Publishing a GitHub release tr
 - `SeoLive.gs` — live SEO regression check: fetches key URLs and compares status, redirect target, title, H1, canonical, robots and schema with the expectations in the `SEO LIVE` sheet.
 - `Sitemaps.gs` — sitemap status from the Search Console Sitemaps API, written into the `SITEMAPY` sheet and summarised in *Status danych*.
 - `Diagnostics.gs` — read-only smoke test from the menu: Script Properties, sheets, GSC / GA4 / WordPress access, triggers, alert configuration, one report per step.
+- `SheetCatalog.gs` — the catalogue of script-owned sheets: tab colours, tab order, the generated `START` index and hiding the raw-data tabs.
 - `Version.gs` — placeholders only; the deploy workflow overwrites it with the release tag, commit and time before `clasp push`, and the sheet shows that tag as a menu (*Szczegóły wdrożenia*). The drift check ignores this file.
 - `eslint.config.js` — lint rules with Apps Script services declared as globals.
 - `.claspignore` — only `*.gs` and `appsscript.json` are ever pushed to Apps Script.
@@ -106,6 +107,14 @@ The result is the state **in Google's index**, not the live page: after changing
 ### System diagnostics (why does something not work?)
 
 *Dane → Diagnostyka systemu (tylko odczyt)* runs `smokeTest()` and shows one line per step: required Script Properties (and which optional ones are set; the value of `ALERT_EMAIL` is never printed, valid or not, only whether it is configured and whether it parses as an address), configuration sheets and expected tabs, a Search Console read (site list, is `siteUrl` among the properties and with which permission), a GA4 Data API read (property metadata), a WordPress read (`/wp/v2/users/me`: who the application password logs in as and whether it can edit pages, plus the write and dry-run switches), installed triggers, alert recipient (configured / invalid / absent, never the address itself) and sitemap state. Every step runs even when an earlier one fails, errors keep their HTTP code, and nothing is written anywhere: no sheet, no Script Property, no WordPress call other than GET, no lock. It does not run from CI (see #54: `clasp run` and reading a cell were rejected as too expensive to configure); the deploy verification (#44) proves the right files are live, the status model (#43, #42) tells whether the real processes work, and this dialog tells why they do not.
+
+### Keeping the file tidy
+
+The file has more than twenty tabs and gains one with every feature, so the order is maintained by the script instead of by hand. *Dane → Uporządkuj arkusze* colours the tabs by category (monitoring green, control orange, configuration grey, raw data near-black, `START` purple), puts the tabs in that order and rebuilds the `START` sheet: one row per tab with a link, its category, who maintains it (człowiek / skrypt / both) and one sentence on what belongs there. It is idempotent, so a second run reports that nothing changed.
+
+Only sheets the script itself creates are catalogued (`SheetCatalog.gs`, one entry per sheet). **Your own sheets are never recoloured and never hidden**; they keep their relative order and sit right after `START`, because those are the ones read daily. A new feature that creates a sheet adds one catalogue entry, otherwise the sheet lands among the unmanaged ones.
+
+Raw data and logs stay visible by default. *Dane → Ukryj arkusze techniczne* hides `GSC RAW`, the GA4 raw tabs and `IMPORT LOG`; *Pokaż arkusze techniczne* brings them back. Hiding is deliberately a separate menu item, not a side effect of tidying, and the imports keep working on hidden sheets.
 
 ### GitHub repository secrets
 
