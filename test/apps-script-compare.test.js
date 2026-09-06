@@ -70,6 +70,18 @@ describe('apps-script-compare', () => {
     assert.equal(fs.readFileSync(path.join(root, 'Version.gs'), 'utf8'), "const DEPLOYED_VERSION = { tag: 'dev' };\n", 'Version.gs restored from git');
   });
 
+  test('a checked-out source without final newline is not false drift after pull normalisation', () => {
+    const { root, fake } = repo('');
+    fs.writeFileSync(path.join(root, 'Kod.gs'), 'function a() {}');
+    execFileSync('git', ['add', 'Kod.gs'], { cwd: root });
+    execFileSync('git', ['commit', '-q', '-m', 'source without final newline'], { cwd: root });
+
+    const r = run(root, fake);
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /✅ Apps Script matches v9\.9\.9\./);
+    assert.equal(fs.readFileSync(path.join(root, 'Kod.gs'), 'utf8'), 'function a() {}');
+  });
+
   test('a changed source is drift: exit 1, file listed, patch written', () => {
     const { root, fake } = repo(`fs.writeFileSync('GA4.gs', 'function b() { return 1; }\\n');`);
     const r = run(root, fake, ['--patch', 'drift.patch']);
