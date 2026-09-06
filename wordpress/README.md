@@ -17,6 +17,21 @@ It deliberately exposes only three GeneratePress page-level settings:
 
 The write endpoint copies presence as well as value. If the source page does not have a whitelisted meta key, a stale value on the target page is deleted. The response is then read back and compared before success is returned.
 
+## Rank Math robots bridge
+
+The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and the read-only REST field `cc_rank_math_robots` on pages. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
+
+Design notes:
+
+- the value travels as a comma-separated list (`noindex,follow`) because that is what a sheet cell holds; Rank Math stores it as an array and the bridge converts;
+- only these directives are accepted, on both sides: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Anything else is a 400 before any write;
+- contradictory pairs (`index` with `noindex`, `follow` with `nofollow`) are rejected as well: writing one by mistake costs organic traffic;
+- an empty value deletes the meta, which means "fall back to the Rank Math defaults";
+- the write is verified by reading the meta back, exactly like the layout copy;
+- permission is `edit_post` on a real page, and a malformed request is a 400 before the page is even loaded.
+
+**Updating an existing installation:** this endpoint arrived in version 1.1.0 of the snippet. Until the WordPress side is updated, `UPDATE_RANK_MATH_FIELD` with `rank_math_robots` refuses with a message naming the file to update, and *WordPress → Test Rank Math bridge* reports the robots support as missing. Nothing else changes; the layout endpoints keep working.
+
 ## REST namespace
 
 The Apps Script client uses `WP_REST_NAMESPACE` and calls:

@@ -118,9 +118,19 @@ describe('WordPress.gs response helpers', () => {
   });
 
   test('getRankMathData_ reports availability and defaults', () => {
-    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' } })), { available: true, title: 'T', description: 'D' });
-    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: null })), { available: true, title: '', description: '' });
-    assert.deepEqual(plain(gas.getRankMathData_({})), { available: false, title: '', description: '' });
-    assert.deepEqual(plain(gas.getRankMathData_(null)), { available: false, title: '', description: '' });
+    const noRobots = { robotsAvailable: false, robots: '' };
+    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' } })), Object.assign({ available: true, title: 'T', description: 'D' }, noRobots));
+    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: null })), Object.assign({ available: true, title: '', description: '' }, noRobots));
+    assert.deepEqual(plain(gas.getRankMathData_({})), Object.assign({ available: false, title: '', description: '' }, noRobots));
+    assert.deepEqual(plain(gas.getRankMathData_(null)), Object.assign({ available: false, title: '', description: '' }, noRobots));
+  });
+
+  test('#88: getRankMathData_ czyta robots z osobnego pola REST i normalizuje je do listy po przecinku', () => {
+    const withRobots = value => plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' }, cc_rank_math_robots: value }));
+    assert.deepEqual(withRobots('noindex,follow'), { available: true, title: 'T', description: 'D', robotsAvailable: true, robots: 'noindex,follow' });
+    assert.equal(withRobots(' NoIndex , follow , noindex ').robots, 'noindex,follow', 'wielkość liter, spacje i duplikaty nie mają znaczenia');
+    assert.equal(withRobots(['noindex', 'nofollow']).robots, 'noindex,nofollow', 'tablica, tak jak trzyma to Rank Math');
+    assert.equal(withRobots('').robots, '', 'pusto znaczy domyślne ustawienia Rank Math');
+    assert.equal(withRobots('').robotsAvailable, true, 'pole jest, tylko puste');
   });
 });

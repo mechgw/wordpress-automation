@@ -20,6 +20,9 @@ function addWpMenu_() {
     .addToUi();
 }
 
+/** Pola Rank Math, które most potrafi zapisać. Robots idzie osobnym endpointem. */
+const WP_RANK_MATH_FIELDS = ['rank_math_title', 'rank_math_description', 'rank_math_robots'];
+
 /** Akcje, które zmieniają WordPress; tylko one podlegają idempotencji po command_id. */
 const WP_WRITE_ACTIONS = [
   'CREATE_PAGE_DRAFT', 'PUBLISH_PAGE', 'UPDATE_MEDIA_FIELD', 'UPDATE_RANK_MATH_FIELD',
@@ -180,7 +183,7 @@ function testWpConnection() {
 
 function testRankMathBridge() {
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math'
+    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,cc_rank_math_robots'
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -212,7 +215,11 @@ function testRankMathBridge() {
     'Rank Math bridge działa (wersja ' + versionLabel_() + ').\n\n' +
     'Strona testowa: ' + (page.slug || page.id) +
     '\nOdczyt surowego SEO title/meta: OK' +
-    '\nDedykowany endpoint zapisu: OK'
+    '\nDedykowany endpoint zapisu: OK' +
+    '\nObsługa robots (pole cc_rank_math_robots): ' +
+    (Object.prototype.hasOwnProperty.call(page, 'cc_rank_math_robots')
+      ? 'OK'
+      : 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie')
   );
 }
 
@@ -470,7 +477,7 @@ function getPageBySlug_(slug, commandId) {
     '/wp-json/wp/v2/pages' +
     '?slug=' + encodeURIComponent(slug) +
     '&context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -504,7 +511,7 @@ function getPageRawById_(id, requireRankMath = false) {
   const path =
     '/wp-json/wp/v2/pages/' + encodeURIComponent(id) +
     '?context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -558,7 +565,7 @@ function getAllPages_(commandId) {
         '&page=' + pageNo +
         '&orderby=id' +
         '&order=asc' +
-        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math';
+        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
 
       const response = wpFetch_(path);
 
@@ -949,26 +956,78 @@ function getRankMathData_(page) {
     ? page.cc_rank_math
     : {};
 
+  // Robots idzie osobnym polem REST, bo dodaje je nasz snippet z repozytorium,
+  // a nie niewersjonowany most seo-meta. Brak pola = snippet nieaktualny.
+  const robotsAvailable = Object.prototype.hasOwnProperty.call(page || {}, 'cc_rank_math_robots');
+
   return {
     available,
     title: String(raw.title || ''),
-    description: String(raw.description || '')
+    description: String(raw.description || ''),
+    robotsAvailable,
+    robots: robotsAvailable ? robotsList_(page.cc_rank_math_robots).join(',') : ''
   };
 }
 
+/** Dyrektywy robots dopuszczone przy zapisie; ta sama lista co w snippecie PHP. */
+const WP_ROBOTS_DIRECTIVES = ['index', 'noindex', 'follow', 'nofollow', 'noarchive', 'noimageindex', 'nosnippet'];
+
+/** Rozbija wartość robots (tekst po przecinku albo tablica) na listę bez walidacji. */
+function robotsList_(value) {
+  const parts = Array.isArray(value) ? value : String(value === null || value === undefined ? '' : value).split(',');
+  const out = [];
+  parts.forEach(part => {
+    const directive = String(part).trim().toLowerCase();
+    if (directive && out.indexOf(directive) < 0) out.push(directive);
+  });
+  return out;
+}
+
+/**
+ * Waliduje i normalizuje wartość robots przed wysłaniem. Pusta wartość jest
+ * poprawna i oznacza powrót do domyślnych Rank Math. Sprzeczna para jest
+ * odrzucana tutaj, żeby błąd wyszedł przed żądaniem, a nie po zapisie.
+ */
+function normalizeRobotsValue_(value) {
+  const list = robotsList_(value);
+  list.forEach(directive => {
+    if (WP_ROBOTS_DIRECTIVES.indexOf(directive) < 0) {
+      throw new Error(
+        'Niedozwolona dyrektywa robots: ' + directive +
+        '. Dozwolone: ' + WP_ROBOTS_DIRECTIVES.join(', ')
+      );
+    }
+  });
+  if (list.indexOf('index') >= 0 && list.indexOf('noindex') >= 0) {
+    throw new Error('Sprzeczne dyrektywy robots: index i noindex naraz.');
+  }
+  if (list.indexOf('follow') >= 0 && list.indexOf('nofollow') >= 0) {
+    throw new Error('Sprzeczne dyrektywy robots: follow i nofollow naraz.');
+  }
+  return list.join(',');
+}
+
+/** Porównanie robots jako zbiorów: kolejność dyrektyw nie ma znaczenia. */
+function robotsEqual_(a, b) {
+  const x = robotsList_(a).slice().sort();
+  const y = robotsList_(b).slice().sort();
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
 function writeRankMathField_(postId, field, value) {
-  const allowedFields = ['rank_math_title', 'rank_math_description'];
-  if (!allowedFields.includes(field)) {
+  if (!WP_RANK_MATH_FIELDS.includes(field)) {
     throw new Error('Niedozwolone pole Rank Math: ' + field);
   }
 
-  const response = wpFetch_(wpBridgePath_('seo-meta'), {
+  // Robots ma własny endpoint z tego repozytorium (page-layout-rest-bridge.php),
+  // bo most seo-meta obsługuje wyłącznie tytuł i opis.
+  const request = field === 'rank_math_robots'
+    ? { path: wpBridgePath_('seo-robots'), payload: { post_id: Number(postId), value: normalizeRobotsValue_(value) } }
+    : { path: wpBridgePath_('seo-meta'), payload: { post_id: Number(postId), field: field, value: value === null || value === undefined ? '' : String(value) } };
+
+  const response = wpFetch_(request.path, {
     method: 'post',
-    payload: {
-      post_id: Number(postId),
-      field: field,
-      value: value === null || value === undefined ? '' : String(value)
-    }
+    payload: request.payload
   });
 
   if (response.code < 200 || response.code >= 300) {
@@ -985,23 +1044,35 @@ function updateRankMathField_(command) {
     throw new Error('UPDATE_RANK_MATH_FIELD wymaga ID strony WordPress.');
   }
 
-  const allowedFields = ['rank_math_title', 'rank_math_description'];
-  if (!allowedFields.includes(command.field)) {
+  if (!WP_RANK_MATH_FIELDS.includes(command.field)) {
     throw new Error(
       'Niedozwolone pole Rank Math: ' + command.field +
-      '. Dozwolone: ' + allowedFields.join(', ')
+      '. Dozwolone: ' + WP_RANK_MATH_FIELDS.join(', ')
     );
   }
+
+  // Walidacja robots przed czymkolwiek innym: zła dyrektywa ma zatrzymać komendę,
+  // zanim powstanie snapshot i zanim cokolwiek poleci do WordPressa.
+  const isRobots = command.field === 'rank_math_robots';
+  const robotsValue = isRobots ? normalizeRobotsValue_(command.value) : '';
 
   // Odczyt surowych pól Rank Math jest obowiązkowy przed zapisem,
   // żeby snapshot pozwalał odtworzyć faktyczny stan, także zmienne Rank Math.
   const before = getPageRawById_(command.target, true);
+
+  if (isRobots && !getRankMathData_(before).robotsAvailable) {
+    throw new Error(
+      'Most nie udostępnia pola cc_rank_math_robots, więc zapisu robots nie da się potwierdzić odczytem. ' +
+      'Zaktualizuj snippet page-layout-rest-bridge.php po stronie WordPressa.'
+    );
+  }
+
   const snapshot = saveSnapshot_(before, command.id);
 
   const meta = {};
-  meta[command.field] = command.value === null || command.value === undefined
-    ? ''
-    : String(command.value);
+  meta[command.field] = isRobots
+    ? robotsValue
+    : (command.value === null || command.value === undefined ? '' : String(command.value));
 
   const response = writeRankMathField_(
     Number(command.target),
@@ -1016,11 +1087,13 @@ function updateRankMathField_(command) {
   const after = getPageRawById_(command.target, true);
   const rankMathAfter = getRankMathData_(after);
   const expected = meta[command.field];
-  const actual = command.field === 'rank_math_title'
-    ? rankMathAfter.title
-    : rankMathAfter.description;
+  const actual = isRobots
+    ? rankMathAfter.robots
+    : (command.field === 'rank_math_title' ? rankMathAfter.title : rankMathAfter.description);
 
-  if (String(actual) !== String(expected)) {
+  // Kolejność dyrektyw robots nie ma znaczenia, więc porównujemy je jak zbiory.
+  const matches = isRobots ? robotsEqual_(actual, expected) : String(actual) === String(expected);
+  if (!matches) {
     throw new Error(
       'Rank Math odpowiedział poprawnie, ale odczyt kontrolny nie zgadza się z zapisem. ' +
       'Pole: ' + command.field

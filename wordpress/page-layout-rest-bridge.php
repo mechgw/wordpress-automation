@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: WordPress Automation — GeneratePress Page Layout REST Bridge
- * Description: Adds a narrowly scoped REST endpoint for reading and copying the GeneratePress page-layout settings used by wordpress-automation.
- * Version: 1.0.0
+ * Description: Adds narrowly scoped REST endpoints for the GeneratePress page-layout settings and for the Rank Math robots directives used by wordpress-automation.
+ * Version: 1.1.0
  * License: MIT
  */
 
@@ -60,6 +60,86 @@ function wpa_page_layout_rest_namespace() {
 
 	$namespaces = array_keys( $matches );
 	return (string) $namespaces[0];
+}
+
+/**
+ * Dyrektywy robots dopuszczone przy zapisie. Świadomie wąska lista: wartość
+ * spoza niej jest odrzucana, zanim cokolwiek zostanie zapisane.
+ *
+ * @return string[]
+ */
+function wpa_robots_directives() {
+	return array(
+		'index',
+		'noindex',
+		'follow',
+		'nofollow',
+		'noarchive',
+		'noimageindex',
+		'nosnippet',
+	);
+}
+
+/**
+ * Normalizuje wartość robots do listy dyrektyw. Przyjmuje tablicę (tak Rank Math
+ * trzyma meta) albo tekst po przecinku (tak wygodniej w arkuszu). Pusta wartość
+ * jest poprawna i oznacza „usuń ustawienie, wróć do domyślnych Rank Math”.
+ *
+ * @param mixed $value Raw value.
+ * @return string[]|WP_Error
+ */
+function wpa_robots_normalize( $value ) {
+	$parts = is_array( $value ) ? $value : explode( ',', (string) $value );
+	$out   = array();
+
+	foreach ( $parts as $part ) {
+		$directive = strtolower( trim( (string) $part ) );
+		if ( '' === $directive ) {
+			continue;
+		}
+		if ( ! in_array( $directive, wpa_robots_directives(), true ) ) {
+			return new WP_Error(
+				'wp_automation_invalid_robots',
+				'Unsupported robots directive: ' . $directive,
+				array( 'status' => 400 )
+			);
+		}
+		if ( ! in_array( $directive, $out, true ) ) {
+			$out[] = $directive;
+		}
+	}
+
+	// Sprzeczna para znaczy, że ktoś się pomylił; zapis takiej wartości kosztuje ruch organiczny.
+	if ( in_array( 'index', $out, true ) && in_array( 'noindex', $out, true ) ) {
+		return new WP_Error( 'wp_automation_invalid_robots', 'index and noindex are contradictory.', array( 'status' => 400 ) );
+	}
+	if ( in_array( 'follow', $out, true ) && in_array( 'nofollow', $out, true ) ) {
+		return new WP_Error( 'wp_automation_invalid_robots', 'follow and nofollow are contradictory.', array( 'status' => 400 ) );
+	}
+
+	return $out;
+}
+
+/**
+ * Aktualne robots strony jako tekst po przecinku; pusty tekst = brak własnego
+ * ustawienia, czyli obowiązują domyślne Rank Math.
+ *
+ * @param int $post_id Page ID.
+ * @return string
+ */
+function wpa_robots_read( $post_id ) {
+	$raw = get_post_meta( $post_id, 'rank_math_robots', true );
+	if ( ! is_array( $raw ) ) {
+		$raw = ( '' === $raw || null === $raw ) ? array() : array( $raw );
+	}
+
+	$normalized = wpa_robots_normalize( $raw );
+	if ( is_wp_error( $normalized ) ) {
+		// Wartość zapisana poza tym mostem może być nietypowa; pokazujemy ją bez oceniania.
+		return implode( ',', array_map( 'strval', $raw ) );
+	}
+
+	return implode( ',', $normalized );
 }
 
 /**
@@ -285,6 +365,86 @@ function wpa_page_layout_copy( $request ) {
 }
 
 /**
+ * POST permission dla /seo-robots: najpierw walidacja wejścia (400), potem
+ * zachowanie 404 dla nieistniejącej strony, na końcu prawo edycji.
+ *
+ * @param WP_REST_Request $request REST request.
+ * @return bool|WP_Error
+ */
+function wpa_robots_can_write( $request ) {
+	$post_id = absint( $request->get_param( 'post_id' ) );
+
+	if ( $post_id <= 0 ) {
+		return new WP_Error(
+			'wp_automation_invalid_post_id',
+			'Valid post_id is required.',
+			array( 'status' => 400 )
+		);
+	}
+
+	$normalized = wpa_robots_normalize( $request->get_param( 'value' ) );
+	if ( is_wp_error( $normalized ) ) {
+		return $normalized;
+	}
+
+	$post = wpa_page_layout_get_page( $post_id );
+	if ( is_wp_error( $post ) ) {
+		return $post;
+	}
+
+	return current_user_can( 'edit_post', $post_id );
+}
+
+/**
+ * Handle POST /seo-robots. Zapisuje wyłącznie meta rank_math_robots i
+ * potwierdza wynik odczytem kontrolnym przed zwróceniem sukcesu.
+ *
+ * @param WP_REST_Request $request REST request.
+ * @return WP_REST_Response|WP_Error
+ */
+function wpa_robots_write( $request ) {
+	$post_id    = absint( $request->get_param( 'post_id' ) );
+	$normalized = wpa_robots_normalize( $request->get_param( 'value' ) );
+
+	if ( is_wp_error( $normalized ) ) {
+		return $normalized;
+	}
+
+	$post = wpa_page_layout_get_page( $post_id );
+	if ( is_wp_error( $post ) ) {
+		return $post;
+	}
+
+	$before = wpa_robots_read( $post_id );
+
+	if ( empty( $normalized ) ) {
+		delete_post_meta( $post_id, 'rank_math_robots' );
+	} else {
+		update_post_meta( $post_id, 'rank_math_robots', $normalized );
+	}
+
+	clean_post_cache( $post_id );
+	$after = wpa_robots_read( $post_id );
+
+	if ( $after !== implode( ',', $normalized ) ) {
+		return new WP_Error(
+			'wp_automation_robots_verification_failed',
+			'Robots read-after-write verification failed.',
+			array( 'status' => 500 )
+		);
+	}
+
+	return rest_ensure_response(
+		array(
+			'post_id' => (int) $post_id,
+			'before'  => $before,
+			'robots'  => $after,
+			'changed' => $before !== $after,
+		)
+	);
+}
+
+/**
  * Register after the existing Rank Math bridge so its namespace can be
  * discovered from the already registered /v1/seo-meta route.
  */
@@ -328,6 +488,54 @@ add_action(
 							'sanitize_callback' => 'absint',
 						),
 					),
+				),
+			)
+		);
+
+		register_rest_route(
+			$namespace . '/v1',
+			'/seo-robots',
+			array(
+				array(
+					'methods'             => WP_REST_Server::CREATABLE,
+					'callback'            => 'wpa_robots_write',
+					'permission_callback' => 'wpa_robots_can_write',
+					'args'                => array(
+						'post_id' => array(
+							'required'          => true,
+							'type'              => 'integer',
+							'sanitize_callback' => 'absint',
+						),
+						'value'   => array(
+							'required' => true,
+							'type'     => 'string',
+						),
+					),
+				),
+			)
+		);
+	},
+	100
+);
+
+/**
+ * Odczyt robots wystawiony jako pole REST strony, żeby WordPress.gs mógł je
+ * pobrać razem z resztą danych jednym żądaniem (_fields=cc_rank_math_robots).
+ */
+add_action(
+	'rest_api_init',
+	function () {
+		register_rest_field(
+			'page',
+			'cc_rank_math_robots',
+			array(
+				'get_callback' => function ( $page ) {
+					return wpa_robots_read( (int) $page['id'] );
+				},
+				'schema'       => array(
+					'description' => 'Rank Math robots directives as a comma-separated list; empty means Rank Math defaults.',
+					'type'        => 'string',
+					'context'     => array( 'edit' ),
 				),
 			)
 		);

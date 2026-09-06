@@ -63,3 +63,35 @@ test('layout copy mirrors missing meta and verifies the result after writing', (
   assert.match(bridge, /\$source_layout !== \$after_layout/);
   assert.match(bridge, /wp_automation_layout_verification_failed/);
 });
+
+test('#88: robots bridge accepts only known directives and rejects contradictory pairs', () => {
+  assert.match(bridge, /function wpa_robots_directives/);
+  const list = [...bridge.matchAll(/^\t\t'([a-z]+)',$/gm)].map(m => m[1]);
+  assert.deepEqual(list, ['index', 'noindex', 'follow', 'nofollow', 'noarchive', 'noimageindex', 'nosnippet']);
+  assert.match(bridge, /Unsupported robots directive/);
+  assert.match(bridge, /index and noindex are contradictory/);
+  assert.match(bridge, /follow and nofollow are contradictory/);
+});
+
+test('#88: robots endpoint is POST-only, permission-gated and verified by a read-back', () => {
+  assert.match(bridge, /'\/seo-robots'/);
+  assert.match(bridge, /'callback' {12}=> 'wpa_robots_write'/);
+  assert.match(bridge, /'permission_callback' => 'wpa_robots_can_write'/);
+  assert.match(bridge, /function wpa_robots_can_write/);
+  assert.match(bridge, /current_user_can\( 'edit_post', \$post_id \)/);
+  assert.match(bridge, /wp_automation_robots_verification_failed/);
+  // Zapis dotyczy wyłącznie jednego klucza meta; żadnych innych pól Rank Math.
+  const metaWrites = [...bridge.matchAll(/update_post_meta\( \$post_id, '([^']+)'/g)].map(m => m[1]);
+  assert.deepEqual(metaWrites, ['rank_math_robots']);
+});
+
+test('#88: empty robots value clears the meta instead of writing an empty array', () => {
+  assert.match(bridge, /if \( empty\( \$normalized \) \) \{\s*\n\t\t*delete_post_meta\( \$post_id, 'rank_math_robots' \);/);
+});
+
+test('#88: robots value is readable as a REST field so one request returns it with the page', () => {
+  assert.match(bridge, /register_rest_field\(\s*\n\t*'page',\s*\n\t*'cc_rank_math_robots'/);
+  assert.match(bridge, /function wpa_robots_read/);
+  assert.match(bridge, /get_post_meta\( \$post_id, 'rank_math_robots', true \)/);
+  assert.doesNotMatch(bridge, /citycouriers/i);
+});
