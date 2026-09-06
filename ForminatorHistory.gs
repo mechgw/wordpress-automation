@@ -7,14 +7,53 @@ const FORMINATOR_HISTORY_TAG = 'forminator-submission-history-bridge';
 const FORMINATOR_HISTORY_NAME = 'Form Submission History Bridge';
 const FORMINATOR_HISTORY_SNIPPET_ID_PROP = 'WP_FORMINATOR_HISTORY_SNIPPET_ID';
 const FORMINATOR_HISTORY_FORM_ID_PROP = 'WP_B2B_FORM_ID';
+const FORMINATOR_HISTORY_WRITE_APPROVAL_PROP = 'WP_FORMINATOR_HISTORY_WRITE_APPROVAL';
 const FORMINATOR_HISTORY_SHEET = 'FORMINATOR B2B HISTORY';
 
+/**
+ * One-time approval for editor/headless execution.
+ *
+ * Running this function is the explicit first step. The approval is consumed by
+ * the next Forminator-history write operation, so prepare/activate/rollback each
+ * require a fresh arm. WP_ALLOW_WRITES must still be TRUE.
+ */
+function armForminatorHistoryWrite() {
+  requireWpWrite_({ confirm: 'YES' });
+  PropertiesService.getScriptProperties().setProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP, 'YES');
+  return { armed: true };
+}
+
 function requireForminatorHistoryWriteApproval_(title, message) {
-  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP) === 'YES') {
+    props.setProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP, '');
+    requireWpWrite_({ confirm: 'YES' });
+    return true;
+  }
+
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch {
+    throw new Error(
+      'Forminator history: brak kontekstu UI. Najpierw uruchom armForminatorHistoryWrite(), ' +
+      'a potem ponów operację.'
+    );
+  }
+
   const answer = ui.alert(title, message, ui.ButtonSet.YES_NO);
   if (answer !== ui.Button.YES) return false;
   requireWpWrite_({ confirm: 'YES' });
   return true;
+}
+
+/** Post-run message: dialog in the spreadsheet UI, log only in editor/headless context. */
+function showForminatorHistoryMessage_(message) {
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch {
+    Logger.log(message);
+  }
 }
 
 function validateForminatorHistoryFormId_(value) {
@@ -157,7 +196,7 @@ function prepareForminatorHistoryBridge() {
     );
     const saved = saveCodeSnippetResult_(snippet, 'FORMINATOR-HISTORY-PREPARE');
 
-    SpreadsheetApp.getUi().alert(
+    showForminatorHistoryMessage_(
       'Forminator history bridge przygotowany.\n\n' +
       'Snippet ID: ' + snippet.id + '\nStan: NIEAKTYWNY\n\nPo audycie uruchom activateForminatorHistoryBridge().'
     );
@@ -188,7 +227,7 @@ function auditForminatorHistoryBridge() {
       codeError: null,
       scope: String(snippet.scope || '')
     };
-    SpreadsheetApp.getUi().alert(
+    showForminatorHistoryMessage_(
       'Audyt Forminator history bridge\n\n' +
       'Snippet ID: ' + state.snippetId +
       '\nStan: ' + (state.active ? 'AKTYWNY' : 'nieaktywny') +
@@ -220,7 +259,7 @@ function activateForminatorHistoryBridge() {
     validateForminatorHistorySnippet_(snippet, expectedCode);
     if (!snippet.active) throw new Error('Forminator history: snippet pozostał nieaktywny po aktywacji.');
 
-    SpreadsheetApp.getUi().alert(
+    showForminatorHistoryMessage_(
       'Forminator history bridge aktywny.\n\nSnippet ID: ' + snippet.id +
       '\nNastępny krok: importB2BForminatorHistory().'
     );
@@ -329,7 +368,7 @@ function importB2BForminatorHistory() {
 
     const first = rows.length ? rows[0][1] : 'brak';
     const last = rows.length ? rows[rows.length - 1][1] : 'brak';
-    SpreadsheetApp.getUi().alert(
+    showForminatorHistoryMessage_(
       'Historia Forminator B2B pobrana.\n\n' +
       'Wpisy: ' + rows.length + '\nNajstarszy: ' + first + '\nNajnowszy: ' + last +
       '\n\nDo arkusza nie skopiowano żadnych wartości pól formularza.'
