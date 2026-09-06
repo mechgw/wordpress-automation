@@ -366,6 +366,8 @@ function addStatusMenu_() {
     .addSeparator()
     .addItem('Sprawdź aktualność teraz (alerty)', 'sprawdzAktualnoscImportowZMenu')
     .addItem('Włącz codzienne alerty e-mail', 'ustawCodzienneAlerty')
+    .addSeparator()
+    .addItem('Diagnostyka systemu (tylko odczyt)', 'diagnostykaSystemu')
     .addToUi();
 }
 
