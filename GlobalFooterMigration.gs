@@ -4,7 +4,35 @@
 // creates a new inactive loader snippet, switches activation in an availability-
 // preserving order, and provides a symmetric rollback. It intentionally does
 // not expose generic snippet update/delete operations.
-const GLOBAL_FOOTER_SOURCE_SLUG = 'cc-global-footer-source';
+/**
+ * Identyfikatory z konkretnej instalacji (slug strony źródłowej, id bloku stylów,
+ * klasa stopki) mieszkają w Script Properties, a nie w kodzie: repozytorium jest
+ * publiczne (#103). Dopuszczamy wyłącznie [a-z0-9-], więc wartość jest bezpieczna
+ * i w wyrażeniu regularnym, i we wstrzykiwanym kodzie PHP, bez cytowania.
+ */
+function globalFooterIdentifiers_() {
+  const props = PropertiesService.getScriptProperties();
+  const read = function (key) {
+    const value = String(props.getProperty(key) || '').trim();
+    if (!value) {
+      throw new Error(
+        'Brak Script Property: ' + key + '. Migracja stopki wymaga podania ' +
+        'identyfikatorów instalacji, bo nie są zaszyte w kodzie.'
+      );
+    }
+    if (!/^[a-z0-9-]+$/.test(value)) {
+      throw new Error(
+        'Nieprawidłowa Script Property ' + key + ': dozwolone są małe litery, cyfry i myślnik.'
+      );
+    }
+    return value;
+  };
+  return {
+    slug: read('WP_GLOBAL_FOOTER_SOURCE_SLUG'),
+    styleId: read('WP_GLOBAL_FOOTER_STYLE_ID'),
+    footerClass: read('WP_GLOBAL_FOOTER_CLASS')
+  };
+}
 const GLOBAL_FOOTER_LOADER_TAG = 'global-footer-loader';
 const GLOBAL_FOOTER_LOADER_NAME = 'Global Footer Loader';
 const GLOBAL_FOOTER_SOURCE_ID_PROP = 'WP_GLOBAL_FOOTER_SOURCE_ID';
@@ -112,10 +140,23 @@ function saveCodeSnippetSnapshot_(snippet, commandId) {
   return { snapshotId, chunks: chunks.length };
 }
 
+/**
+ * Wyrażenia budowane z identyfikatorów instalacji. Wartość przeszła już przez
+ * globalFooterIdentifiers_, więc mieści się w [a-z0-9-] i nie wymaga cytowania.
+ */
+function globalFooterStyleRegExp_(styleId) {
+  return new RegExp('<style\\b[^>]*id=["\']' + styleId + '["\'][^>]*>[\\s\\S]*?<\\/style>', 'gi');
+}
+
+function globalFooterMarkupRegExp_(footerClass) {
+  return new RegExp('<footer\\b[^>]*class=["\'][^"\']*\\b' + footerClass + '\\b[^"\']*["\'][^>]*>[\\s\\S]*?<\\/footer>', 'gi');
+}
+
 /** Fetch the non-public WordPress page that stores footer CSS and markup. */
 function getGlobalFooterSourcePageBySlug_() {
+  const slug = globalFooterIdentifiers_().slug;
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?slug=' + encodeURIComponent(GLOBAL_FOOTER_SOURCE_SLUG) +
+    '/wp-json/wp/v2/pages?slug=' + encodeURIComponent(slug) +
     '&status=draft&context=edit&_fields=id,slug,status,title,content'
   );
   if (response.code < 200 || response.code >= 300) {
@@ -126,7 +167,7 @@ function getGlobalFooterSourcePageBySlug_() {
   if (pages.length !== 1) {
     throw new Error(
       'Źródło stopki: oczekiwano dokładnie jednej strony draft o slugu ' +
-      GLOBAL_FOOTER_SOURCE_SLUG + ', znaleziono: ' + pages.length + '.'
+      slug + ', znaleziono: ' + pages.length + '.'
     );
   }
   return pages[0];
@@ -141,12 +182,14 @@ function validateGlobalFooterSourcePage_(page) {
     throw new Error('Źródło stopki nie może być opublikowanym landingiem.');
   }
 
+  const ids = globalFooterIdentifiers_();
   const content = getRawValue_(page.content);
-  const styleHits = (content.match(/<style\b[^>]*id=["']cc-global-footer-styles["'][^>]*>[\s\S]*?<\/style>/gi) || []).length;
-  const footerHits = (content.match(/<footer\b[^>]*class=["'][^"']*\bcc-site-footer\b[^"']*["'][^>]*>[\s\S]*?<\/footer>/gi) || []).length;
+  const styleHits = (content.match(globalFooterStyleRegExp_(ids.styleId)) || []).length;
+  const footerHits = (content.match(globalFooterMarkupRegExp_(ids.footerClass)) || []).length;
   if (styleHits !== 1 || footerHits !== 1) {
     throw new Error(
-      'Źródło stopki musi zawierać dokładnie jeden kompletny #cc-global-footer-styles i jeden kompletny .cc-site-footer.'
+      'Źródło stopki musi zawierać dokładnie jeden kompletny #' + ids.styleId +
+      ' i jeden kompletny .' + ids.footerClass + '.'
     );
   }
   return content;
@@ -154,13 +197,14 @@ function validateGlobalFooterSourcePage_(page) {
 
 /** Identify the current active footer implementation without relying on production IDs. */
 function findLegacyGlobalFooterSnippet_(snippets) {
+  const footerClass = globalFooterIdentifiers_().footerClass;
   const candidates = snippets.filter(snippet => {
     const code = String(snippet.code || '');
     const tags = Array.isArray(snippet.tags) ? snippet.tags : [];
     return snippet.active &&
       !tags.includes(GLOBAL_FOOTER_LOADER_TAG) &&
       code.includes('generate_before_footer') &&
-      code.includes('cc-site-footer');
+      code.includes(footerClass);
   });
 
   if (candidates.length !== 1) {
@@ -179,6 +223,11 @@ function buildGlobalFooterLoaderCode_(pageId) {
   }
 
   const id = Number(pageId);
+  // Identyfikatory instalacji są walidowane do [a-z0-9-], więc wklejenie ich do
+  // wzorca preg jest bezpieczne i nie wymaga cytowania.
+  const ids = globalFooterIdentifiers_();
+  const styleId = ids.styleId;
+  const footerClass = ids.footerClass;
   return [
     "if ( ! function_exists( 'wpauto_global_footer_source_content' ) ) {",
     "\tfunction wpauto_global_footer_source_content() {",
@@ -194,8 +243,8 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "if ( ! function_exists( 'wpauto_global_footer_source_valid' ) ) {",
     "\tfunction wpauto_global_footer_source_valid() {",
     "\t\t$content = wpauto_global_footer_source_content();",
-    "\t\t$style_ok = (bool) preg_match( '/<style\\b[^>]*id=[\"\\x27]cc-global-footer-styles[\"\\x27][^>]*>.*?<\\/style>/is', $content );",
-    "\t\t$footer_ok = (bool) preg_match( '/<footer\\b[^>]*class=[\"\\x27][^\"\\x27]*\\bcc-site-footer\\b[^\"\\x27]*[\"\\x27][^>]*>.*?<\\/footer>/is', $content );",
+    "\t\t$style_ok = (bool) preg_match( '/<style\\b[^>]*id=[\"\\x27]" + styleId + "[\"\\x27][^>]*>.*?<\\/style>/is', $content );",
+    "\t\t$footer_ok = (bool) preg_match( '/<footer\\b[^>]*class=[\"\\x27][^\"\\x27]*\\b" + footerClass + "\\b[^\"\\x27]*[\"\\x27][^>]*>.*?<\\/footer>/is', $content );",
     "\t\treturn $style_ok && $footer_ok;",
     "\t}",
     "}",
@@ -203,7 +252,7 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "add_action( 'wp_head', function () {",
     "\tif ( ! wpauto_global_footer_source_valid() ) { return; }",
     "\t$content = wpauto_global_footer_source_content();",
-    "\tif ( preg_match( '/<style\\b[^>]*id=[\"\\x27]cc-global-footer-styles[\"\\x27][^>]*>.*?<\\/style>/is', $content, $match ) ) {",
+    "\tif ( preg_match( '/<style\\b[^>]*id=[\"\\x27]" + styleId + "[\"\\x27][^>]*>.*?<\\/style>/is', $content, $match ) ) {",
     "\t\techo $match[0];",
     "\t}",
     "}, 40 );",
@@ -211,7 +260,7 @@ function buildGlobalFooterLoaderCode_(pageId) {
     "add_action( 'generate_before_footer', function () {",
     "\tif ( is_admin() || ! wpauto_global_footer_source_valid() ) { return; }",
     "\t$content = wpauto_global_footer_source_content();",
-    "\t$markup = preg_replace( '/<style\\b[^>]*id=[\"\\x27]cc-global-footer-styles[\"\\x27][^>]*>.*?<\\/style>\\s*/is', '', $content, 1 );",
+    "\t$markup = preg_replace( '/<style\\b[^>]*id=[\"\\x27]" + styleId + "[\"\\x27][^>]*>.*?<\\/style>\\s*/is', '', $content, 1 );",
     "\tif ( null !== $markup ) { echo $markup; }",
     "}, 5 );",
     "",

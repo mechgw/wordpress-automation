@@ -125,6 +125,25 @@ describe('WordPress.gs response helpers', () => {
     assert.deepEqual(plain(gas.getRankMathData_(null)), Object.assign({ available: false, title: '', description: '' }, noRobots));
   });
 
+  test('#103: nowa nazwa pola jest preferowana, stara działa jako awaryjna', () => {
+    const both = plain(gas.getRankMathData_({ cc_rank_math: {}, wpa_rank_math_robots: 'noindex', cc_rank_math_robots: 'follow' }));
+    assert.equal(both.robots, 'noindex', 'przy obu nazwach wygrywa docelowa');
+
+    const legacy = plain(gas.getRankMathData_({ cc_rank_math: {}, cc_rank_math_robots: 'noindex,follow' }));
+    assert.equal(legacy.robotsAvailable, true, 'stary snippet nadal jest obsługiwany');
+    assert.equal(legacy.robots, 'noindex,follow');
+
+    const none = plain(gas.getRankMathData_({ cc_rank_math: {} }));
+    assert.equal(none.robotsAvailable, false);
+    assert.equal(none.robots, '');
+  });
+
+  test('#103: test mostu mówi, której nazwy pola używa instalacja', () => {
+    assert.match(gas.robotsBridgeStatusText_({ wpa_rank_math_robots: '' }), /^OK \(pole wpa_rank_math_robots\)$/);
+    assert.match(gas.robotsBridgeStatusText_({ cc_rank_math_robots: '' }), /^OK, ale przez starą nazwę pola \(cc_rank_math_robots\)\. Wgraj nowszy snippet/);
+    assert.match(gas.robotsBridgeStatusText_({}), /^BRAK – zaktualizuj snippet/);
+  });
+
   test('#88: getRankMathData_ czyta robots z osobnego pola REST i normalizuje je do listy po przecinku', () => {
     const withRobots = value => plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' }, cc_rank_math_robots: value }));
     assert.deepEqual(withRobots('noindex,follow'), { available: true, title: 'T', description: 'D', robotsAvailable: true, robots: 'noindex,follow' });

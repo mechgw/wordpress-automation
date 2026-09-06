@@ -215,7 +215,7 @@ function testWpConnection() {
 
 function testRankMathBridge() {
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,cc_rank_math_robots'
+    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -243,15 +243,14 @@ function testRankMathBridge() {
     );
   }
 
+  // Test mostu mówi wprost, której nazwy pola używa instalacja, żeby było widać,
+  // czy snippet jest już zaktualizowany (#103).
   SpreadsheetApp.getUi().alert(
     'Rank Math bridge działa (wersja ' + versionLabel_() + ').\n\n' +
     'Strona testowa: ' + (page.slug || page.id) +
     '\nOdczyt surowego SEO title/meta: OK' +
     '\nDedykowany endpoint zapisu: OK' +
-    '\nObsługa robots (pole cc_rank_math_robots): ' +
-    (Object.prototype.hasOwnProperty.call(page, 'cc_rank_math_robots')
-      ? 'OK'
-      : 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie')
+    '\nObsługa robots: ' + robotsBridgeStatusText_(page)
   );
 }
 
@@ -509,7 +508,7 @@ function getPageBySlug_(slug, commandId) {
     '/wp-json/wp/v2/pages' +
     '?slug=' + encodeURIComponent(slug) +
     '&context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -543,7 +542,7 @@ function getPageRawById_(id, requireRankMath = false) {
   const path =
     '/wp-json/wp/v2/pages/' + encodeURIComponent(id) +
     '?context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -597,7 +596,7 @@ function getAllPages_(commandId) {
         '&page=' + pageNo +
         '&orderby=id' +
         '&order=asc' +
-        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots';
+        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
       const response = wpFetch_(path);
 
@@ -995,16 +994,42 @@ function getRankMathData_(page) {
     : {};
 
   // Robots idzie osobnym polem REST, bo dodaje je nasz snippet z repozytorium,
-  // a nie niewersjonowany most seo-meta. Brak pola = snippet nieaktualny.
-  const robotsAvailable = Object.prototype.hasOwnProperty.call(page || {}, 'cc_rank_math_robots');
+  // a nie niewersjonowany most seo-meta. Brak obu nazw = snippet nieaktualny.
+  const robotsField = robotsFieldName_(page);
 
   return {
     available,
     title: String(raw.title || ''),
     description: String(raw.description || ''),
-    robotsAvailable,
-    robots: robotsAvailable ? robotsList_(page.cc_rank_math_robots).join(',') : ''
+    robotsAvailable: Boolean(robotsField),
+    robots: robotsField ? robotsList_(page[robotsField]).join(',') : ''
   };
+}
+
+/**
+ * Nazwy pola REST z robots, w kolejności preferencji (#103).
+ *
+ * `wpa_rank_math_robots` jest nazwą docelową, spójną z prefiksem funkcji
+ * w moście. `cc_rank_math_robots` to nazwa historyczna: repozytorium jest
+ * publiczne, a ten prefiks pochodzi od nazwy firmy. Czytamy obie, dopóki
+ * snippet w WordPressie nie zostanie zaktualizowany.
+ */
+const WP_ROBOTS_FIELDS = ['wpa_rank_math_robots', 'cc_rank_math_robots'];
+
+/** Opis stanu mostu robots do testu z menu: nazwa pola albo powód braku. */
+function robotsBridgeStatusText_(page) {
+  const field = robotsFieldName_(page);
+  if (!field) return 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie';
+  if (field === WP_ROBOTS_FIELDS[0]) return 'OK (pole ' + field + ')';
+  return 'OK, ale przez starą nazwę pola (' + field + '). Wgraj nowszy snippet page-layout-rest-bridge.php.';
+}
+
+/** Która z nazw pola robots jest obecna w odpowiedzi; '' gdy żadna. */
+function robotsFieldName_(page) {
+  const found = WP_ROBOTS_FIELDS.filter(function (name) {
+    return Object.prototype.hasOwnProperty.call(page || {}, name);
+  });
+  return found.length ? found[0] : '';
 }
 
 /** Dyrektywy robots dopuszczone przy zapisie; ta sama lista co w snippecie PHP. */
@@ -1100,7 +1125,7 @@ function updateRankMathField_(command) {
 
   if (isRobots && !getRankMathData_(before).robotsAvailable) {
     throw new Error(
-      'Most nie udostępnia pola cc_rank_math_robots, więc zapisu robots nie da się potwierdzić odczytem. ' +
+      'Most nie udostępnia pola z robots, więc zapisu nie da się potwierdzić odczytem kontrolnym. ' +
       'Zaktualizuj snippet page-layout-rest-bridge.php po stronie WordPressa.'
     );
   }

@@ -17,18 +17,22 @@ const SNAPSHOTS_HEADER = [
 const BASE_PROPS = {
   WP_BASE_URL: 'https://www.example.pl',
   WP_USERNAME: 'bot',
-  WP_APP_PASSWORD: 'pw'
+  WP_APP_PASSWORD: 'pw',
+  // Identyfikatory instalacji nie są zaszyte w kodzie (#103).
+  WP_GLOBAL_FOOTER_SOURCE_SLUG: 'acme-footer-source',
+  WP_GLOBAL_FOOTER_STYLE_ID: 'acme-footer-styles',
+  WP_GLOBAL_FOOTER_CLASS: 'acme-site-footer'
 };
 
 function sourcePage(id = 101) {
   return {
     id,
-    slug: 'cc-global-footer-source',
+    slug: 'acme-footer-source',
     status: 'draft',
     title: { raw: 'Global Footer Source' },
     content: {
-      raw: '<style id="cc-global-footer-styles">.x{display:block}</style>\n' +
-        '<footer class="cc-site-footer"><a href="/x/">X</a></footer>'
+      raw: '<style id="acme-footer-styles">.x{display:block}</style>\n' +
+        '<footer class="acme-site-footer"><a href="/x/">X</a></footer>'
     }
   };
 }
@@ -38,7 +42,7 @@ function legacySnippet(id = 201, active = true) {
     id,
     name: 'Legacy Footer',
     desc: 'Old footer',
-    code: "add_action('generate_before_footer', function(){ echo '<footer class=\"cc-site-footer\"></footer>'; });",
+    code: "add_action('generate_before_footer', function(){ echo '<footer class=\"acme-site-footer\"></footer>'; });",
     scope: 'front-end',
     active,
     priority: 10,
@@ -82,7 +86,7 @@ function makeRouter(options = {}) {
       return { code: options.forceHttpError.code, text: 'forced-error', headers: {} };
     }
 
-    if (parsed.pathname === '/wp-json/wp/v2/pages' && parsed.searchParams.get('slug') === 'cc-global-footer-source') {
+    if (parsed.pathname === '/wp-json/wp/v2/pages' && parsed.searchParams.get('slug') === 'acme-footer-source') {
       return { code: 200, json: state.source ? [state.source] : [], headers: {} };
     }
     if (state.source && parsed.pathname === '/wp-json/wp/v2/pages/' + state.source.id) {
@@ -172,6 +176,33 @@ function migrationProps() {
   };
 }
 
+test('#103: identyfikatory instalacji pochodzą ze Script Properties i są walidowane', () => {
+  const missing = ['WP_GLOBAL_FOOTER_SOURCE_SLUG', 'WP_GLOBAL_FOOTER_STYLE_ID', 'WP_GLOBAL_FOOTER_CLASS'];
+  for (const key of missing) {
+    // project() scala z BASE_PROPS, więc brak właściwości wyrażamy pustą wartością.
+    const gas = project({ properties: Object.assign({}, BASE_PROPS, { [key]: '' }) });
+    assert.throws(
+      () => gas.globalFooterIdentifiers_(),
+      new RegExp('Brak Script Property: ' + key),
+      'brak identyfikatora musi być jasnym błędem, a nie cichym podstawieniem'
+    );
+  }
+
+  // Ograniczenie do [a-z0-9-] sprawia, że wartość jest bezpieczna i w wyrażeniu
+  // regularnym, i we wstrzykiwanym kodzie PHP, bez cytowania.
+  for (const bad of ['ACME-Footer', 'stopka strony', 'foo.*bar', "x'; drop"]) {
+    const gas = project({ properties: Object.assign({}, BASE_PROPS, { WP_GLOBAL_FOOTER_CLASS: bad }) });
+    assert.throws(() => gas.globalFooterIdentifiers_(), /Nieprawidłowa Script Property WP_GLOBAL_FOOTER_CLASS/);
+  }
+
+  const ok = project({ properties: BASE_PROPS });
+  assert.deepEqual(plain(ok.globalFooterIdentifiers_()), {
+    slug: 'acme-footer-source',
+    styleId: 'acme-footer-styles',
+    footerClass: 'acme-site-footer'
+  });
+});
+
 test('approval, snapshot i walidatory pokrywają bezpieczne ścieżki pomocnicze', () => {
   let gas = project({ uiAnswer: 'NO' });
   assert.equal(gas.requireGlobalFooterWriteApproval_('x', 'y'), false);
@@ -205,15 +236,15 @@ test('approval, snapshot i walidatory pokrywają bezpieczne ścieżki pomocnicze
   assert.throws(() => gas.validateGlobalFooterSourcePage_({ id: 1, status: 'draft', content: { raw: '<footer></footer>' } }), /dokładnie jeden/);
 
   const incompleteStyle = sourcePage();
-  incompleteStyle.content.raw = '<style id="cc-global-footer-styles">.x{}\n' +
-    '<footer class="cc-site-footer">X</footer>';
+  incompleteStyle.content.raw = '<style id="acme-footer-styles">.x{}\n' +
+    '<footer class="acme-site-footer">X</footer>';
   assert.throws(() => gas.validateGlobalFooterSourcePage_(incompleteStyle), /kompletny/);
 
   const incompleteFooter = sourcePage();
-  incompleteFooter.content.raw = '<style id="cc-global-footer-styles">.x{}</style>\n' +
-    '<footer class="cc-site-footer">X';
+  incompleteFooter.content.raw = '<style id="acme-footer-styles">.x{}</style>\n' +
+    '<footer class="acme-site-footer">X';
   assert.throws(() => gas.validateGlobalFooterSourcePage_(incompleteFooter), /kompletny/);
-  assert.match(gas.validateGlobalFooterSourcePage_(sourcePage()), /cc-site-footer/);
+  assert.match(gas.validateGlobalFooterSourcePage_(sourcePage()), /acme-site-footer/);
 
   assert.throws(() => gas.findLegacyGlobalFooterSnippet_([]), /Kandydaci: 0/);
   assert.equal(gas.findLegacyGlobalFooterSnippet_([legacySnippet()]).id, 201);
@@ -227,7 +258,7 @@ test('approval, snapshot i walidatory pokrywają bezpieczne ścieżki pomocnicze
   assert.match(php, /\$footer_ok =/);
   assert.match(php, /echo \$match\[0\];/);
   assert.match(php, /return wpauto_global_footer_source_valid\(\) \? '' : \$copyright;/);
-  assert.doesNotMatch(php, /stripos\( \$content, 'cc-site-footer' \)/);
+  assert.doesNotMatch(php, /stripos\( \$content, 'acme-site-footer' \)/);
   assert.doesNotMatch(php, /\\"/);
 
   assert.throws(() => gas.setCodeSnippetActive_('bad', true), /numerycznego ID/);

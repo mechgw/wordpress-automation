@@ -55,6 +55,12 @@ Opcjonalne:
 
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
+### Identyfikatory instalacji
+
+Repozytorium jest publiczne, więc slug strony ze źródłem stopki, identyfikator bloku stylów i klasa stopki nie są zaszyte w kodzie. Migracja stopki czyta je ze Script Properties `WP_GLOBAL_FOOTER_SOURCE_SLUG`, `WP_GLOBAL_FOOTER_STYLE_ID` i `WP_GLOBAL_FOOTER_CLASS`. Brak którejkolwiek kończy się jasnym błędem, a nie cichym podstawieniem. Dozwolone są wyłącznie małe litery, cyfry i myślnik, dzięki czemu wartość jest bezpieczna zarówno w wyrażeniu regularnym, jak i we wstrzykiwanym kodzie PHP.
+
+Pole REST z robots ma dwie nazwy. `wpa_rank_math_robots` jest docelowa, `cc_rank_math_robots` historyczna i utrzymywana tylko na czas aktualizacji snippetu. Skrypt czyta docelową, a historyczną wtedy, gdy docelowej nie ma; *WordPress → Test Rank Math bridge* mówi, której używa Twoja instalacja.
+
 ### Zajętość arkusza i retencja
 
 Arkusz Google ma twardy limit 10 mln komórek na cały plik, dzielony przez wszystkie zakładki. Po jego przekroczeniu przestaje działać nie jedna funkcja, tylko wszystko naraz: importy, monitoring i komendy. *Dane → Zajętość arkusza* pokazuje procent limitu i największe zakładki, a linia ze stanem jest też w *Status danych*.

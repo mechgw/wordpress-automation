@@ -32,7 +32,10 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       rankMath: Object.assign({ title: '', description: '' }, p.rankMath || {}), hasRankMath: p.hasRankMath !== false,
       // Robots wystawia osobne pole REST z page-layout-rest-bridge.php; hasRobots:false
       // odwzorowuje instalację ze starym snippetem, bez obsługi robots.
-      robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false
+      robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false,
+      // legacyRobotsField: instalacja ze starym snippetem, wystawiająca pole pod
+      // historyczną nazwą cc_rank_math_robots (#103).
+      legacyRobotsField: Boolean(p.legacyRobotsField)
     };
   }
   function normalizeMedia(m) {
@@ -46,7 +49,7 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
     id: p.id, slug: p.slug, status: p.status, link: p.link,
     title: { raw: p.title, rendered: p.title }, excerpt: { raw: p.excerpt, rendered: p.excerpt }, content: { raw: p.content, rendered: p.content },
     modified: p.modified, ...(p.hasRankMath ? { cc_rank_math: { title: p.rankMath.title, description: p.rankMath.description } } : {}),
-    ...(p.hasRobots ? { cc_rank_math_robots: p.robots } : {})
+    ...(p.hasRobots ? (p.legacyRobotsField ? { cc_rank_math_robots: p.robots } : { wpa_rank_math_robots: p.robots }) : {})
   });
   const mediaJson = m => ({
     id: m.id, slug: m.slug, status: m.status, link: m.source_url, title: { raw: m.title, rendered: m.title }, alt_text: m.alt_text,
