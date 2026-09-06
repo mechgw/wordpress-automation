@@ -2,13 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 const { loadProject, plain } = require('./helpers/gas');
 
-const ROOT = path.resolve(__dirname, '..');
-const MIGRATION_CODE = fs.readFileSync(path.join(ROOT, 'GlobalFooterMigration.gs'), 'utf8');
 const RESULTS_HEADER = [
   'result_id', 'command_id', 'wp_id', 'slug', 'status', 'link', 'title',
   'modified', 'content', 'at', 'rm_title', 'rm_desc', 'kind'
@@ -164,7 +159,6 @@ function project({ router, properties = {}, uiAnswer = 'YES', withResults = true
     fetch: router ? router.fetch : (() => ({ code: 200, json: [], headers: {} })),
     lockHeld
   });
-  vm.runInContext(MIGRATION_CODE, gas, { filename: path.join(ROOT, 'GlobalFooterMigration.gs') });
   gas.$ui.$answer = uiAnswer;
   return gas;
 }

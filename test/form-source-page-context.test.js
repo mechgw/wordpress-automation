@@ -2,13 +2,9 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 const vm = require('vm');
 const { loadProject, plain } = require('./helpers/gas');
 
-const ROOT = path.resolve(__dirname, '..');
-const FOOTER_MIGRATION_CODE = fs.readFileSync(path.join(ROOT, 'GlobalFooterMigration.gs'), 'utf8');
 const FORM_TYPE_FIELD = 'form-type-field';
 const SOURCE_PAGE_FIELD = 'source-page-field';
 const RESULTS_HEADER = [
@@ -114,7 +110,6 @@ function project({ router, properties = {}, uiAnswer = 'YES', withResults = true
     sheets,
     fetch: router ? router.fetch : (() => ({ code: 200, json: [], headers: {} }))
   });
-  vm.runInContext(FOOTER_MIGRATION_CODE, gas, { filename: path.join(ROOT, 'GlobalFooterMigration.gs') });
   gas.$ui.$answer = uiAnswer;
   return gas;
 }
