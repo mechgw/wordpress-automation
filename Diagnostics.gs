@@ -14,13 +14,6 @@
 
 const SMOKE_REQUIRED_PROPERTIES = ['WP_BASE_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_REST_NAMESPACE'];
 const SMOKE_OPTIONAL_PROPERTIES = ['SITE_DOMAIN', 'ALERT_EMAIL', 'ALERT_RECOVERY', 'WP_ALLOW_WRITES', 'WP_DRY_RUN', 'EXPECTED_SITEMAPS'];
-const SMOKE_TRIGGER_HANDLERS = [
-  { handler: 'importDzienny', label: 'import GSC' },
-  { handler: 'importGA4Dzienny', label: 'import GA4' },
-  { handler: 'sprawdzAktualnoscImportow', label: 'strażnik alertów' },
-  { handler: 'sprawdzIndeksowanieTrigger', label: 'inspekcja URL' },
-  { handler: 'sprawdzStronyLiveTrigger', label: 'live check SEO' }
-];
 
 /** Skraca komunikat błędu do jednej czytelnej linii (kod HTTP zostaje). */
 function smokeErrorText_(e) {
@@ -115,7 +108,9 @@ function smokeWordPress_() {
 function smokeTriggers_() {
   const installed = {};
   ScriptApp.getProjectTriggers().forEach(t => { installed[t.getHandlerFunction()] = true; });
-  return SMOKE_TRIGGER_HANDLERS.map(t => t.label + ': ' + (installed[t.handler] ? 'TAK' : 'NIE')).join(' | ');
+  // Lista zadań pochodzi z jednego rejestru (scheduledJobs_), żeby nowe zadanie
+  // nie mogło zniknąć z diagnostyki przez przeoczenie.
+  return scheduledJobs_().map(t => t.label + ': ' + (installed[t.handler] ? 'TAK' : 'NIE')).join(' | ');
 }
 
 function smokeAlerts_() {
