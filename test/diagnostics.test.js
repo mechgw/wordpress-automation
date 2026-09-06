@@ -52,7 +52,9 @@ describe('smokeTest: kroki', () => {
     assert.equal(s['GA4 odczyt'].detail, 'właściwość 111: Data API odpowiada (200 wymiarów, 90 metryk)');
     assert.equal(s['WordPress odczyt'].detail, 'https://www.example.pl: zalogowany jako bot | edycja stron: TAK | zapisy: wyłączone');
     assert.equal(s['Triggery'].detail, 'import GSC: TAK | import GA4: TAK | strażnik alertów: TAK | inspekcja URL: NIE | live check SEO: NIE');
-    assert.match(s['Alerty i sitemapy'].detail, /^adresat: alerty@example\.pl \| Sitemapy: nie sprawdzano/);
+    assert.equal(s['Alerty i sitemapy'].detail.split(' | ')[0], 'adresat: skonfigurowany i poprawny (1 adres, wartość w Script Properties)');
+    assert.doesNotMatch(gas.$alerts[0][0], /alerty@example\.pl/, 'the address itself is never printed');
+    assert.match(s['Alerty i sitemapy'].detail, /\| Sitemapy: nie sprawdzano/);
     const text = gas.$alerts[0][0];
     assert.match(text, /^Diagnostyka systemu \(tylko odczyt\) – wersja dev: wszystkie 7 kroków OK\n\nOK {4}Script Properties: /);
     assert.doesNotMatch(text, /Nic nie zostało zmienione/);
@@ -70,12 +72,27 @@ describe('smokeTest: kroki', () => {
     assert.match(gas.$alerts[0][0], /2 z 7 kroków z błędem[\s\S]*BŁĄD {2}Script Properties: brak wymaganych: WP_APP_PASSWORD[\s\S]*Nic nie zostało zmienione/);
   });
 
-  test('T2b: nieprawidłowy ALERT_EMAIL i opcjonalne właściwości są opisane; adres nie jest wypisywany, wartości pozostałych tak', () => {
-    const gas = project({ properties: { ALERT_EMAIL: 'TRUE', WP_ALLOW_WRITES: 'TRUE', WP_DRY_RUN: 'TRUE' } });
+  test('T2b: nieprawidłowy ALERT_EMAIL i opcjonalne właściwości są opisane; ani adres, ani błędna wartość nie są wypisywane', () => {
+    const gas = project({ properties: { ALERT_EMAIL: 'sekret@example.pl x', WP_ALLOW_WRITES: 'TRUE', WP_DRY_RUN: 'TRUE' } });
     const s = byName(gas.diagnostykaSystemu());
     assert.equal(s['Script Properties'].ok, false);
-    assert.match(s['Script Properties'].detail, /opcjonalne: ALERT_EMAIL, WP_ALLOW_WRITES=TRUE, WP_DRY_RUN=TRUE \| ALERT_EMAIL nieprawidłowy \(„TRUE”\)/);
+    assert.match(s['Script Properties'].detail, /opcjonalne: ALERT_EMAIL, WP_ALLOW_WRITES=TRUE, WP_DRY_RUN=TRUE \| ALERT_EMAIL nie jest adresem \(popraw Script Property\)$/);
+    assert.equal(s['Alerty i sitemapy'].detail.split(' | ')[0], 'adresat: NIEPRAWIDŁOWY (wartość nie jest adresem)');
+    assert.doesNotMatch(gas.$alerts[0][0], /sekret@example\.pl/, 'not even a malformed value reaches the report');
     assert.match(s['WordPress odczyt'].detail, /zapisy: WŁĄCZONE \| DRY_RUN$/);
+  });
+
+  test('T2c: brak ALERT_EMAIL to nie błąd, lista adresów jest liczona bez ujawniania adresów', () => {
+    const none = project({ properties: { ALERT_EMAIL: '' } });
+    const sn = byName(none.smokeTest());
+    assert.equal(sn['Script Properties'].ok, true);
+    assert.equal(sn['Script Properties'].detail, 'wymagane: 4/4 | opcjonalne: brak');
+    assert.equal(sn['Alerty i sitemapy'].detail.split(' | ')[0], 'adresat: brak (ALERT_EMAIL nieustawione, alerty wyłączone)');
+
+    const many = project({ properties: { ALERT_EMAIL: 'a@example.pl, b@example.pl' } });
+    const sm = byName(many.smokeTest());
+    assert.equal(sm['Alerty i sitemapy'].detail.split(' | ')[0], 'adresat: skonfigurowany i poprawny (2 adresy, wartość w Script Properties)');
+    assert.doesNotMatch(JSON.stringify(plain(many.smokeTest())), /@example\.pl/, 'no address in any step');
   });
 
   test('T3: błędy HTTP w GSC, GA4 i WordPress → kroki czerwone z kodem, pozostałe zielone', () => {

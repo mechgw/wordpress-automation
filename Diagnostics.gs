@@ -47,9 +47,19 @@ function smokeProperties_() {
   });
   const notes = ['wymagane: ' + SMOKE_REQUIRED_PROPERTIES.length + '/' + SMOKE_REQUIRED_PROPERTIES.length];
   notes.push('opcjonalne: ' + (optional.length ? optional.join(', ') : 'brak'));
-  const alerts = alertConfig_();
-  if (alerts.raw && !alerts.valid) throw new Error(notes.join(' | ') + ' | ALERT_EMAIL nieprawidłowy („' + alerts.raw + '”)');
+  // Sama wartość ALERT_EMAIL nigdy nie trafia do raportu: diagnostyka bywa
+  // wklejana i zrzucana na ekran. Poprawną wartość pokazuje „Status danych”.
+  if (!smokeAlertRecipient_().ok) throw new Error(notes.join(' | ') + ' | ALERT_EMAIL nie jest adresem (popraw Script Property)');
   return notes.join(' | ');
+}
+
+/** Stan adresata alertów bez ujawniania adresu: { ok, text }. */
+function smokeAlertRecipient_() {
+  const cfg = alertConfig_();
+  if (!cfg.raw) return { ok: true, text: 'brak (ALERT_EMAIL nieustawione, alerty wyłączone)' };
+  if (!cfg.valid) return { ok: false, text: 'NIEPRAWIDŁOWY (wartość nie jest adresem)' };
+  const count = cfg.email.split(',').length;
+  return { ok: true, text: 'skonfigurowany i poprawny (' + count + (count === 1 ? ' adres' : ' adresy') + ', wartość w Script Properties)' };
 }
 
 function smokeSheets_() {
@@ -109,7 +119,7 @@ function smokeTriggers_() {
 }
 
 function smokeAlerts_() {
-  return 'adresat: ' + alertRecipientText_() + ' | ' + sitemapsStatusLine_();
+  return 'adresat: ' + smokeAlertRecipient_().text + ' | ' + sitemapsStatusLine_();
 }
 
 /**
