@@ -11,11 +11,13 @@
  *
  * Kroki:
  *   1. `clasp pull` nadpisuje pliki źródłowe w katalogu roboczym.
- *   2. Normalizacja końcowego znaku nowej linii (edytor Apps Script go obcina).
- *   3. `Version.gs` wraca do wersji z gita (wdrożenie stempluje go celowo).
- *   4. `git status` ograniczony do *.gs i appsscript.json; cokolwiek innego
+ *   2. Normalizacja końcowego znaku nowej linii po stronie pobranego projektu.
+ *   3. Różnice będące wyłącznie końcowym `\n` są porównywane po tej samej
+ *      normalizacji także względem wersji z gita i czyszczone jako brak driftu.
+ *   4. `Version.gs` wraca do wersji z gita (wdrożenie stempluje go celowo).
+ *   5. `git status` ograniczony do *.gs i appsscript.json; cokolwiek innego
  *      (np. .clasp.json) nie liczy się jako różnica.
- *   5. Różnica → lista plików, patch (opcjonalnie do pliku) i kod wyjścia 1.
+ *   6. Różnica → lista plików, patch (opcjonalnie do pliku) i kod wyjścia 1.
  *
  * Użycie:
  *   node scripts/quality/apps-script-compare.js [--label <opis>] [--patch <plik>] [--cwd <katalog>]
@@ -61,12 +63,49 @@ function pull(cwd) {
   return (r.stdout || '').trim();
 }
 
+function withTrailingNewline(text) {
+  return text.length && !text.endsWith('\n') ? text + '\n' : text;
+}
+
 function normalizeTrailingNewline(cwd) {
   for (const f of fs.readdirSync(cwd)) {
     if (!/\.gs$/.test(f) && f !== 'appsscript.json') continue;
     const p = path.join(cwd, f);
     const s = fs.readFileSync(p, 'utf8');
-    if (s.length && !s.endsWith('\n')) fs.writeFileSync(p, s + '\n');
+    const normalized = withTrailingNewline(s);
+    if (normalized !== s) fs.writeFileSync(p, normalized);
+  }
+}
+
+/**
+ * `normalizeTrailingNewline()` normalizuje workspace po `clasp pull`, ale gitowy
+ * ref może sam nie mieć końcowego `\n`. W takim przypadku samo dopisanie nowej
+ * linii tworzyłoby fałszywe ` M plik.gs`. Jeśli zawartość HEAD i workspace jest
+ * identyczna po normalizacji końcowego `\n`, przywracamy bajty z HEAD i usuwamy
+ * wyłącznie ten sztuczny drift. Każda inna zmiana zostaje nietknięta.
+ */
+function clearTrailingNewlineOnlyDiffs(cwd) {
+  const changed = git(cwd, ['diff', '--name-only', '--', '*.gs', 'appsscript.json'])
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  for (const f of changed) {
+    if (f === 'Version.gs') continue;
+    const p = path.join(cwd, f);
+    if (!fs.existsSync(p) || !fs.statSync(p).isFile()) continue;
+
+    let baseline;
+    try {
+      baseline = git(cwd, ['show', `HEAD:${f}`]);
+    } catch {
+      continue;
+    }
+
+    const current = fs.readFileSync(p, 'utf8');
+    if (withTrailingNewline(baseline) === withTrailingNewline(current)) {
+      git(cwd, ['checkout', '--', f]);
+    }
   }
 }
 
@@ -77,6 +116,8 @@ function compare(cwd) {
   if (git(cwd, ['ls-files', '--', 'Version.gs']).trim()) {
     git(cwd, ['checkout', '--', 'Version.gs']);
   }
+  clearTrailingNewlineOnlyDiffs(cwd);
+
   const pathspec = ['--', '*.gs', 'appsscript.json'];
   // Keep the leading status column (" M", "??"); only strip trailing whitespace.
   const changes = git(cwd, ['status', '--porcelain', ...pathspec]).replace(/\s+$/, '');
@@ -124,4 +165,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { compare, normalizeTrailingNewline };
+module.exports = { compare, normalizeTrailingNewline, clearTrailingNewlineOnlyDiffs, withTrailingNewline };
