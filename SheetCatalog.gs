@@ -69,7 +69,10 @@ function sheetCatalog_() {
     { name: ga4.eventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: key events. Nie edytuj ręcznie.' },
     { name: ga4.businessEventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: zdarzenia biznesowe. Nie edytuj ręcznie.' },
     { name: ga4.adsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
-    { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' }
+    { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' },
+    // Arkusz człowieka, z którego skrypt tylko czyta. W katalogu jest po to, żeby
+    // START mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl.
+    { name: RECRAWL_CHANGELOG_SHEET, category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' }
   ];
 }
 
@@ -87,12 +90,16 @@ function sheetPlan_() {
   const catalog = {};
   sheetCatalog_().forEach(entry => { catalog[entry.name] = entry; });
 
+  // Wpis katalogowy w kategorii „wlasne” opisuje arkusz człowieka, z którego
+  // skrypt tylko czyta: dostaje własny opis w START, ale zachowuje kolor,
+  // widoczność i miejsce wśród arkuszy własnych.
+  const managed = name => catalog[name] && catalog[name].category !== 'wlasne';
   const existing = ss.getSheets().map(s => s.getName());
-  const known = existing.filter(name => catalog[name]);
-  const own = existing.filter(name => name !== START_SHEET && !catalog[name]);
+  const known = existing.filter(managed);
+  const own = existing.filter(name => name !== START_SHEET && !managed(name));
 
   const plan = [{ name: START_SHEET, category: 'start', owner: 'skrypt', description: 'Ten spis: co jest w pliku, kto to prowadzi i gdzie wpisywać dane.' }];
-  own.forEach(name => plan.push({ name: name, category: 'wlasne', owner: 'człowiek', description: 'Arkusz własny, nie zarządzany przez skrypt.' }));
+  own.forEach(name => plan.push(catalog[name] || { name: name, category: 'wlasne', owner: 'człowiek', description: 'Arkusz własny, nie zarządzany przez skrypt.' }));
   SHEET_CATEGORIES.forEach(cat => {
     if (cat.key === 'start' || cat.key === 'wlasne') return;
     sheetCatalog_().forEach(entry => {

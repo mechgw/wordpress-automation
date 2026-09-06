@@ -228,11 +228,12 @@ describe('#78: katalog i menu', () => {
       const category = plain(gas.sheetCategory_(entry.category));
       assert.notEqual(category.label, entry.category, entry.name + ': unknown category ' + entry.category);
       assert.match(entry.owner, /^(skrypt|człowiek|człowiek \+ skrypt)$/, entry.name);
+      assert.notEqual(entry.category, 'start', entry.name + ': kategoria „start” jest zarezerwowana dla samego arkusza START');
       assert.ok(entry.description.length > 20, entry.name + ': description too short');
       assert.ok(!seen[entry.name], 'duplicate ' + entry.name);
       seen[entry.name] = true;
     });
-    assert.equal(catalog.length, 18);
+    assert.equal(catalog.length, 19);
   });
 
   test('#78/Codex: nadpisane w konfiguracji nazwy arkuszy GA4 trafiają do kategorii „dane”, nie do arkuszy własnych', () => {
@@ -256,6 +257,19 @@ describe('#78: katalog i menu', () => {
     const noConfig = loadProject({ sheets: { 'GA4 RAW': [['date']], 'Analiza': [['a']] } });
     noConfig.uporzadkujArkusze();
     assert.equal(colors(noConfig)['GA4 RAW'], '#434343');
+  });
+
+  test('arkusz człowieka opisany w katalogu trafia do START z własnym opisem, ale nie jest kolorowany ani przenoszony między arkusze skryptu', () => {
+    const gas = project({ 'Dziennik zmian': [['Data', 'URL']] });
+    const out = plain(gas.uporzadkujArkuszeZMenu());
+
+    assert.equal(colors(gas)['Dziennik zmian'], null, 'kategoria „wlasne” nie ma koloru');
+    assert.deepEqual(names(gas).slice(0, 4), ['START', 'Kierunki SEO', 'Quick wins', 'Dziennik zmian'], 'zostaje wśród arkuszy własnych');
+    assert.equal(out.own, 3, 'liczony jako arkusz własny, nie skryptu');
+
+    const row = plain(gas.$sheet(START)).slice(4).find(r => String(r[0]).includes('"Dziennik zmian"'));
+    assert.deepEqual(row.slice(1), ['Analiza (arkusze własne)', 'człowiek', 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.']);
+    assert.equal(plain(gas.ukryjArkuszeTechniczne()).includes('Dziennik zmian'), false, 'nigdy nie jest ukrywany');
   });
 
   test('menu Dane ma trzy pozycje porządkowe na końcu', () => {
