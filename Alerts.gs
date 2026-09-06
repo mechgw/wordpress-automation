@@ -246,6 +246,9 @@ function sprawdzAktualnoscImportow() {
     }
   }
 
+  // Codzienny przebieg to naturalny moment na odnotowanie stanu flag zapisu (#104).
+  observeWriteFlags_(now);
+
   // Własny przebieg zapisujemy na końcu, żeby „Status danych” pokazywał, kiedy
   // strażnik ostatnio działał.
   const guard = readJobRecord_(ALERT_GUARD_JOB_KEY);
