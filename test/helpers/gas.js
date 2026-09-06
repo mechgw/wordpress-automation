@@ -23,6 +23,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+/** Limit znaków w jednej komórce Arkuszy Google. */
+const CELL_CHAR_LIMIT = 50000;
 const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs'];
 
 function pad(n) {
@@ -83,6 +85,18 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
   // Arkusz przycięty do kilkunastu kolumn to realny przypadek (użytkownik usunął
   // nadmiar), a wtedy zapis szerszego wiersza wymaga wcześniejszego dołożenia kolumn.
   let maxCols = (limits && limits.maxColumns) || Math.max(26, ...grid.map(r => r.length), 1);
+  // Komórka Arkuszy Google mieści najwyżej 50 000 znaków; dłuższy tekst kończy
+  // się wyjątkiem, a nie cichym obcięciem. Bez tego w stubie zapis pełnej treści
+  // strony przechodzi w teście i pada dopiero na produkcji.
+  const checkCell = (value, row, col) => {
+    if (typeof value === 'string' && value.length > CELL_CHAR_LIMIT) {
+      throw new Error(
+        'Your input contains more than the maximum of ' + CELL_CHAR_LIMIT +
+        ' characters in a single cell (' + name + '!R' + row + 'C' + col + ', ' + value.length + ').'
+      );
+    }
+    return value;
+  };
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
@@ -116,11 +130,13 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
       return true;
     },
     setValue(value) {
+      checkCell(value, row, col);
       ensure(row, col);
       grid[row - 1][col - 1] = value;
       return this;
     },
     setValues(values) {
+      values.forEach((line, i) => line.forEach((v, j) => checkCell(v, row + i, col + j)));
       values.forEach((line, i) => line.forEach((v, j) => {
         ensure(row + i, col + j);
         grid[row + i - 1][col + j - 1] = v;
@@ -186,7 +202,12 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
     deleteRows(row, n = 1) { grid.splice(row - 1, n); return this; },
     setFrozenRows() { return this; },
     setColumnWidth() { return this; },
-    appendRow(row) { grid.push(row.slice()); maxRows = Math.max(maxRows, grid.length); return sheet; },
+    appendRow(row) {
+      row.forEach((v, j) => checkCell(v, grid.length + 1, j + 1));
+      grid.push(row.slice());
+      maxRows = Math.max(maxRows, grid.length);
+      return sheet;
+    },
     $grid: grid,
     $tabColor: null,
     $hidden: false
@@ -434,4 +455,4 @@ function freezeClock(gas, y, monthIndex, d, hour = 10) {
   return gas;
 }
 
-module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter, freezeClock };
+module.exports = { loadProject, makeSpreadsheet, plain, fetchRouter, freezeClock, CELL_CHAR_LIMIT };
