@@ -51,7 +51,7 @@ describe('smokeTest: kroki', () => {
     assert.equal(s['GSC odczyt'].detail, '2 właściwości, https://www.example.pl/: siteOwner');
     assert.equal(s['GA4 odczyt'].detail, 'właściwość 111: Data API odpowiada (200 wymiarów, 90 metryk)');
     assert.equal(s['WordPress odczyt'].detail, 'https://www.example.pl: zalogowany jako bot | edycja stron: TAK | zapisy: wyłączone');
-    assert.equal(s['Triggery'].detail, 'import GSC: TAK | import GA4: TAK | strażnik alertów: TAK | inspekcja URL: NIE | live check SEO: NIE');
+    assert.equal(s['Triggery'].detail, 'import GSC: TAK | import GA4: TAK | strażnik alertów: TAK | adresy z sitemap: NIE | inspekcja URL: NIE | live check SEO: NIE | kolejka recrawl: NIE');
     assert.equal(s['Alerty i sitemapy'].detail.split(' | ')[0], 'adresat: skonfigurowany i poprawny (1 adres, wartość w Script Properties)');
     assert.doesNotMatch(gas.$alerts[0][0], /alerty@example\.pl/, 'the address itself is never printed');
     assert.match(s['Alerty i sitemapy'].detail, /\| Sitemapy: nie sprawdzano/);

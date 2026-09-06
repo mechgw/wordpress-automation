@@ -41,6 +41,29 @@ function importSources_() {
   };
 }
 
+/**
+ * Jedno źródło prawdy o zadaniach cyklicznych (#100).
+ *
+ * Każdy handler triggera musi tu być wymieniony. Korzysta z tego diagnostyka,
+ * a docelowo także monitoring świeżości. Wcześniej lista zadań istniała
+ * w kilku miejscach i najnowsze zadania trafiały tylko do części z nich, przez
+ * co diagnostyka meldowała komplet, nie sprawdzając dwóch triggerów.
+ *
+ * Test `scheduled-jobs` skanuje pliki `*.gs` i pada, gdy istnieje handler
+ * triggera spoza tej listy.
+ */
+function scheduledJobs_() {
+  return [
+    { key: 'GSC', handler: 'importDzienny', label: 'import GSC', schedule: 'codziennie ok. 05:00' },
+    { key: 'GA4', handler: 'importGA4Dzienny', label: 'import GA4', schedule: 'codziennie ok. 06:00' },
+    { key: 'ALERTS', handler: ALERT_GUARD_HANDLER, label: 'strażnik alertów', schedule: 'codziennie ok. 08:00' },
+    { key: 'SITEMAP_URLS', handler: SITEMAP_SYNC_TRIGGER_HANDLER, label: 'adresy z sitemap', schedule: 'poniedziałek ok. 06:00' },
+    { key: 'URL_INSPECTION', handler: URL_INSPECTION_TRIGGER_HANDLER, label: 'inspekcja URL', schedule: 'poniedziałek ok. 07:00' },
+    { key: 'SEO_LIVE', handler: SEO_LIVE_TRIGGER_HANDLER, label: 'live check SEO', schedule: 'codziennie ok. 09:00' },
+    { key: 'RECRAWL', handler: RECRAWL_TRIGGER_HANDLER, label: 'kolejka recrawl', schedule: 'codziennie ok. 10:00' }
+  ];
+}
+
 function importSource_(source) {
   const def = importSources_()[source];
   if (!def) throw new Error('Nieznane źródło importu: ' + source);
