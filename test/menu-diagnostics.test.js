@@ -28,6 +28,25 @@ function ga4Sheets() {
 
 const cell = (gas, sheet, a1) => gas.$cell(sheet, a1);
 
+/**
+ * Zamraża zegar w VM: `new Date()` bez argumentów zawsze zwraca ten sam moment,
+ * a `new Date(...)` z argumentami działa normalnie. Bez tego test zależny od
+ * „dzisiaj” potrafi paść raz na jakiś czas, gdy między dwoma pomiarami minie północ.
+ * Składowe podajemy w czasie lokalnym, bo stub `Utilities.formatDate` formatuje
+ * w strefie maszyny (Warszawa lokalnie, UTC w CI).
+ */
+function freezeClock(gas, y, monthIndex, d) {
+  const Real = gas.$Date;
+  const fixed = new Real(y, monthIndex, d, 10, 0, 0).getTime();
+  function Frozen(...args) { return args.length ? new Real(...args) : new Real(fixed); }
+  Frozen.prototype = Real.prototype;
+  Frozen.now = () => fixed;
+  Frozen.parse = Real.parse;
+  Frozen.UTC = Real.UTC;
+  gas.Date = Frozen;
+  return gas;
+}
+
 describe('Kod.gs showDeployedVersion', () => {
   test('ostemplowany Version.gs → okno z tagiem, commitem, czasem i autorem wdrożenia', () => {
     const gas = loadProject({
@@ -148,19 +167,16 @@ describe('GA4.gs diagnozujZdarzeniaGA4', () => {
     assert.match(gas.$fetchCalls[0].url, /properties\/111:runReport$/);
   });
 
-  test('zakres to 30 dni, a koniec przesuwa się razem z dailyLagDays', () => {
+  test('zakres to 30 dni kończące się dailyLagDays przed dzisiaj (zegar zamrożony na 2026-09-06)', () => {
     const range = lag => {
       const s = ga4Sheets();
       s[GA4_SHEET][3] = ['dailyLagDays', lag];
-      const gas = loadProject({ sheets: s, fetch: report([['page_view', 1, 0, 1]]) });
+      const gas = freezeClock(loadProject({ sheets: s, fetch: report([['page_view', 1, 0, 1]]) }), 2026, 8, 6);
       gas.diagnozujZdarzeniaGA4();
       return JSON.parse(gas.$fetchCalls[0].params.payload).dateRanges[0];
     };
-    const two = range(2);
-    assert.equal((new Date(two.endDate) - new Date(two.startDate)) / 86400000, 29, '30 dni włącznie');
-    const five = range(5);
-    assert.equal((new Date(two.endDate) - new Date(five.endDate)) / 86400000, 3, 'większe opóźnienie cofa koniec zakresu');
-    assert.equal((new Date(five.endDate) - new Date(five.startDate)) / 86400000, 29, 'okno zostaje 30-dniowe');
+    assert.deepEqual(range(2), { startDate: '2026-08-06', endDate: '2026-09-04' }, 'opóźnienie 2 dni, okno 30-dniowe');
+    assert.deepEqual(range(5), { startDate: '2026-08-03', endDate: '2026-09-01' }, 'większe opóźnienie cofa całe okno');
   });
 
   test('brak zdarzeń → nagłówek jest, wierszy nie ma, licznik zero', () => {
