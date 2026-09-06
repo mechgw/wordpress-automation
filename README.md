@@ -20,6 +20,7 @@ Merge do `main` **niczego nie wdraża**. Publikacja wydania w GitHubie uruchamia
 - `SeoLive.gs` — live SEO regression check: pobiera kluczowe adresy i porównuje status, cel przekierowania, title, H1, canonical, robots i schema z oczekiwaniami z arkusza `SEO LIVE`.
 - `Sitemaps.gs` — stan map witryny z API Sitemaps w Search Console, zapisywany do arkusza `SITEMAPY` i podsumowany w *Status danych*.
 - `Diagnostics.gs` — smoke test z menu, wyłącznie odczyt: Script Properties, zakładki, dostęp do GSC / GA4 / WordPressa, triggery, konfiguracja alertów, jedna linia raportu na krok.
+- `SheetCatalog.gs` — katalog arkuszy tworzonych przez skrypt: kolory zakładek, kolejność, generowany spis `START` i ukrywanie zakładek z danymi surowymi.
 - `Version.gs` — same placeholdery; workflow deployu nadpisuje go tagiem wydania, commitem i czasem przed `clasp push`, a arkusz pokazuje ten tag jako menu (*Szczegóły wdrożenia*). Drift check ignoruje ten plik.
 - `eslint.config.js` — reguły lintu z globalnymi symbolami Apps Script.
 - `.claspignore` — do Apps Script trafiają wyłącznie `*.gs` i `appsscript.json`.
@@ -107,6 +108,14 @@ Arkusz `SEO LIVE`: URL w kolumnie A, oczekiwania w B..H (tworzony z nagłówkiem
 ### Diagnostyka systemu (dlaczego coś nie działa?)
 
 *Dane → Diagnostyka systemu (tylko odczyt)* uruchamia `smokeTest()` i pokazuje po jednej linii na krok: wymagane Script Properties (i to, które opcjonalne są ustawione; wartość `ALERT_EMAIL` nigdy nie jest wypisywana, poprawna czy nie, tylko to, czy jest skonfigurowana i czy parsuje się jako adres), arkusze konfiguracji i oczekiwane zakładki, odczyt Search Console (lista właściwości, czy `siteUrl` jest wśród nich i z jakim uprawnieniem), odczyt GA4 Data API (metadane właściwości), odczyt WordPressa (`/wp/v2/users/me`: kogo loguje hasło aplikacji i czy może edytować strony, plus przełączniki zapisu i dry run), zainstalowane triggery, adresat alertów (skonfigurowany / nieprawidłowy / brak, nigdy sam adres) i stan sitemap. Każdy krok wykonuje się nawet wtedy, gdy wcześniejszy padł, błędy zachowują kod HTTP i nic nigdzie nie jest zapisywane: żaden arkusz, żadna Script Property, żadne wywołanie WordPressa inne niż GET, żaden lock. Nie działa z CI (zob. #54: `clasp run` i odczyt komórki odrzucone jako zbyt kosztowne w konfiguracji); weryfikacja deployu (#44) dowodzi, że żyją właściwe pliki, model statusu (#43, #42) mówi, czy realne procesy działają, a to okno mówi, dlaczego nie działają.
+
+### Porządek w pliku
+
+Plik ma ponad dwadzieścia zakładek i zyskuje kolejną z każdą funkcją, więc kolejność utrzymuje skrypt, nie ręka. *Dane → Uporządkuj arkusze* koloruje zakładki kategoriami (monitoring zielony, sterowanie pomarańczowy, konfiguracja szary, dane surowe prawie czarny, `START` fioletowy), ustawia zakładki w tej kolejności i przepisuje arkusz `START`: wiersz na każdą zakładkę z linkiem, kategorią, informacją, kto ją prowadzi (człowiek / skrypt / oba) i jednym zdaniem o tym, co tam należy. Działanie jest idempotentne, więc drugie uruchomienie zgłasza, że nic się nie zmieniło.
+
+Katalogowane są wyłącznie arkusze, które tworzy sam skrypt (`SheetCatalog.gs`, jeden wpis na arkusz). **Twoje własne arkusze nigdy nie są przekolorowane ani ukryte**; zachowują kolejność względną i stoją zaraz za `START`, bo to je czyta się codziennie. Nowa funkcja tworząca arkusz dodaje jeden wpis do katalogu, inaczej arkusz wyląduje wśród niezarządzanych. Nazwy arkuszy GA4 nadpisane w `Konfiguracja GA4` (`landingSheet`, `eventsSheet`, `businessEventsSheet`, `adsSheet`) katalog rozpoznaje po aktualnej konfiguracji, nie po wartościach domyślnych. Arkusz `START` o cudzej treści nigdy nie jest kasowany: skrypt rozpoznaje własny spis po podpisie w A1, a przy zbiegu nazw odmawia i prosi o zmianę nazwy albo opróżnienie zakładki.
+
+Dane surowe i logi domyślnie zostają widoczne. *Dane → Ukryj arkusze techniczne* chowa `GSC RAW`, surowe zakładki GA4 i `IMPORT LOG`; *Pokaż arkusze techniczne* przywraca je. Ukrywanie jest celowo osobną pozycją menu, nie efektem ubocznym porządkowania, a importy działają na ukrytych arkuszach bez zmian.
 
 ### Sekrety repozytorium GitHub
 

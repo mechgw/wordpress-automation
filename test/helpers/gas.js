@@ -23,7 +23,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -73,7 +73,7 @@ function parseA1(a1, gridRows = 1) {
  * A sheet is a 2D grid with 1-based semantics (grid[r-1][c-1]); the fixture
  * rows start at row 1. Cells outside the grid read as ''.
  */
-function makeSheet(name, initialRows) {
+function makeSheet(name, initialRows, sheetId = 0) {
   const grid = initialRows.map(r => r.slice());
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
@@ -144,8 +144,15 @@ function makeSheet(name, initialRows) {
       return finder;
     }
   });
-  return {
+  const sheet = {
     getName: () => name,
+    getSheetId: () => sheetId,
+    setTabColor(color) { sheet.$tabColor = color === null ? null : String(color); return sheet; },
+    getTabColor: () => sheet.$tabColor,
+    hideSheet() { sheet.$hidden = true; return sheet; },
+    showSheet() { sheet.$hidden = false; return sheet; },
+    isSheetHidden: () => sheet.$hidden,
+    clear() { grid.length = 0; return sheet; },
     getRange: (...args) => {
       if (typeof args[0] === 'string') {
         const { row, col, rows, cols } = parseA1(args[0], grid.length);
@@ -163,16 +170,26 @@ function makeSheet(name, initialRows) {
     setFrozenRows() { return this; },
     setColumnWidth() { return this; },
     appendRow(row) { grid.push(row.slice()); return this; },
-    $grid: grid
+    $grid: grid,
+    $tabColor: null,
+    $hidden: false
   };
+  return sheet;
 }
 
 /** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
 function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   const instances = new Map();
+  // Tab order, like the real spreadsheet: insertion order, mutated by moveActiveSheet.
+  const order = Object.keys(sheets);
+  let nextId = 100;
+  const ids = new Map();
   const sheetFor = name => {
     if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
-    if (!instances.has(name)) instances.set(name, makeSheet(name, sheets[name]));
+    if (!instances.has(name)) {
+      if (!ids.has(name)) ids.set(name, nextId++);
+      instances.set(name, makeSheet(name, sheets[name], ids.get(name)));
+    }
     return instances.get(name);
   };
   const ui = {
@@ -198,15 +215,31 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
       throw new Error(`A sheet with the name "${name}" already exists. Please enter another name.`);
     }
     sheets[name] = [];
+    order.push(name);
     return sheetFor(name);
   };
+  let activeName = order[0];
   // One stable spreadsheet object, like Apps Script: tests may patch its methods.
-  const active = { getSheetByName: sheetFor, insertSheet, getUrl: () => 'https://docs.google.com/spreadsheets/d/test-sheet/edit' };
+  const active = {
+    getSheetByName: sheetFor,
+    insertSheet,
+    getUrl: () => 'https://docs.google.com/spreadsheets/d/test-sheet/edit',
+    getSheets: () => order.map(sheetFor),
+    setActiveSheet(sh) { activeName = sh.getName(); return sh; },
+    // 1-based target position, like Apps Script.
+    moveActiveSheet(pos) {
+      const from = order.indexOf(activeName);
+      if (from < 0) return;
+      order.splice(from, 1);
+      order.splice(Math.max(0, Math.min(order.length, pos - 1)), 0, activeName);
+    }
+  };
   return {
     getActive: () => active,
     getUi: () => ui,
     flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid,
+    $order: () => order.slice(),
     $ui: ui
   };
 }

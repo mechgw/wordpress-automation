@@ -368,6 +368,10 @@ function addStatusMenu_() {
     .addItem('Włącz codzienne alerty e-mail', 'ustawCodzienneAlerty')
     .addSeparator()
     .addItem('Diagnostyka systemu (tylko odczyt)', 'diagnostykaSystemu')
+    .addSeparator()
+    .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')
+    .addItem('Ukryj arkusze techniczne', 'ukryjArkuszeTechniczne')
+    .addItem('Pokaż arkusze techniczne', 'pokazArkuszeTechniczne')
     .addToUi();
 }
 
