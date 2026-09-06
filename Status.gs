@@ -504,6 +504,9 @@ function addStatusMenu_() {
     .addSeparator()
     .addItem('Diagnostyka systemu (tylko odczyt)', 'diagnostykaSystemu')
     .addSeparator()
+    .addItem('Zajętość arkusza', 'pokazZajetoscArkusza')
+    .addItem('Wyczyść stare snapshoty i wyniki', 'wyczyscStareSnapshotyIWyniki')
+    .addSeparator()
     .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')
     .addItem('Ukryj arkusze techniczne', 'ukryjArkuszeTechniczne')
     .addItem('Pokaż arkusze techniczne', 'pokazArkuszeTechniczne')
@@ -537,6 +540,7 @@ function showImportStatus() {
 
   lines.push('Zadanie jest nieaktualne po upływie własnego progu od ostatniego poprawnego przebiegu.');
   lines.push('Zadanie monitorujące bez triggera, które nigdy nie działało, nie jest zgłaszane jako awaria.');
+  lines.push(sheetUsageLine_());
   lines.push(sitemapsStatusLine_());
   lines.push('Alerty e-mail: ' + alertRecipientText_() + ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));

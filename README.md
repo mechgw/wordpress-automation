@@ -55,6 +55,16 @@ Opcjonalne:
 
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
+### Zajętość arkusza i retencja
+
+Arkusz Google ma twardy limit 10 mln komórek na cały plik, dzielony przez wszystkie zakładki. Po jego przekroczeniu przestaje działać nie jedna funkcja, tylko wszystko naraz: importy, monitoring i komendy. *Dane → Zajętość arkusza* pokazuje procent limitu i największe zakładki, a linia ze stanem jest też w *Status danych*.
+
+Rosną tylko trzy zakładki dopisywane wierszami. `IMPORT LOG` ma własną retencję 90 dni. `WP RESULTS` i `WP SNAPSHOTS` czyści *Dane → Wyczyść stare snapshoty i wyniki*.
+
+Czyszczenie nie jest automatyczne i nie ma triggera. Snapshot jest siatką bezpieczeństwa dla rollbacku, a jego skasowanie jest nieodwracalne, więc usuwa je wyłącznie człowiek, po zobaczeniu w dialogu dokładnej liczby wierszy. Snapshot młodszy niż 30 dni zostaje zawsze, podobnie pięć najnowszych na każdą stronę; wiersz bez czytelnej daty jest traktowany jak świeży. Wyniki starsze niż 180 dni są usuwane, bo są wyłącznie informacyjne.
+
+`SEO LIVE`, `URL INSPEKCJA` i `RECRAWL QUEUE` mają jeden wiersz na adres, aktualizowany w miejscu. Rosną więc razem z serwisem i retencji nie potrzebują.
+
 ### Monitoring zadań cyklicznych
 
 Wszystkie zadania cykliczne, nie tylko importy GSC i GA4, zapisują czas ostatniego udanego przebiegu i podlegają temu samemu modelowi incydentów: jeden e-mail przy otwarciu, cisza w trakcie, e-mail przy powrocie do normy. Bez tego zadanie, które przestało działać, byłoby nieodróżnialne od zadania, które nie ma nic do zgłoszenia, bo kolejka recrawl i live check SEO piszą maila tylko wtedy, gdy coś znajdą.
