@@ -41,6 +41,14 @@ const RECRAWL_STATUS = {
   unknown: 'BRAK DATY ZMIANY'
 };
 const RECRAWL_DEFAULT_STALE_DAYS = 7;
+/**
+ * Ile adresów maksymalnie w jednym mailu. MailApp ma limit rozmiaru wiadomości,
+ * a monitoring dopuszcza tysiące adresów z sitemapy: bez tego limitu przy dużej
+ * liczbie nowych rekomendacji mail nigdy by nie wyszedł, nic nie zostałoby
+ * oznaczone jako zgłoszone i trigger powtarzałby tę samą próbę codziennie.
+ * Reszta idzie w kolejnych przebiegach, po jednej porcji dziennie.
+ */
+const RECRAWL_MAX_EMAIL_ITEMS = 50;
 const RECRAWL_TRIGGER_HANDLER = 'kolejkaRecrawlTrigger';
 const RECRAWL_TRIGGER_HOUR = 10;
 
@@ -267,10 +275,10 @@ function refreshRecrawlQueue_() {
   return summary;
 }
 
-/** Zapisuje znacznik powiadomienia dla adresów, o których właśnie wysłaliśmy mail. */
-function markRecrawlNotified_(summary) {
+/** Zapisuje znacznik powiadomienia wyłącznie dla adresów, które trafiły do wysłanego maila. */
+function markRecrawlNotified_(summary, items) {
   const notified = {};
-  summary.newRecommended.forEach(item => { notified[seoLiveNormalizeUrl_(item.url)] = true; });
+  items.forEach(item => { notified[seoLiveNormalizeUrl_(item.url)] = true; });
   summary.notifyRows.forEach((row, i) => {
     if (!notified[row.key]) return;
     summary.sheet.getRange(i + 2, 9).setValue(summary.checkedAt);
@@ -310,24 +318,42 @@ function kolejkaRecrawl() {
   return summary;
 }
 
-/** Handler codziennego triggera: bez okna, e-mail tylko o nowych rekomendacjach. */
+/**
+ * Handler codziennego triggera: bez okna, e-mail tylko o nowych rekomendacjach.
+ * Przeliczenie, wysyłka i oznaczenie są w JEDNEJ sekcji krytycznej: gdyby lock
+ * puszczać po samym przeliczeniu, dwa nakładające się uruchomienia zobaczyłyby
+ * te same puste znaczniki i wysłały tę samą listę dwa razy.
+ */
 function kolejkaRecrawlTrigger() {
-  const summary = withScriptLock_('kolejka recrawl', refreshRecrawlQueue_);
-  Logger.log(recrawlSummaryText_(summary));
+  return withScriptLock_('kolejka recrawl', () => {
+    const summary = refreshRecrawlQueue_();
+    Logger.log(recrawlSummaryText_(summary));
+    if (!summary.newRecommended.length) return summary;
 
-  if (summary.newRecommended.length) {
-    const sent = sendImportAlert_('Do zgłoszenia w Search Console: ' + summary.newRecommended.length + ' stron(y)', [
-      'Te strony warto ręcznie zgłosić w Search Console przez „Poproś o zindeksowanie”:',
-      ''
-    ].concat(summary.newRecommended.map(item => '- ' + item.url + '\n  ' + item.reason)).concat([
+    const batch = summary.newRecommended.slice(0, RECRAWL_MAX_EMAIL_ITEMS);
+    const rest = summary.newRecommended.length - batch.length;
+    const tail = [
       '',
       'Nic nie zostało zgłoszone automatycznie: dla zwykłych stron Google nie udostępnia do tego API.',
       'Strona już zgłoszona nie wróci w kolejnym mailu. Pełna kolejka jest w arkuszu „' + RECRAWL_SHEET + '”,',
       'a wpisanie TAK w kolumnie „Wyciszone” usuwa adres z rekomendacji na stałe.'
-    ]));
-    if (sent) markRecrawlNotified_(summary);
-  }
-  return summary;
+    ];
+    if (rest > 0) {
+      tail.unshift('… i ' + rest + ' kolejnych w arkuszu; trafią do maila w następnych przebiegach, po ' + RECRAWL_MAX_EMAIL_ITEMS + ' dziennie.');
+    }
+
+    const sent = sendImportAlert_(
+      'Do zgłoszenia w Search Console: ' + batch.length + ' stron(y)' + (rest > 0 ? ' z ' + summary.newRecommended.length : ''),
+      ['Te strony warto ręcznie zgłosić w Search Console przez „Poproś o zindeksowanie”:', '']
+        .concat(batch.map(item => '- ' + item.url + '\n  ' + item.reason))
+        .concat(tail)
+    );
+
+    // Oznaczamy wyłącznie wysłaną porcję, więc reszta wróci jutro zamiast zniknąć.
+    if (sent) markRecrawlNotified_(summary, batch);
+    summary.emailed = sent ? batch.length : 0;
+    return summary;
+  });
 }
 
 /** Instaluje codzienne przeliczanie kolejki (ok. 10:00, po live checku). */

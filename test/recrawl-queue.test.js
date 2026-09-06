@@ -247,6 +247,56 @@ describe('#92: e-mail tylko o nowych rekomendacjach', () => {
     assert.equal(gas.$mails.length, 1);
   });
 
+  test('#92/Codex: przy wielu nowych rekomendacjach mail jest ograniczony do porcji, reszta idzie w kolejnych przebiegach', () => {
+    const many = Array.from({ length: 60 }, (_, i) => 'p' + i);
+    const gas = project({
+      [SITEMAP]: [['URL', 'S', 'lastmod', 'O']].concat(many.map(s => sitemapRow(U(s), '2026-08-01'))),
+      [INSPECT]: [['URL']].concat(many.map(s => inspectRow(U(s), '2026-07-01 08:00'))),
+      [LIVE]: [['URL']].concat(many.map(s => liveRow(U(s))))
+    }, { ALERT_EMAIL: 'alerty@example.pl' });
+
+    const first = plain(gas.kolejkaRecrawlTrigger());
+    assert.equal(first.newRecommended.length, 60);
+    assert.equal(first.emailed, 50, 'tylko porcja trafia do maila');
+    assert.equal(gas.$mails.length, 1);
+    assert.equal(gas.$mails[0].subject, '[wordpress-automation] Do zgłoszenia w Search Console: 50 stron(y) z 60');
+    assert.match(gas.$mails[0].body, /… i 10 kolejnych w arkuszu; trafią do maila w następnych przebiegach, po 50 dziennie\./);
+    assert.equal((gas.$mails[0].body.match(/^- https/gm) || []).length, 50);
+
+    // Oznaczonych jest dokładnie 50, więc jutro wychodzi reszta, a nie ta sama lista.
+    gas.$mails.length = 0;
+    const second = plain(gas.kolejkaRecrawlTrigger());
+    assert.equal(second.newRecommended.length, 10);
+    assert.equal(second.emailed, 10);
+    assert.equal(gas.$mails.length, 1);
+    assert.equal(gas.$mails[0].subject, '[wordpress-automation] Do zgłoszenia w Search Console: 10 stron(y)');
+
+    gas.$mails.length = 0;
+    const third = plain(gas.kolejkaRecrawlTrigger());
+    assert.equal(third.newRecommended.length, 0);
+    assert.equal(gas.$mails.length, 0, 'po zgłoszeniu wszystkich mail nie wraca');
+  });
+
+  test('#92/Codex: wysyłka i oznaczanie dzieją się pod tym samym lockiem co przeliczenie', () => {
+    const gas = project({
+      [SITEMAP]: [['URL', 'S', 'lastmod', 'O'], sitemapRow(U('stara'), '2026-08-01')],
+      [INSPECT]: [['URL'], inspectRow(U('stara'), '2026-07-01 08:00')],
+      [LIVE]: [['URL'], liveRow(U('stara'))]
+    }, { ALERT_EMAIL: 'alerty@example.pl' });
+
+    const lockAtSend = [];
+    const realSend = gas.MailApp.sendEmail;
+    gas.MailApp.sendEmail = (to, subject, body) => {
+      lockAtSend.push(plain(gas.$lock).map(e => e[0]).join(','));
+      return realSend(to, subject, body);
+    };
+    gas.kolejkaRecrawlTrigger();
+
+    assert.deepEqual(lockAtSend, ['tryLock'], 'lock jeszcze nie zwolniony w chwili wysyłki');
+    assert.deepEqual(plain(gas.$lock).map(e => e[0]), ['tryLock', 'releaseLock'], 'jedna sekcja krytyczna na cały przebieg');
+    assert.ok(queueRow(gas, U('stara')).Powiadomiono, 'znacznik zapisany zanim lock puścił');
+  });
+
   test('bez ALERT_EMAIL nic nie jest wysyłane, znacznik nie jest ustawiany, kolejka i tak działa', () => {
     const gas = project(sheets());
     const out = plain(gas.kolejkaRecrawlTrigger());

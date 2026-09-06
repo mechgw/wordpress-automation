@@ -135,7 +135,7 @@ Wszystko liczone jest z danych, które już są w pliku, bez ani jednego zapytan
 
 Rekomendacje dostają wyłącznie adresy z sitemapy, czyli te przeznaczone do indeksowania. Celowe przekierowania i strony z `noindex` są monitorowane, ale nigdy nie trafiają na listę do zgłoszenia. Wpisanie `TAK` w kolumnie *Wyciszone* wyłącza adres na stałe i przetrwa przepisanie arkusza.
 
-*Włącz codzienną kolejkę recrawl* instaluje trigger około 10:00, po live checku. E-mail wychodzi wyłącznie o **nowych** rekomendacjach: strona, która czeka od tygodnia, nie wraca codziennie w kolejnej wiadomości. Znacznik powiadomienia czyści się, gdy Google w końcu odwiedzi stronę, więc następny taki przypadek zostanie zgłoszony ponownie.
+*Włącz codzienną kolejkę recrawl* instaluje trigger około 10:00, po live checku. E-mail wychodzi wyłącznie o **nowych** rekomendacjach: strona, która czeka od tygodnia, nie wraca codziennie w kolejnej wiadomości. Znacznik powiadomienia czyści się, gdy Google w końcu odwiedzi stronę, więc następny taki przypadek zostanie zgłoszony ponownie. Jedna wiadomość zawiera najwyżej 50 adresów, a oznaczana jako zgłoszona jest dokładnie ta porcja, więc przy dłuższej liście reszta trafia do maila w kolejnych dniach zamiast przekroczyć limit rozmiaru i nie dojść wcale. Przeliczenie, wysyłka i oznaczenie działają w jednej sekcji krytycznej, więc dwa nakładające się uruchomienia nie wyślą tej samej listy dwa razy.
 
 ### Diagnostyka systemu (dlaczego coś nie działa?)
 
