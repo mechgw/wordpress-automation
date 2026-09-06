@@ -2,13 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 const { loadProject, plain } = require('./helpers/gas');
 
-const ROOT = path.resolve(__dirname, '..');
-const FOOTER_MIGRATION_CODE = fs.readFileSync(path.join(ROOT, 'GlobalFooterMigration.gs'), 'utf8');
 const RESULTS_HEADER = ['result_id', 'command_id', 'wp_id', 'slug', 'status', 'link', 'title', 'modified', 'content', 'at', 'rm_title', 'rm_desc', 'kind'];
 const SNAPSHOTS_HEADER = ['snapshot_id', 'command_id', 'wp_id', 'slug', 'title_before', 'excerpt_before', 'content_before', 'status_before', 'modified_before', 'created_at', 'rank_math_title_before', 'rank_math_description_before', 'rank_math_captured', 'snapshot_kind', 'media_before_json', 'code_snippet_before_json', 'code_snippet_code_chunk'];
 const PROPS = {
@@ -30,7 +25,6 @@ function makeProject({ properties = {}, fetch, answer = 'YES' } = {}) {
     },
     fetch: fetch || (() => ({ code: 200, json: [], headers: {} }))
   });
-  vm.runInContext(FOOTER_MIGRATION_CODE, gas, { filename: path.join(ROOT, 'GlobalFooterMigration.gs') });
   gas.$ui.$answer = answer;
   return gas;
 }

@@ -60,6 +60,7 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 - Rozszerzaj stuby harnessu zamiast rejestrować wyjątki pokrycia.
 - Trzymaj `Version.gs` jako placeholdery; workflow deployu go stempluje.
 - Nowy plik `*.gs`: dopisz do `SOURCES` w `test/helpers/gas.js` i do `.quality/coverage-policy.json`.
+  Pilnuje tego `test/sources-completeness.test.js`; nie ładuj źródeł do kontekstu ręcznie w teście.
 - Nie uruchamiaj `clasp push` lokalnie; jedyną drogą do produkcji jest workflow deployu.
 - Nie dotykaj `.clasp.json` / `.clasprc.json` (ignorowane przez gita, poświadczenia).
 - Nie obniżaj progu pokrycia bez uzasadnienia i issue z follow-upem.
