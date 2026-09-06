@@ -91,7 +91,7 @@ Wszystkie zadania cykliczne, nie tylko importy GSC i GA4, zapisują czas ostatni
 
 Próg nieaktualności jest ustawiany per zadanie: doba z okładem dla zadań codziennych, osiem dni dla tygodniowych. *Dane → Status danych* pokazuje każde zadanie z jego harmonogramem, progiem i ostatnim uruchomieniem.
 
-Dwa wyjątki są celowe. Zadanie monitorujące, które nigdy nie działało i nie ma zainstalowanego triggera, jest traktowane jako nieużywane, a nie zepsute; incydent otwiera się dopiero wtedy, gdy zadanie kiedyś zadziałało albo ma włączony trigger. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
+Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorujące bez zainstalowanego triggera, które nigdy nie działało, jest nieużywane, a nie zepsute, i milczy. Zadanie z triggerem, które jeszcze nie zapisało przebiegu, dostaje swój własny próg na pierwsze uruchomienie: tak wygląda instalacja tuż po włączeniu monitoringu, gdzie trigger jest od dawna, a znacznik dopiero się pojawił. Dopiero gdy próg minie bez ani jednego przebiegu, otwiera się incydent. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
 
 ### Współbieżność i idempotencja
 
