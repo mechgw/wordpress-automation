@@ -218,7 +218,7 @@ clasp is a pinned dev dependency (`package-lock.json`), so local runs and both w
 
 ## Drift check
 
-*Apps Script drift check* runs every Monday (and on demand). It pulls the live project and compares it with `main` using `scripts/quality/apps-script-compare.js` (trailing newlines normalised, `Version.gs` ignored, only `*.gs` and `appsscript.json` compared). If someone edited code directly in the Apps Script editor, the run fails and attaches a patch with the differences so the change can be brought back into the repository.
+*Apps Script drift check* runs every Monday (and on demand). It pulls the live project and compares it with `main` using `scripts/quality/apps-script-compare.js` (trailing newlines normalised on both sides: Apps Script always returns a file with a final newline, so a committed source without one is not drift, and ESLint's `eol-last` rule keeps such files out of the repository; `Version.gs` ignored, only `*.gs` and `appsscript.json` compared). If someone edited code directly in the Apps Script editor, the run fails and attaches a patch with the differences so the change can be brought back into the repository.
 
 ## Releases
 

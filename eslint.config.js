@@ -48,6 +48,9 @@ module.exports = [
     },
     rules: {
       ...js.configs.recommended.rules,
+      // Apps Script always returns files with a final newline; a source without
+      // one shows up as drift right after deploy (v2.15.0). Catch it at lint time.
+      "eol-last": ["error", "always"],
     },
   },
   {
@@ -75,6 +78,7 @@ module.exports = [
       "no-redeclare": ["error", { builtinGlobals: false }],
       eqeqeq: ["warn", "smart"],
       "prefer-const": "warn",
+      "eol-last": ["error", "always"],
     },
   },
 ];
