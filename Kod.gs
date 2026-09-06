@@ -13,6 +13,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Sprawdź indeksowanie (URL INSPEKCJA)', 'sprawdzIndeksowanie')
     .addItem('Włącz cotygodniową inspekcję URL', 'ustawTygodniowaInspekcje')
+    .addItem('Sprawdź strony live (SEO LIVE)', 'sprawdzStronyLive')
+    .addItem('Włącz codzienny live check SEO', 'ustawCodziennyLiveCheck')
     .addToUi();
 
     addGa4Menu_();

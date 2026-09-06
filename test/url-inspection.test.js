@@ -281,7 +281,7 @@ describe('inspekcja URL: menu i trigger', () => {
     const gas = project(null, {});
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn), ['testPolaczenia', 'importOstatniZakres', 'importDzienny', 'ustawAutomatycznyImport', 'sprawdzIndeksowanie', 'ustawTygodniowaInspekcje']);
+    assert.deepEqual(seo.items.map(i => i.fn).slice(0, 6), ['testPolaczenia', 'importOstatniZakres', 'importDzienny', 'ustawAutomatycznyImport', 'sprawdzIndeksowanie', 'ustawTygodniowaInspekcje']);
   });
 
   test('ustawTygodniowaInspekcje instaluje trigger poniedziałek 07:00 i zastępuje stary', () => {

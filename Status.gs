@@ -149,6 +149,32 @@ function ensureImportLogSheet_() {
   return sheet;
 }
 
+/**
+ * Arkusz o podanej nazwie z nagłówkiem w wierszu 1; tworzony, gdy go nie ma
+ * (odporne na wyścig: duplikat przy insertSheet kończy się użyciem istniejącego).
+ * Arkusz z danymi bez nagłówka dostaje nagłówek wstawiony NAD dane.
+ */
+function ensureSheetWithHeader_(name, header) {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    try {
+      sheet = ss.insertSheet(name);
+    } catch (e) {
+      sheet = ss.getSheetByName(name);
+      if (!sheet) throw e;
+    }
+  }
+  if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== header[0]) {
+    if (sheet.getLastRow() >= 1 && !sheet.getRange(1, 1, 1, header.length).isBlank()) {
+      sheet.insertRowBefore(1);
+    }
+    sheet.getRange(1, 1, 1, header.length).setValues([header]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
 function importRunType_(run) {
   return run.trigger ? 'trigger' : 'ręczny';
 }
