@@ -19,13 +19,13 @@
     },
     {
       "pattern": "Kod.gs",
-      "threshold": 85,
-      "rationale": "RATCHET 2026-09-05 (#39): GSC import end to end, trigger installation, menus and status wiring are covered (87%). testPolaczenia and the sheet-formatting tail of replaceRange_ remain."
+      "threshold": 95,
+      "rationale": "RATCHET 2026-09-06: testPolaczenia and showDeployedVersion are now covered end to end (97%). Remaining: error branches of importRange_ and the sheet-formatting tail of replaceRange_."
     },
     {
       "pattern": "GA4.gs",
-      "threshold": 85,
-      "rationale": "RATCHET 2026-09-05 (#39): daily and range imports end to end (all four reports, business fallback, Ads degradation), testGA4, API layer and helpers are covered (80%). Event diagnostics and key-event configuration remain."
+      "threshold": 94,
+      "rationale": "RATCHET 2026-09-06: diagnozujZdarzeniaGA4 is now covered end to end (95%). Remaining: error branches inside the import reports and a few formatting tails."
     },
     {
       "pattern": "Alerts.gs",
@@ -64,8 +64,8 @@
     },
     {
       "pattern": "WordPress.gs",
-      "threshold": 90,
-      "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94%). Remaining lines are alert texts of the menu tests."
+      "threshold": 94,
+      "rationale": "RATCHET 2026-09-05 (#48): command loop, every read and write command, snapshots, restore, guards and dry run are covered end to end against a stateful fake WordPress (94.7%). RATCHET 2026-09-06: threshold raised to match. Remaining lines are alert texts of the menu tests."
     }
   ]
 }
