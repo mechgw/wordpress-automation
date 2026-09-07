@@ -111,6 +111,11 @@
       "pattern": "src/SchemaChecks.gs",
       "threshold": 95,
       "rationale": "Nowy w #110 z pełnym pokryciem: parser JSON-LD z @graph, ścieżki, reguły wartość/strona, sprzeczności, uszkodzony blok."
+    },
+    {
+      "pattern": "src/BusinessProfile.gs",
+      "threshold": 95,
+      "rationale": "Nowy w #123 z pełnym pokryciem: konfiguracja, budowa żądań, parsowanie odpowiedzi, upsert i rozróżnione powody odmowy API."
     }
   ]
 }

@@ -97,6 +97,18 @@ Próg nieaktualności jest ustawiany per zadanie: doba z okładem dla zadań cod
 
 Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorujące bez zainstalowanego triggera, które nigdy nie działało, jest nieużywane, a nie zepsute, i milczy. Zadanie z triggerem, które jeszcze nie zapisało przebiegu, dostaje swój własny próg na pierwsze uruchomienie: tak wygląda instalacja tuż po włączeniu monitoringu, gdzie trigger jest od dawna, a znacznik dopiero się pojawił. Dopiero gdy próg minie bez ani jednego przebiegu, otwiera się incydent. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
 
+### Google Business Profile
+
+Import wydajności i miesięcznych fraz wyszukiwania do zakładek `GBP PERFORMANCE RAW` i `GBP SEARCH KEYWORDS`. *SEO / GSC → Przygotuj Business Profile* zakłada obie i mówi, czego jeszcze brakuje do uruchomienia.
+
+Do działania potrzebne są trzy rzeczy po stronie Google, żadnej z nich nie da się załatwić kodem. Włączenie Business Profile Performance API w projekcie Google Cloud. Przyznany dostęp do rodziny Business Profile, o który wnioskuje się osobno; samo włączenie API nie wystarcza, bo bez wniosku limit wynosi zero. Zakres OAuth dopisany do `appsscript.json` i ponowna autoryzacja projektu.
+
+Zakresu celowo jeszcze nie ma w `appsscript.json`: dopisanie go wymusza ponowną autoryzację całego projektu, a nie ma powodu robić tego przed przyznaniem dostępu. Do tego czasu import kończy się komunikatem, który rozróżnia brak zakresu (401), brak przyznanego dostępu (403) i złą lokalizację (404).
+
+Lokalizacja pochodzi ze Script Property `GBP_LOCATION` w formacie `locations/<id>`, więc identyfikator instalacji nie trafia do repozytorium. Import jest idempotentny: ponowne uruchomienie tego samego zakresu podmienia wiersze zamiast je dublować, a backfill starszego okresu nie kasuje nowszych danych.
+
+Dwie decyzje wpływające na dane. Brak wartości w odpowiedzi nie jest zamieniany na zero, bo API pomija dni bez pomiaru, a to nie to samo co dzień z zerem. Frazy rozróżniają wartość dokładną od progu, poniżej którego Google nie podaje liczby; potraktowanie progu jak liczby zawyżałoby sumy.
+
 ### Semantyczne kontrole JSON-LD
 
 Sprawdzenie obecności `@type` chroni przed zniknięciem całego typu danych strukturalnych, ale przepuszcza gorszą regresję: schema jest, tylko opisuje co innego niż strona. Cena w `Offer` inna niż widoczna, pytanie w `FAQPage`, którego nie ma w FAQ, dwa węzły podające sprzeczne wartości tego samego pola.
