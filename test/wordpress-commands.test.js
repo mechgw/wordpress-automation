@@ -119,7 +119,7 @@ describe('komendy odczytu', () => {
 
     gas = project({ commands: [cmd('GET_RANK_MATH_META', '7')], wp: fakeWordPress({ pages: [{ id: 7, slug: 'home', hasRankMath: false }] }) });
     gas.processWpCommands();
-    assert.match(message(gas), /Brak pola cc_rank_math/);
+    assert.match(message(gas), /Brak pola z SEO title i description/);
   });
 
   test('GET_ALL_PAGES stronicuje po X-WP-TotalPages, nie dubluje i zwraca zakres wyników', () => {

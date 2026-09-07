@@ -33,7 +33,7 @@ describe('WordPress.gs testRankMathBridge', () => {
     });
     gas.testRankMathBridge();
     assert.equal(gas.$fetchCalls.length, 2);
-    assert.match(gas.$fetchCalls[0].url, /_fields=id,slug,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots$/);
+    assert.match(gas.$fetchCalls[0].url, /_fields=id,slug,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots$/);
     assert.equal(gas.$fetchCalls[1].url, 'https://www.example.pl/wp-json/acme/v1/seo-meta');
     assert.equal(gas.$alerts.length, 1);
     const text = gas.$alerts[0][0];
@@ -55,7 +55,7 @@ describe('WordPress.gs testRankMathBridge', () => {
 
   test('a page without cc_rank_math points at the WordPress snippet', () => {
     const gas = loadProject({ properties: BASE_PROPS, fetch: fetchRouter([pagesRoute([{ id: 5, slug: 'x' }])]) });
-    assert.throws(() => gas.testRankMathBridge(), /Brak pola cc_rank_math.*Rank Math REST bridge/);
+    assert.throws(() => gas.testRankMathBridge(), /Brak pola z SEO title i description.*seo-meta-rest-bridge/);
     assert.equal(gas.$fetchCalls.length, 1, 'bridge endpoint not probed');
   });
 
@@ -75,13 +75,13 @@ describe('WordPress.gs getPageRawById_', () => {
   test('fetches the page in edit context with the Rank Math field', () => {
     const gas = loadProject({ properties: BASE_PROPS, fetch: () => ({ code: 200, json: { id: 12, slug: 'p', cc_rank_math: { title: 'x' } } }) });
     const page = gas.getPageRawById_(12, true);
-    assert.match(gas.$fetchCalls[0].url, /\/wp-json\/wp\/v2\/pages\/12\?context=edit&_fields=.*cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots$/);
+    assert.match(gas.$fetchCalls[0].url, /\/wp-json\/wp\/v2\/pages\/12\?context=edit&_fields=.*cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots$/);
     assert.equal(plain(page).slug, 'p');
   });
 
   test('requireRankMath rejects a page without the field, a plain read accepts it', () => {
     const make = () => loadProject({ properties: BASE_PROPS, fetch: () => ({ code: 200, json: { id: 12, slug: 'p' } }) });
-    assert.throws(() => make().getPageRawById_(12, true), /Brak pola cc_rank_math.*Rank Math REST read/);
+    assert.throws(() => make().getPageRawById_(12, true), /Brak pola z SEO title i description.*seo-meta-rest-bridge/);
     assert.equal(plain(make().getPageRawById_(12)).id, 12);
   });
 

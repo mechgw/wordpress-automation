@@ -229,7 +229,7 @@ function testWpConnection() {
 
 function testRankMathBridge() {
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
+    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -242,9 +242,9 @@ function testRankMathBridge() {
   }
 
   const page = pages[0];
-  if (!Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')) {
+  if (!rankMathFieldName_(page)) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST bridge” po stronie WordPressa.'
+      'Brak pola z SEO title i description w REST API. Wgraj snippet seo-meta-rest-bridge.php po stronie WordPressa.'
     );
   }
 
@@ -522,7 +522,7 @@ function getPageBySlug_(slug, commandId) {
     '/wp-json/wp/v2/pages' +
     '?slug=' + encodeURIComponent(slug) +
     '&context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -556,7 +556,7 @@ function getPageRawById_(id, requireRankMath = false) {
   const path =
     '/wp-json/wp/v2/pages/' + encodeURIComponent(id) +
     '?context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -566,12 +566,9 @@ function getPageRawById_(id, requireRankMath = false) {
 
   const page = response.json || {};
 
-  if (
-    requireRankMath &&
-    !Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')
-  ) {
+  if (requireRankMath && !rankMathFieldName_(page)) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST read” po stronie WordPressa.'
+      'Brak pola z SEO title i description w REST API. Wgraj snippet seo-meta-rest-bridge.php po stronie WordPressa.'
     );
   }
 
@@ -610,7 +607,7 @@ function getAllPages_(commandId) {
         '&page=' + pageNo +
         '&orderby=id' +
         '&order=asc' +
-        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
       const response = wpFetch_(path);
 
@@ -1002,9 +999,10 @@ function savePageResult_(page, commandId) {
 }
 
 function getRankMathData_(page) {
-  const available = Object.prototype.hasOwnProperty.call(page || {}, 'cc_rank_math');
-  const raw = available && page.cc_rank_math && typeof page.cc_rank_math === 'object'
-    ? page.cc_rank_math
+  const metaField = rankMathFieldName_(page);
+  const available = Boolean(metaField);
+  const raw = available && page[metaField] && typeof page[metaField] === 'object'
+    ? page[metaField]
     : {};
 
   // Robots idzie osobnym polem REST, bo dodaje je nasz snippet z repozytorium,
@@ -1036,6 +1034,20 @@ function robotsBridgeStatusText_(page) {
   if (!field) return 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie';
   if (field === WP_ROBOTS_FIELDS[0]) return 'OK (pole ' + field + ')';
   return 'OK, ale przez starą nazwę pola (' + field + '). Wgraj nowszy snippet page-layout-rest-bridge.php.';
+}
+
+/**
+ * Nazwy pola REST z tytułem i opisem SEO, w kolejności preferencji (#103).
+ * Ta sama zasada co przy robots: `wpa_` jest docelowe, `cc_` historyczne.
+ */
+const WP_RANK_MATH_META_FIELDS = ['wpa_rank_math', 'cc_rank_math'];
+
+/** Która z nazw pola z tytułem i opisem jest obecna w odpowiedzi; '' gdy żadna. */
+function rankMathFieldName_(page) {
+  const found = WP_RANK_MATH_META_FIELDS.filter(function (name) {
+    return Object.prototype.hasOwnProperty.call(page || {}, name);
+  });
+  return found.length ? found[0] : '';
 }
 
 /** Która z nazw pola robots jest obecna w odpowiedzi; '' gdy żadna. */
