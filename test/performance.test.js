@@ -173,6 +173,50 @@ describe('#124: dane laboratoryjne z PSI', () => {
     assert.equal(gas.medianOfValues_([4, 1, 2, 3]), 2.5);
   });
 
+  test('#124: przebieg mieści się w budżecie czasu i wraca do reszty adresów później', () => {
+    // Jedno wywołanie PSI trwa kilkanaście sekund, więc kilka adresów
+    // przekroczyłoby limit czasu wykonania Apps Script. Zamiast paść w połowie,
+    // przebieg mierzy tyle, ile zdąży, i zapamiętuje, gdzie skończył.
+    const many = [1, 2, 3, 4].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+    let elapsed = 0;
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(many) },
+      fetch: () => {
+        elapsed += 30000;
+        return { code: 200, text: JSON.stringify(psiResponse()) };
+      }
+    });
+    // Zegar podmieniamy w kontekście VM, bo tam działa kod źródeł; podmiana
+    // Date.now w realm testu nie miałaby na niego wpływu.
+    const base = gas.$Date.now();
+    gas.$Date.now = () => base + elapsed;
+
+    const out = plain(gas.runPsiMeasurement_());
+    assert.ok(out.measured < many.length, 'nie wszystkie adresy w jednym przebiegu');
+    assert.ok(out.measured > 0, 'ale przynajmniej jeden zmierzony w całości');
+    assert.equal(out.measured + out.skipped, many.length);
+    assert.match(out.detail, /zostanie zmierzonych w kolejnym przebiegu/);
+  });
+
+  test('#124: kolejny przebieg zaczyna od adresu, na którym skończył poprzedni', () => {
+    const many = [1, 2].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+    const gas = loadProject({
+      properties: Object.assign({}, KEY, { PAGESPEED_CURSOR: '1' }),
+      sheets: { [URLS]: [URLS_HEADER].concat(many) },
+      fetch: () => ({ code: 200, text: JSON.stringify(psiResponse()) })
+    });
+    gas.runPsiMeasurement_();
+    assert.equal(gas.$sheet(LAB)[1][1], 'https://www.example.pl/2/', 'zaczyna od drugiego adresu');
+  });
+
+  test('#124: kursor jest zapisywany i zawija się na liście adresów', () => {
+    const gas = project({ fetch: () => ({ code: 200, text: JSON.stringify(psiResponse()) }) });
+    gas.runPsiMeasurement_();
+    assert.equal(gas.$properties.PAGESPEED_CURSOR, '0', 'jeden adres: kursor wraca na początek');
+    assert.equal(gas.psiStartIndex_(0), 0, 'pusta lista nie dzieli przez zero');
+  });
+
   test('brakujący audyt jest pomijany, a nie zapisywany jako zero', () => {
     const thin = { lighthouseResult: { categories: {}, audits: { 'largest-contentful-paint': { numericValue: 2500 } } } };
     const gas = project({ fetch: () => ({ code: 200, text: JSON.stringify(thin) }) });
@@ -231,7 +275,7 @@ describe('#124: menu', () => {
     gas.zmierzWydajnosc();
     const text = gas.$alerts[0][0];
     assert.match(text, /Dane terenowe \(CrUX\): 6 pomiarów terenowych/);
-    assert.match(text, /Dane laboratoryjne \(PSI\): 48 pomiarów laboratoryjnych/);
+    assert.match(text, /Dane laboratoryjne \(PSI\): 48 pomiarów dla 1 z 1 adresów/);
     assert.match(text, /Brak danych terenowych nie jest błędem strony/);
   });
 

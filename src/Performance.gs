@@ -28,6 +28,31 @@ const PSI_API = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 /** Ile prób Lighthouse na adres i strategię; mediana z nich jest podstawą porównań. */
 const PSI_ATTEMPTS = 3;
 
+/**
+ * Budżet czasu na pomiar laboratoryjny w jednym przebiegu.
+ *
+ * Jedno wywołanie PSI trwa kilkanaście do kilkudziesięciu sekund, a przy trzech
+ * próbach i dwóch strategiach daje sześć wywołań na adres. Nawet kilka adresów
+ * przekroczyłoby limit czasu wykonania Apps Script, a przerwany przebieg
+ * zostawiłby część pomiarów bez zapisu.
+ *
+ * Zamiast tego mierzymy tyle adresów, ile mieści się w budżecie, i zapamiętujemy,
+ * gdzie skończyliśmy. Kolejny przebieg zaczyna od następnego adresu, więc przy
+ * cyklicznym uruchamianiu wszystkie doczekają się pomiaru.
+ */
+const PSI_TIME_BUDGET_MS = 4 * 60 * 1000;
+const PSI_CURSOR_PROP = 'PAGESPEED_CURSOR';
+
+/** Adres, od którego zacząć ten przebieg; rotacja po kolejnych uruchomieniach. */
+function psiStartIndex_(total) {
+  const raw = Number(PropertiesService.getScriptProperties().getProperty(PSI_CURSOR_PROP) || 0);
+  return total > 0 && raw > 0 ? raw % total : 0;
+}
+
+function savePsiCursor_(index) {
+  PropertiesService.getScriptProperties().setProperty(PSI_CURSOR_PROP, String(index));
+}
+
 /** Metryki terenowe, w nazwach CrUX. */
 const CRUX_METRICS = ['largest_contentful_paint', 'interaction_to_next_paint', 'cumulative_layout_shift'];
 
@@ -258,9 +283,17 @@ function runPsiMeasurement_() {
 
   const now = new Date();
   const measuredAt = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  const startedAt = Date.now();
   const rows = [];
+  const start = psiStartIndex_(urls.length);
+  let measured = 0;
+  let index = start;
 
-  urls.forEach(function (entry) {
+  // Budżet sprawdzamy PRZED rozpoczęciem adresu, nie w trakcie: przerwanie
+  // w połowie zostawiłoby adres z częścią prób, a mediana z dwóch prób jest
+  // gorsza niż jej brak.
+  while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
+    const entry = urls[index % urls.length];
     ['mobile', 'desktop'].forEach(function (strategy) {
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
@@ -270,14 +303,23 @@ function runPsiMeasurement_() {
           .forEach(function (row) { rows.push(row); });
       }
     });
-  });
+    measured++;
+    index++;
+  }
 
+  savePsiCursor_(index % urls.length);
   upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], rows);
+
+  const skipped = urls.length - measured;
   return {
     rows: rows.length,
     urls: urls.length,
+    measured: measured,
+    skipped: skipped,
     medians: psiMedians_(rows),
-    detail: rows.length + ' pomiarów laboratoryjnych (' + PSI_ATTEMPTS + ' próby na adres i strategię)'
+    detail: rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
+      PSI_ATTEMPTS + ' próby na adres i strategię)' +
+      (skipped ? '; ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu' : '')
   };
 }
 
