@@ -111,6 +111,16 @@ Lokalizacja pochodzi ze Script Property `GBP_LOCATION` w formacie `locations/<id
 
 Dwie decyzje wpływające na dane. Brak wartości w odpowiedzi nie jest zamieniany na zero, bo API pomija dni bez pomiaru, a to nie to samo co dzień z zerem. Frazy rozróżniają wartość dokładną od progu, poniżej którego Google nie podaje liczby; potraktowanie progu jak liczby zawyżałoby sumy.
 
+### Zmiany oczekujące na wykonanie
+
+`SEO LIVE` i kolejka `WP COMMANDS` działały niezależnie, co dawało wyścig: polecenie przygotowane wieczorem, poranny live check widzi jeszcze stary stan i wysyła alert o regresji, a polecenie wykonuje się później tego samego dnia. Alert jest wtedy prawdziwy, ale bezużyteczny, bo system zna już zamierzony stan.
+
+Live check rozpoznaje więc różnicę, którą naprawi przygotowana zmiana, i oznacza wiersz jako `PENDING CHANGE` z numerem oczekującego polecenia, zamiast zgłaszać regresję. Po upływie progu, domyślnie 48 godzin i konfigurowalnego przez Script Property `SEO_LIVE_PENDING_GRACE_HOURS`, niewykonane polecenie samo staje się alertem: cisza bez końca byłaby gorsza niż fałszywy alarm.
+
+Wyciszenie jest celowo wąskie, bo tłumienie prawdziwej regresji jest znacznie gorsze niż jeden alert za dużo. Tłumione są wyłącznie różnice pokryte jawnie wymienioną parą akcji i pola: robots i tytuł SEO z `UPDATE_RANK_MATH_FIELD` oraz status z `PUBLISH_PAGE`. Polecenie musi mieć `confirm=YES` i status `PENDING`; tryb próbny, brak potwierdzenia i polecenie już wykonane nie wyciszają niczego. Adres jest dopasowywany po identyfikatorze strony odczytanym z WordPressa, nie po podobieństwie tekstu, a jedna niewyjaśniona różnica znosi wyciszenie całego wiersza.
+
+Monitoring pozostaje read-only wobec WordPressa. Nic z tego mechanizmu nie wykonuje poleceń, nie omija `WP_ALLOW_WRITES` ani potwierdzenia; prawo do zapisu zostaje wyłącznie w kontrakcie `WP COMMANDS`.
+
 ### Semantyczne kontrole JSON-LD
 
 Sprawdzenie obecności `@type` chroni przed zniknięciem całego typu danych strukturalnych, ale przepuszcza gorszą regresję: schema jest, tylko opisuje co innego niż strona. Cena w `Offer` inna niż widoczna, pytanie w `FAQPage`, którego nie ma w FAQ, dwa węzły podające sprzeczne wartości tego samego pola.
