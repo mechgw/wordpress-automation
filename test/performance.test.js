@@ -229,15 +229,43 @@ describe('#124: dane laboratoryjne z PSI', () => {
     assert.throws(() => project({ fetch: () => ({ code: 403, text: '{}' }) }).runPsiMeasurement_(), /PageSpeed Insights API/);
   });
 
-  test('limit i inny błąd HTTP mają osobne komunikaty', () => {
+  test('#124: błąd systemowy przerywa pomiar, bo kolejne próby dadzą to samo', () => {
+    // Klucz i limit dotyczą wszystkich adresów, więc brnięcie dalej tylko
+    // zużyłoby limit i zasypało raport tym samym błędem.
     assert.throws(
       () => project({ fetch: () => ({ code: 429, text: '{}' }) }).runPsiMeasurement_(),
       /Przekroczony limit zapytań \(429\).*zmniejsz liczbę adresów/s
     );
     assert.throws(
-      () => project({ fetch: () => ({ code: 500, text: 'awaria po stronie Google' }) }).runPsiMeasurement_(),
-      /HTTP 500:[\s\S]*awaria po stronie Google/
+      () => project({ fetch: () => ({ code: 403, text: '{}' }) }).runPsiMeasurement_(),
+      /PageSpeed Insights API/
     );
+  });
+
+  test('#124: awaria Lighthouse nie przerywa pomiaru i jest zgłoszona', () => {
+    // Realny błąd z produkcji: Lighthouse zwraca 500 dla pojedynczego przebiegu.
+    // To zdarza się losowo i nie może kasować wszystkiego, co już zmierzono.
+    const lighthouse500 = { code: 500, text: '{"error":{"code":500,"message":"Lighthouse returned error: Something went wrong.","errors":[{"domain":"lighthouse","reason":"lighthouseError"}]}}' };
+    let call = 0;
+    const gas = project({
+      fetch: () => {
+        call++;
+        return call === 2 ? lighthouse500 : { code: 200, text: JSON.stringify(psiResponse()) };
+      }
+    });
+    const out = plain(gas.runPsiMeasurement_());
+    assert.equal(out.failures.length, 1, 'jedna strategia z niepełnym kompletem prób');
+    assert.match(out.failures[0], /\(mobile\): 2 z 3 prób/);
+    assert.ok(out.rows > 0, 'udane próby są zapisane, a nie tracone');
+    assert.match(out.detail, /nieudane próby:/);
+  });
+
+  test('#124: adres, którego Lighthouse w ogóle nie zmierzył, jest wypisany wprost', () => {
+    const gas = project({ fetch: () => ({ code: 500, text: '{"error":{"errors":[{"domain":"lighthouse"}]}}' }) });
+    const out = plain(gas.runPsiMeasurement_());
+    assert.equal(out.rows, 0);
+    assert.equal(out.failures.length, 2, 'obie strategie bez ani jednej udanej próby');
+    assert.match(out.failures[0], /0 z 3 prób/);
   });
 
   test('pusta odpowiedź nie wywraca pomiaru', () => {
@@ -277,6 +305,23 @@ describe('#124: menu', () => {
     assert.match(text, /Dane terenowe \(CrUX\): 6 pomiarów terenowych/);
     assert.match(text, /Dane laboratoryjne \(PSI\): 48 pomiarów dla 1 z 1 adresów/);
     assert.match(text, /Brak danych terenowych nie jest błędem strony/);
+  });
+
+  test('#124: okno tłumaczy nieudane przebiegi Lighthouse, gdy jakieś były', () => {
+    let call = 0;
+    const gas = project({
+      fetch: url => {
+        if (String(url).indexOf('chromeuxreport') > 0) return { code: 200, text: JSON.stringify(cruxRecord()) };
+        call++;
+        return call === 1
+          ? { code: 500, text: '{"error":{"errors":[{"domain":"lighthouse"}]}}' }
+          : { code: 200, text: JSON.stringify(psiResponse()) };
+      }
+    });
+    gas.zmierzWydajnosc();
+    const text = gas.$alerts[0][0];
+    assert.match(text, /nieudane próby:/);
+    assert.match(text, /zdarzają się losowo po stronie Google/);
   });
 
   test('pozycje są w menu SEO / GSC', () => {
