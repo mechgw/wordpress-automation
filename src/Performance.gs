@@ -115,7 +115,12 @@ function performanceApiRequest_(url) {
     throw new Error('Przekroczony limit zapytań (429). Ponów pomiar później albo zmniejsz liczbę adresów.');
   }
   if (code < 200 || code >= 300) {
-    throw new Error('HTTP ' + code + ':\n' + text.slice(0, 800));
+    // Lighthouse potrafi wywrócić się na pojedynczym adresie i zwraca wtedy 500
+    // z domeną „lighthouse”. To awaria jednej próby, a nie konfiguracji ani
+    // klucza, więc nie może przerywać całego pomiaru.
+    const error = new Error('HTTP ' + code + ':\n' + text.slice(0, 800));
+    error.transient = code >= 500;
+    throw error;
   }
   return text ? JSON.parse(text) : {};
 }
@@ -292,15 +297,29 @@ function runPsiMeasurement_() {
   // Budżet sprawdzamy PRZED rozpoczęciem adresu, nie w trakcie: przerwanie
   // w połowie zostawiłoby adres z częścią prób, a mediana z dwóch prób jest
   // gorsza niż jej brak.
+  const failures = [];
+
   while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
     const entry = urls[index % urls.length];
     ['mobile', 'desktop'].forEach(function (strategy) {
+      let ok = 0;
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
-        const response = performanceApiRequest_(url);
-        parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now)
-          .forEach(function (row) { rows.push(row); });
+        try {
+          const response = performanceApiRequest_(url);
+          parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now)
+            .forEach(function (row) { rows.push(row); });
+          ok++;
+        } catch (e) {
+          // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
+          // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
+          // Lighthouse wywraca się losowo i to normalne.
+          if (!e.transient) throw e;
+        }
+      }
+      if (ok < PSI_ATTEMPTS) {
+        failures.push(entry.url + ' (' + strategy + '): ' + ok + ' z ' + PSI_ATTEMPTS + ' prób');
       }
     });
     measured++;
@@ -316,10 +335,12 @@ function runPsiMeasurement_() {
     urls: urls.length,
     measured: measured,
     skipped: skipped,
+    failures: failures,
     medians: psiMedians_(rows),
     detail: rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
       PSI_ATTEMPTS + ' próby na adres i strategię)' +
-      (skipped ? '; ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu' : '')
+      (skipped ? '; ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu' : '') +
+      (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
   };
 }
 
@@ -357,7 +378,11 @@ function zmierzWydajnosc() {
     'Dane terenowe (CrUX): ' + field.detail + '.',
     'Dane laboratoryjne (PSI): ' + lab.detail + '.',
     '',
-    'Brak danych terenowych nie jest błędem strony, tylko informacją o zbyt małym ruchu.'
+    'Brak danych terenowych nie jest błędem strony, tylko informacją o zbyt małym ruchu.',
+    (lab.failures && lab.failures.length
+      ? 'Nieudane przebiegi Lighthouse zdarzają się losowo po stronie Google. Pomiar zapisał to, ' +
+        'co się udało, a mediana liczy się z udanych prób.'
+      : '')
   ].join('\n'));
   return { field: field, lab: lab };
 }
