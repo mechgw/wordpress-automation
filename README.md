@@ -53,6 +53,8 @@ Opcjonalne:
 
 `UPDATE_RANK_MATH_FIELD` obsługuje `rank_math_title`, `rank_math_description` i `rank_math_robots`. Dwa pierwsze idą przez most `seo-meta`, robots przez endpoint `seo-robots` ze snippetu `wordpress/page-layout-rest-bridge.php` (wersja 1.1.0 i nowsza). Wartość robots wpisuje się jako listę po przecinku, na przykład `noindex,follow`; pusta wartość przywraca domyślne ustawienia Rank Math.
 
+Po zapisie robots skrypt nie poprzestaje na odczycie post meta: pobiera publiczną stronę i sprawdza, co naprawdę serwuje w meta robots. Produkcja pokazała, że sam wpis w bazie nie wystarcza; polecenie kończyło się sukcesem, meta było poprawne, a strona nadal oddawała `index`. Porównywane są wyłącznie decyzje o indeksowaniu i podążaniu za linkami, bo Rank Math dokłada własne dyrektywy, których nie ustawiamy. Rozjazd kończy się błędem wskazującym najczęstszą przyczynę, czyli pamięć podręczną strony albo CDN, których zapis przez REST nie unieważnia. Szkic i strona, której nie udało się pobrać, nie są sprawdzane, a polecenie mówi o tym wprost zamiast udawać potwierdzenie.
+
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
 ### Układ repozytorium

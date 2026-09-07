@@ -505,6 +505,79 @@ describe('RESTORE_SNAPSHOT', () => {
   });
 });
 
+describe('#88: weryfikacja robots na publicznej stronie', () => {
+  const publishedPage = extra => Object.assign({ id: 7, slug: 'home', status: 'publish', title: 'Home' }, extra || {});
+
+  test('zgodna strona kończy się sukcesem i mówi, że potwierdziła ustawienie na żywo', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex,follow')],
+      wp: fakeWordPress({ pages: [publishedPage()] })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.match(message(gas), /Strona na żywo potwierdza ustawienie\./);
+  });
+
+  test('strona serwująca co innego niż post meta jest błędem, a nie sukcesem', () => {
+    // Dokładnie przypadek z produkcji: zapis przeszedł, meta poprawne, a strona
+    // nadal oddaje index, bo pamięć podręczna nie została unieważniona.
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex,follow')],
+      wp: fakeWordPress({ pages: [publishedPage({ robots: 'index,follow' })], stalePageCache: true })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'ERROR');
+    assert.match(message(gas), /publiczna strona nadal serwuje co innego/);
+    assert.match(message(gas), /noindex: oczekiwano obecne, jest nieobecne/);
+    assert.match(message(gas), /Post meta jest poprawne, więc to nie jest błąd zapisu/);
+    assert.match(message(gas), /pamięć podręczna strony albo CDN/);
+  });
+
+  test('dyrektywy dokładane przez Rank Math nie są rozjazdem', () => {
+    // Strona oddaje też max-snippet, którego nie ustawiamy; liczy się wyłącznie
+    // decyzja o indeksowaniu i podążaniu za linkami.
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex')],
+      wp: fakeWordPress({ pages: [publishedPage()] })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+  });
+
+  test('szkicu nie sprawdzamy na żywo i mówimy dlaczego', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '8', 'rank_math_robots', 'noindex')],
+      wp: fakeWordPress({ pages: [{ id: 8, slug: 'szkic', status: 'draft', title: 'Szkic' }] })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.match(message(gas), /nie sprawdzono strony na żywo \(strona nie jest opublikowana/);
+  });
+
+  test('nieudane pobranie strony nie zamienia udanego zapisu w błąd', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'noindex')],
+      wp: fakeWordPress({
+        pages: [publishedPage()],
+        failures: { 'GET /home/': { code: 500, text: 'awaria serwera' } }
+      })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.match(message(gas), /nie sprawdzono strony na żywo/);
+  });
+
+  test('tytuł i opis nie uruchamiają sprawdzenia strony, bo nie mają odpowiednika w znaczniku', () => {
+    const gas = project({
+      commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_title', 'Nowy tytuł')],
+      wp: fakeWordPress({ pages: [publishedPage()] })
+    });
+    gas.processWpCommands();
+    assert.equal(status(gas), 'DONE', message(gas));
+    assert.doesNotMatch(message(gas), /na żywo/);
+  });
+});
+
 describe('#98: treść strony ponad limit komórki', () => {
   // Komórka Arkuszy mieści 50 000 znaków. Strona z kreatora bywa dłuższa,
   // a snapshot powstaje PRZED zapisem, więc bez obsługi limitu każda komenda

@@ -17,7 +17,7 @@
  * `failures` pozwala wymusić odpowiedź dla konkretnej trasy: { 'POST /wp-json/wp/v2/pages/7': { code: 500, text: 'boom' } }.
  * Opcja `readBackLies` symuluje WordPress, który przyjął zapis, ale odczyt kontrolny nie odzwierciedla zmiany.
  */
-function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, perPage = 100 } = {}) {
+function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, perPage = 100 } = {}) {
   const state = {
     pages: new Map(pages.map(p => [Number(p.id), normalizePage(p)])),
     media: new Map(media.map(m => [Number(m.id), normalizeMedia(m)])),
@@ -36,7 +36,12 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       // legacyRobotsField: instalacja ze starym snippetem, wystawiająca pole pod
       // historyczną nazwą cc_rank_math_robots (#103).
       legacyRobotsField: Boolean(p.legacyRobotsField),
-      legacyMetaField: Boolean(p.legacyMetaField)
+      legacyMetaField: Boolean(p.legacyMetaField),
+      // Co NAPRAWDĘ serwuje publiczna strona. Zwykle to samo co post meta, ale
+      // stalePageCache odwzorowuje produkcyjny przypadek z #88: meta zapisane,
+      // a strona nadal oddaje stary znacznik, bo zapis przez REST nie unieważnił
+      // pamięci podręcznej.
+      servedRobots: p.robots === undefined ? '' : String(p.robots)
     };
   }
   function normalizeMedia(m) {
@@ -125,7 +130,10 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
         const bad = list.find(d => !allowed.includes(d));
         if (bad) return { code: 400, text: JSON.stringify({ code: 'wp_automation_invalid_robots', message: 'Unsupported robots directive: ' + bad }) };
         const before = page.robots;
-        if (!readBackLies) page.robots = list.join(',');
+        if (!readBackLies) {
+          page.robots = list.join(',');
+          if (!stalePageCache) page.servedRobots = page.robots;
+        }
         return ok({ post_id: page.id, before, robots: page.robots, changed: before !== page.robots });
       }
       return ok({ ok: true });
@@ -146,6 +154,20 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       if (!page) return notFound();
       return ok({ target: { id: page.id, slug: page.slug, status: page.status, link: page.link, title: page.title, modified: page.modified }, changed: method === 'POST' ? ['layout'] : null });
     }
+    // Publiczna strona: minimalny HTML z meta robots, żeby dało się sprawdzić,
+    // co serwis naprawdę oddaje, a nie tylko co ma w bazie (#88).
+    if (method === 'GET') {
+      const page = [...state.pages.values()].find(p => u.pathname === `/${p.slug}/`);
+      if (page && page.status === 'publish') {
+        const robots = page.servedRobots || 'index, follow';
+        return {
+          code: 200,
+          text: `<html><head><title>${page.title}</title><meta name="robots" content="${robots}, max-snippet:-1"></head><body><h1>${page.title}</h1></body></html>`,
+          headers: {}
+        };
+      }
+    }
+
     return { code: 404, text: `no fake route for ${key}` };
   }
 
