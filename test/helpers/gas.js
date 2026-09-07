@@ -330,7 +330,10 @@ function createStubs(opts) {
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: key => (Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null),
-        setProperty: (key, value) => { properties[key] = String(value); }
+        setProperty: (key, value) => { properties[key] = String(value); },
+        // Usunięcie właściwości to nie to samo co zapisanie w niej pustego
+        // tekstu: pusta wartość blokuje edytor Script Properties (#124).
+        deleteProperty: key => { delete properties[key]; }
       })
     },
     UrlFetchApp: {

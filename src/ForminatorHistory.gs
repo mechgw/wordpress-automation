@@ -26,7 +26,11 @@ function armForminatorHistoryWrite() {
 function requireForminatorHistoryWriteApproval_(title, message) {
   const props = PropertiesService.getScriptProperties();
   if (props.getProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP) === 'YES') {
-    props.setProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP, '');
+    // Usuwamy właściwość, zamiast zapisywać w niej pusty tekst. Brak i pusta
+    // wartość znaczą dla kodu to samo, ale edytor Script Properties odmawia
+    // zapisu, gdy którykolwiek wiersz ma pustą wartość, więc zużyta zgoda
+    // blokowała dodanie dowolnej innej właściwości.
+    props.deleteProperty(FORMINATOR_HISTORY_WRITE_APPROVAL_PROP);
     requireWpWrite_({ confirm: 'YES' });
     return true;
   }

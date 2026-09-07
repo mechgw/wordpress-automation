@@ -20,7 +20,13 @@ test('editor: jednorazowe arm pozwala przejść approval bez Spreadsheet UI i je
   assert.deepEqual(plain(gas.armForminatorHistoryWrite()), { armed: true });
   assert.equal(gas.$properties.WP_FORMINATOR_HISTORY_WRITE_APPROVAL, 'YES');
   assert.equal(gas.requireForminatorHistoryWriteApproval_('title', 'message'), true);
-  assert.equal(gas.$properties.WP_FORMINATOR_HISTORY_WRITE_APPROVAL, '');
+  // Zużyta zgoda jest usuwana, a nie zerowana. Pusta wartość blokowałaby edytor
+  // Script Properties przy dodawaniu jakiejkolwiek innej właściwości.
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(gas.$properties, 'WP_FORMINATOR_HISTORY_WRITE_APPROVAL'),
+    false,
+    'właściwość znika, zamiast zostawać z pustą wartością'
+  );
 
   assert.throws(
     () => gas.requireForminatorHistoryWriteApproval_('title', 'message'),
