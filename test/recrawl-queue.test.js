@@ -327,7 +327,11 @@ describe('#92: arkusz, menu i trigger', () => {
     const gas = project({ [INSPECT]: [['URL']] }, { ALERT_EMAIL: 'alerty@example.pl' });
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn).slice(-2), ['kolejkaRecrawl', 'ustawCodziennaKolejkeRecrawl']);
+    // Pozycja i jej instalator stoją obok siebie; po nich zaczyna się sekcja
+    // Business Profile, więc kotwiczymy się na parze, nie na końcu menu.
+    const fns = seo.items.map(i => i.fn);
+    const at = fns.indexOf('kolejkaRecrawl');
+    assert.deepEqual(fns.slice(at, at + 2), ['kolejkaRecrawl', 'ustawCodziennaKolejkeRecrawl']);
 
     const withTrigger = freezeClock(loadProject({ sheets: { [INSPECT]: [['URL']] }, properties: { ALERT_EMAIL: 'alerty@example.pl' }, triggers: ['kolejkaRecrawlTrigger'] }), 2026, 8, 6);
     withTrigger.ustawCodziennaKolejkeRecrawl();

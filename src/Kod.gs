@@ -23,6 +23,9 @@ function onOpen() {
     .addSeparator()
     .addItem('Kolejka recrawl (RECRAWL QUEUE)', 'kolejkaRecrawl')
     .addItem('Włącz codzienną kolejkę recrawl', 'ustawCodziennaKolejkeRecrawl')
+    .addSeparator()
+    .addItem('Przygotuj Business Profile', 'przygotujBusinessProfile')
+    .addItem('Importuj Business Profile', 'importujBusinessProfile')
     .addToUi();
 
     addGa4Menu_();
