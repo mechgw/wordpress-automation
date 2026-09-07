@@ -73,7 +73,7 @@ function sheetCatalog_() {
     // Arkusz człowieka: skrypt nie zapisuje do niego danych, ale go czyta, wymienia
     // w spisie START i może przesunąć jego zakładkę. W katalogu jest po to, żeby
     // START mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl.
-    { name: RECRAWL_CHANGELOG_SHEET, category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' }
+    { name: recrawlChangeLogSheetName_(), category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' }
   ];
 }
 
