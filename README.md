@@ -109,6 +109,8 @@ Potrzebny jest klucz API z Google Cloud, w Script Property `PAGESPEED_API_KEY`, 
 
 Dwie decyzje wpływające na wiarygodność. Brak danych terenowych jest zapisywany jako `INSUFFICIENT_DATA`, nigdy jako zero: zero znaczyłoby wynik doskonały, czyli dokładną odwrotność prawdy. Pomiar laboratoryjny wykonuje trzy próby na adres i strategię, zapisuje każdą osobno i porównuje przez medianę, bo Lighthouse jest zmienny i pojedynczy słaby wynik nie jest dowodem regresji.
 
+Pomiar laboratoryjny ma budżet czasu. Jedno wywołanie PSI trwa kilkanaście do kilkudziesięciu sekund, a przy trzech próbach i dwóch strategiach daje sześć wywołań na adres, więc kilka adresów przekroczyłoby limit czasu wykonania Apps Script. Przebieg mierzy tyle adresów, ile mieści się w budżecie czterech minut, i zapamiętuje, gdzie skończył; kolejny zaczyna od następnego adresu. Przy cyklicznym uruchamianiu wszystkie doczekają się pomiaru, a komunikat mówi, ile zostało na później. Budżet jest sprawdzany przed rozpoczęciem adresu, nie w trakcie, bo mediana z dwóch prób zamiast trzech jest gorsza niż jej brak.
+
 Zapis jest idempotentny: ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować, a historia wcześniejszych okresów zostaje.
 
 ### Google Business Profile
