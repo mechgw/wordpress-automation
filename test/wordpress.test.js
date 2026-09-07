@@ -125,6 +125,35 @@ describe('WordPress.gs response helpers', () => {
     assert.deepEqual(plain(gas.getRankMathData_(null)), Object.assign({ available: false, title: '', description: '' }, noRobots));
   });
 
+  test('#88: bez publicznego adresu i przy błędzie sieci strona nie jest sprawdzana', () => {
+    const noLink = plain(gas.verifyRobotsOnPage_({ status: 'publish', link: '' }, 'noindex'));
+    assert.equal(noLink.checked, false);
+    assert.match(noLink.detail, /brak publicznego adresu/);
+
+    // Pętla przekierowań: seoLiveFetch_ rzuca, a my nie zamieniamy tego
+    // w rozjazd, tylko mówimy wprost, że nie wiemy.
+    const looping = loadProject({
+      properties: BASE_PROPS,
+      fetch: () => ({ code: 301, text: '', headers: { Location: 'https://www.example.pl/a/' } })
+    });
+    const out = plain(looping.verifyRobotsOnPage_({ status: 'publish', link: 'https://www.example.pl/a/' }, 'noindex'));
+    assert.equal(out.checked, false);
+    assert.match(out.detail, /nie udało się pobrać strony: Za dużo przekierowań/);
+  });
+
+  test('#103: tytuł i opis też mają nazwę docelową i awaryjną', () => {
+    const meta = { title: 'T', description: 'D' };
+    const both = plain(gas.getRankMathData_({ wpa_rank_math: meta, cc_rank_math: { title: 'stare', description: 'stare' } }));
+    assert.equal(both.title, 'T', 'przy obu nazwach wygrywa docelowa');
+
+    const legacy = plain(gas.getRankMathData_({ cc_rank_math: meta }));
+    assert.equal(legacy.available, true, 'stary snippet nadal jest obsługiwany');
+    assert.equal(legacy.description, 'D');
+
+    const none = plain(gas.getRankMathData_({}));
+    assert.equal(none.available, false);
+  });
+
   test('#103: nowa nazwa pola jest preferowana, stara działa jako awaryjna', () => {
     const both = plain(gas.getRankMathData_({ cc_rank_math: {}, wpa_rank_math_robots: 'noindex', cc_rank_math_robots: 'follow' }));
     assert.equal(both.robots, 'noindex', 'przy obu nazwach wygrywa docelowa');

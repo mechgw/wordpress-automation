@@ -53,6 +53,8 @@ Opcjonalne:
 
 `UPDATE_RANK_MATH_FIELD` obsługuje `rank_math_title`, `rank_math_description` i `rank_math_robots`. Dwa pierwsze idą przez most `seo-meta`, robots przez endpoint `seo-robots` ze snippetu `wordpress/page-layout-rest-bridge.php` (wersja 1.1.0 i nowsza). Wartość robots wpisuje się jako listę po przecinku, na przykład `noindex,follow`; pusta wartość przywraca domyślne ustawienia Rank Math.
 
+Po zapisie robots skrypt nie poprzestaje na odczycie post meta: pobiera publiczną stronę i sprawdza, co naprawdę serwuje w meta robots. Produkcja pokazała, że sam wpis w bazie nie wystarcza; polecenie kończyło się sukcesem, meta było poprawne, a strona nadal oddawała `index`. Porównywane są wyłącznie decyzje o indeksowaniu i podążaniu za linkami, bo Rank Math dokłada własne dyrektywy, których nie ustawiamy. Rozjazd kończy się błędem wskazującym najczęstszą przyczynę, czyli pamięć podręczną strony albo CDN, których zapis przez REST nie unieważnia. Szkic i strona, której nie udało się pobrać, nie są sprawdzane, a polecenie mówi o tym wprost zamiast udawać potwierdzenie.
+
 Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noimageindex`, `nosnippet`. Cokolwiek innego, a także pary sprzeczne (`index` z `noindex`, `follow` z `nofollow`), są odrzucane po stronie skryptu, zanim powstanie snapshot i zanim jakiekolwiek żądanie opuści Apps Script. Zapis przechodzi normalną ścieżką: snapshot przed zmianą, odczyt kontrolny po zmianie (kolejność dyrektyw nie ma znaczenia), możliwość cofnięcia przez `RESTORE_SNAPSHOT`. Na instalacji ze starszym snippetem komenda odmawia z komunikatem wskazującym plik do aktualizacji, a *WordPress → Test Rank Math bridge* pokazuje brak obsługi robots.
 
 ### Układ repozytorium
@@ -108,6 +110,16 @@ Zakresu celowo jeszcze nie ma w `appsscript.json`: dopisanie go wymusza ponowną
 Lokalizacja pochodzi ze Script Property `GBP_LOCATION` w formacie `locations/<id>`, więc identyfikator instalacji nie trafia do repozytorium. Import jest idempotentny: ponowne uruchomienie tego samego zakresu podmienia wiersze zamiast je dublować, a backfill starszego okresu nie kasuje nowszych danych.
 
 Dwie decyzje wpływające na dane. Brak wartości w odpowiedzi nie jest zamieniany na zero, bo API pomija dni bez pomiaru, a to nie to samo co dzień z zerem. Frazy rozróżniają wartość dokładną od progu, poniżej którego Google nie podaje liczby; potraktowanie progu jak liczby zawyżałoby sumy.
+
+### Zmiany oczekujące na wykonanie
+
+`SEO LIVE` i kolejka `WP COMMANDS` działały niezależnie, co dawało wyścig: polecenie przygotowane wieczorem, poranny live check widzi jeszcze stary stan i wysyła alert o regresji, a polecenie wykonuje się później tego samego dnia. Alert jest wtedy prawdziwy, ale bezużyteczny, bo system zna już zamierzony stan.
+
+Live check rozpoznaje więc różnicę, którą naprawi przygotowana zmiana, i oznacza wiersz jako `PENDING CHANGE` z numerem oczekującego polecenia, zamiast zgłaszać regresję. Po upływie progu, domyślnie 48 godzin i konfigurowalnego przez Script Property `SEO_LIVE_PENDING_GRACE_HOURS`, niewykonane polecenie samo staje się alertem: cisza bez końca byłaby gorsza niż fałszywy alarm.
+
+Wyciszenie jest celowo wąskie, bo tłumienie prawdziwej regresji jest znacznie gorsze niż jeden alert za dużo. Tłumione są wyłącznie różnice pokryte jawnie wymienioną parą akcji i pola: robots i tytuł SEO z `UPDATE_RANK_MATH_FIELD` oraz status z `PUBLISH_PAGE`. Polecenie musi mieć `confirm=YES` i status `PENDING`; tryb próbny, brak potwierdzenia i polecenie już wykonane nie wyciszają niczego. Adres jest dopasowywany po identyfikatorze strony odczytanym z WordPressa, nie po podobieństwie tekstu, a jedna niewyjaśniona różnica znosi wyciszenie całego wiersza.
+
+Monitoring pozostaje read-only wobec WordPressa. Nic z tego mechanizmu nie wykonuje poleceń, nie omija `WP_ALLOW_WRITES` ani potwierdzenia; prawo do zapisu zostaje wyłącznie w kontrakcie `WP COMMANDS`.
 
 ### Semantyczne kontrole JSON-LD
 
@@ -205,7 +217,9 @@ Z tej listy brakujące adresy trafiają do `SEO LIVE` i `URL INSPEKCJA`, po jedn
 
 Zmieniona strona jest widoczna dla użytkowników od razu, ale w wynikach Google dopiero po ponownym crawlu. *SEO / GSC → Kolejka recrawl (RECRAWL QUEUE)* zestawia datę zmiany z datą ostatniego crawla i mówi, co z tego wynika. Nic nie jest zgłaszane do Google automatycznie: dla zwykłych stron nie ma publicznego API odpowiadającego przyciskowi *Poproś o zindeksowanie*, a Indexing API jest przeznaczone dla innych typów treści. To narzędzie tylko wskazuje, którą stronę zgłosić ręcznie.
 
-Wszystko liczone jest z danych, które już są w pliku, bez ani jednego zapytania do API: `lastmod` z `SITEMAP URLS`, ręczny arkusz `Dziennik zmian` (jeśli ma kolumnę z adresem i kolumnę z datą; nowsza data wygrywa z `lastmod`), ostatni crawl i werdykt z `URL INSPEKCJA`, stan produkcyjny z `SEO LIVE`.
+Nazwę arkusza rejestru zmian ustawia Script Property `CHANGE_LOG_SHEET_NAME`; bez niej obowiązuje dotychczasowa `Dziennik zmian`, więc istniejąca instalacja nie wymaga migracji. Bezpieczna kolejność przy zmianie nazwy to najpierw ustawienie właściwości, potem przemianowanie zakładki, na końcu uruchomienie kolejki i sprawdzenie kolumny ze źródłem daty. Brak wskazanego arkusza jest zgłaszany jego nazwą w raporcie, a nie zastępowany pustym źródłem dat: cicha pustka wyglądałaby jak brak zmian, co jest fałszem.
+
+Wszystko liczone jest z danych, które już są w pliku, bez ani jednego zapytania do API: `lastmod` z `SITEMAP URLS`, ręczny rejestr zmian (jeśli ma kolumnę z adresem i kolumnę z datą; nowsza data wygrywa z `lastmod`), ostatni crawl i werdykt z `URL INSPEKCJA`, stan produkcyjny z `SEO LIVE`.
 
 | Status | Kiedy |
 | --- | --- |
@@ -228,7 +242,7 @@ Rekomendacje dostają wyłącznie adresy z sitemapy, czyli te przeznaczone do in
 
 Plik ma ponad dwadzieścia zakładek i zyskuje kolejną z każdą funkcją, więc kolejność utrzymuje skrypt, nie ręka. *Dane → Uporządkuj arkusze* koloruje zakładki kategoriami (monitoring zielony, sterowanie pomarańczowy, konfiguracja szary, dane surowe prawie czarny, `START` fioletowy), ustawia zakładki w tej kolejności i przepisuje arkusz `START`: wiersz na każdą zakładkę z linkiem, kategorią, informacją, kto ją prowadzi (człowiek / skrypt / oba) i jednym zdaniem o tym, co tam należy. Działanie jest idempotentne, więc drugie uruchomienie zgłasza, że nic się nie zmieniło.
 
-Katalogowane są arkusze, które tworzy sam skrypt (`SheetCatalog.gs`, jeden wpis na arkusz), oraz te arkusze człowieka, z których skrypt czyta: `Dziennik zmian` ma wpis w kategorii *Analiza (arkusze własne)*, żeby `START` mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl. **Twoje własne arkusze nigdy nie są przekolorowane ani ukryte**, także te opisane w katalogu; zachowują kolejność względną i stoją zaraz za `START`, bo to je czyta się codziennie. Nowa funkcja tworząca arkusz dodaje jeden wpis do katalogu, inaczej arkusz wyląduje wśród niezarządzanych. Nazwy arkuszy GA4 nadpisane w `Konfiguracja GA4` (`landingSheet`, `eventsSheet`, `businessEventsSheet`, `adsSheet`) katalog rozpoznaje po aktualnej konfiguracji, nie po wartościach domyślnych. Arkusz `START` o cudzej treści nigdy nie jest kasowany: skrypt rozpoznaje własny spis po podpisie w A1, a przy zbiegu nazw odmawia i prosi o zmianę nazwy albo opróżnienie zakładki.
+Katalogowane są arkusze, które tworzy sam skrypt (`SheetCatalog.gs`, jeden wpis na arkusz), oraz te arkusze człowieka, z których skrypt czyta: ręczny rejestr zmian ma wpis w kategorii *Analiza (arkusze własne)*, żeby `START` mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl. **Twoje własne arkusze nigdy nie są przekolorowane ani ukryte**, także te opisane w katalogu; zachowują kolejność względną i stoją zaraz za `START`, bo to je czyta się codziennie. Nowa funkcja tworząca arkusz dodaje jeden wpis do katalogu, inaczej arkusz wyląduje wśród niezarządzanych. Nazwy arkuszy GA4 nadpisane w `Konfiguracja GA4` (`landingSheet`, `eventsSheet`, `businessEventsSheet`, `adsSheet`) katalog rozpoznaje po aktualnej konfiguracji, nie po wartościach domyślnych. Arkusz `START` o cudzej treści nigdy nie jest kasowany: skrypt rozpoznaje własny spis po podpisie w A1, a przy zbiegu nazw odmawia i prosi o zmianę nazwy albo opróżnienie zakładki.
 
 Dane surowe i logi domyślnie zostają widoczne. *Dane → Ukryj arkusze techniczne* chowa `GSC RAW`, surowe zakładki GA4 i `IMPORT LOG`; *Pokaż arkusze techniczne* przywraca je. Ukrywanie jest celowo osobną pozycją menu, nie efektem ubocznym porządkowania, a importy działają na ukrytych arkuszach bez zmian.
 

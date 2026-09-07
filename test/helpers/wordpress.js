@@ -7,7 +7,7 @@
  * Obsługiwane trasy (prefiks bazy dowolny):
  *   GET  /wp-json/wp/v2/pages?slug=…            lista stron o slugu (po statusie z query, jeśli podano)
  *   GET  /wp-json/wp/v2/pages?status=…&page=N   stronicowana lista (nagłówek X-WP-TotalPages)
- *   GET  /wp-json/wp/v2/pages/:id               jedna strona (context=edit → pola raw + cc_rank_math)
+ *   GET  /wp-json/wp/v2/pages/:id               jedna strona (context=edit → pola raw + wpa_rank_math)
  *   POST /wp-json/wp/v2/pages                   utworzenie (nadaje id)
  *   POST /wp-json/wp/v2/pages/:id               aktualizacja pól title/excerpt/content/status/slug
  *   GET  /wp-json/wp/v2/media/:id, /media?search=…
@@ -17,7 +17,7 @@
  * `failures` pozwala wymusić odpowiedź dla konkretnej trasy: { 'POST /wp-json/wp/v2/pages/7': { code: 500, text: 'boom' } }.
  * Opcja `readBackLies` symuluje WordPress, który przyjął zapis, ale odczyt kontrolny nie odzwierciedla zmiany.
  */
-function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, perPage = 100 } = {}) {
+function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, perPage = 100 } = {}) {
   const state = {
     pages: new Map(pages.map(p => [Number(p.id), normalizePage(p)])),
     media: new Map(media.map(m => [Number(m.id), normalizeMedia(m)])),
@@ -35,7 +35,13 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false,
       // legacyRobotsField: instalacja ze starym snippetem, wystawiająca pole pod
       // historyczną nazwą cc_rank_math_robots (#103).
-      legacyRobotsField: Boolean(p.legacyRobotsField)
+      legacyRobotsField: Boolean(p.legacyRobotsField),
+      legacyMetaField: Boolean(p.legacyMetaField),
+      // Co NAPRAWDĘ serwuje publiczna strona. Zwykle to samo co post meta, ale
+      // stalePageCache odwzorowuje produkcyjny przypadek z #88: meta zapisane,
+      // a strona nadal oddaje stary znacznik, bo zapis przez REST nie unieważnił
+      // pamięci podręcznej.
+      servedRobots: p.robots === undefined ? '' : String(p.robots)
     };
   }
   function normalizeMedia(m) {
@@ -45,10 +51,15 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       mime_type: m.mime_type || 'image/jpeg', modified: m.modified || '2026-09-01T00:00:00', media_details: m.media_details || { width: 800, height: 600 }
     };
   }
+  /** Nazwa pola z tytułem i opisem: docelowa albo historyczna (#103). */
+  const rankMathField_ = p => {
+    const value = { title: p.rankMath.title, description: p.rankMath.description };
+    return p.legacyMetaField ? { cc_rank_math: value } : { wpa_rank_math: value };
+  };
   const pageJson = p => ({
     id: p.id, slug: p.slug, status: p.status, link: p.link,
     title: { raw: p.title, rendered: p.title }, excerpt: { raw: p.excerpt, rendered: p.excerpt }, content: { raw: p.content, rendered: p.content },
-    modified: p.modified, ...(p.hasRankMath ? { cc_rank_math: { title: p.rankMath.title, description: p.rankMath.description } } : {}),
+    modified: p.modified, ...(p.hasRankMath ? rankMathField_(p) : {}),
     ...(p.hasRobots ? (p.legacyRobotsField ? { cc_rank_math_robots: p.robots } : { wpa_rank_math_robots: p.robots }) : {})
   });
   const mediaJson = m => ({
@@ -119,7 +130,10 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
         const bad = list.find(d => !allowed.includes(d));
         if (bad) return { code: 400, text: JSON.stringify({ code: 'wp_automation_invalid_robots', message: 'Unsupported robots directive: ' + bad }) };
         const before = page.robots;
-        if (!readBackLies) page.robots = list.join(',');
+        if (!readBackLies) {
+          page.robots = list.join(',');
+          if (!stalePageCache) page.servedRobots = page.robots;
+        }
         return ok({ post_id: page.id, before, robots: page.robots, changed: before !== page.robots });
       }
       return ok({ ok: true });
@@ -140,6 +154,20 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       if (!page) return notFound();
       return ok({ target: { id: page.id, slug: page.slug, status: page.status, link: page.link, title: page.title, modified: page.modified }, changed: method === 'POST' ? ['layout'] : null });
     }
+    // Publiczna strona: minimalny HTML z meta robots, żeby dało się sprawdzić,
+    // co serwis naprawdę oddaje, a nie tylko co ma w bazie (#88).
+    if (method === 'GET') {
+      const page = [...state.pages.values()].find(p => u.pathname === `/${p.slug}/`);
+      if (page && page.status === 'publish') {
+        const robots = page.servedRobots || 'index, follow';
+        return {
+          code: 200,
+          text: `<html><head><title>${page.title}</title><meta name="robots" content="${robots}, max-snippet:-1"></head><body><h1>${page.title}</h1></body></html>`,
+          headers: {}
+        };
+      }
+    }
+
     return { code: 404, text: `no fake route for ${key}` };
   }
 

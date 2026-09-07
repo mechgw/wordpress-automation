@@ -229,7 +229,7 @@ function testWpConnection() {
 
 function testRankMathBridge() {
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
+    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -242,9 +242,9 @@ function testRankMathBridge() {
   }
 
   const page = pages[0];
-  if (!Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')) {
+  if (!rankMathFieldName_(page)) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST bridge” po stronie WordPressa.'
+      'Brak pola z SEO title i description w REST API. Wgraj snippet seo-meta-rest-bridge.php po stronie WordPressa.'
     );
   }
 
@@ -522,7 +522,7 @@ function getPageBySlug_(slug, commandId) {
     '/wp-json/wp/v2/pages' +
     '?slug=' + encodeURIComponent(slug) +
     '&context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -556,7 +556,7 @@ function getPageRawById_(id, requireRankMath = false) {
   const path =
     '/wp-json/wp/v2/pages/' + encodeURIComponent(id) +
     '?context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -566,12 +566,9 @@ function getPageRawById_(id, requireRankMath = false) {
 
   const page = response.json || {};
 
-  if (
-    requireRankMath &&
-    !Object.prototype.hasOwnProperty.call(page, 'cc_rank_math')
-  ) {
+  if (requireRankMath && !rankMathFieldName_(page)) {
     throw new Error(
-      'Brak pola cc_rank_math w REST API. Włącz snippet „Rank Math REST read” po stronie WordPressa.'
+      'Brak pola z SEO title i description w REST API. Wgraj snippet seo-meta-rest-bridge.php po stronie WordPressa.'
     );
   }
 
@@ -610,7 +607,7 @@ function getAllPages_(commandId) {
         '&page=' + pageNo +
         '&orderby=id' +
         '&order=asc' +
-        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
 
       const response = wpFetch_(path);
 
@@ -1002,9 +999,10 @@ function savePageResult_(page, commandId) {
 }
 
 function getRankMathData_(page) {
-  const available = Object.prototype.hasOwnProperty.call(page || {}, 'cc_rank_math');
-  const raw = available && page.cc_rank_math && typeof page.cc_rank_math === 'object'
-    ? page.cc_rank_math
+  const metaField = rankMathFieldName_(page);
+  const available = Boolean(metaField);
+  const raw = available && page[metaField] && typeof page[metaField] === 'object'
+    ? page[metaField]
     : {};
 
   // Robots idzie osobnym polem REST, bo dodaje je nasz snippet z repozytorium,
@@ -1030,12 +1028,81 @@ function getRankMathData_(page) {
  */
 const WP_ROBOTS_FIELDS = ['wpa_rank_math_robots', 'cc_rank_math_robots'];
 
+/**
+ * Sprawdza, co publiczna strona NAPRAWDĘ serwuje w meta robots (#88).
+ *
+ * Odczyt kontrolny przez REST potwierdza jedynie, że post meta ma nową wartość.
+ * Produkcja pokazała, że to za mało: komenda kończyła się DONE, meta było
+ * poprawne, w edytorze „No Index” było zaznaczone, a strona nadal oddawała
+ * `index, follow`. Znaczenie biznesowe ma znacznik na stronie, nie wpis w bazie,
+ * więc to jego sprawdzamy.
+ *
+ * Porównujemy wyłącznie decyzje o indeksowaniu i podążaniu za linkami, bo Rank
+ * Math dokłada do znacznika własne dyrektywy (max-snippet i podobne), których
+ * nie ustawiamy i których obecność nie jest rozjazdem.
+ */
+function verifyRobotsOnPage_(page, expectedRobots) {
+  if (String(page && page.status) !== 'publish') {
+    return { checked: false, detail: 'strona nie jest opublikowana, więc nie ma czego sprawdzić na żywo' };
+  }
+  const link = String((page && page.link) || '').trim();
+  if (!link) {
+    return { checked: false, detail: 'brak publicznego adresu strony w odpowiedzi REST' };
+  }
+
+  let served;
+  try {
+    const fetched = seoLiveFetch_(link);
+    // Odpowiedź nie-2xx to brak możliwości sprawdzenia, a nie strona bez
+    // noindex: strona błędu nie ma znacznika i udawałaby rozjazd.
+    if (fetched.code < 200 || fetched.code >= 300) {
+      return { checked: false, detail: 'strona odpowiedziała HTTP ' + fetched.code };
+    }
+    served = seoLiveExtract_(fetched.html, fetched.headers).robots;
+  } catch (e) {
+    // Brak możliwości sprawdzenia to nie to samo co rozjazd: nie zamieniamy
+    // udanego zapisu w błąd, ale mówimy wprost, że nie wiemy.
+    return { checked: false, detail: 'nie udało się pobrać strony: ' + String(e && e.message ? e.message : e).slice(0, 200) };
+  }
+
+  const expected = robotsList_(expectedRobots);
+  const problems = [];
+  ['noindex', 'nofollow'].forEach(function (directive) {
+    const want = expected.indexOf(directive) >= 0;
+    const has = served.indexOf(directive) >= 0;
+    if (want !== has) {
+      problems.push(directive + ': oczekiwano ' + (want ? 'obecne' : 'nieobecne') + ', jest ' + (has ? 'obecne' : 'nieobecne'));
+    }
+  });
+
+  return {
+    checked: true,
+    matches: problems.length === 0,
+    served: served || 'brak meta robots',
+    detail: problems.join('; ')
+  };
+}
+
 /** Opis stanu mostu robots do testu z menu: nazwa pola albo powód braku. */
 function robotsBridgeStatusText_(page) {
   const field = robotsFieldName_(page);
   if (!field) return 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie';
   if (field === WP_ROBOTS_FIELDS[0]) return 'OK (pole ' + field + ')';
   return 'OK, ale przez starą nazwę pola (' + field + '). Wgraj nowszy snippet page-layout-rest-bridge.php.';
+}
+
+/**
+ * Nazwy pola REST z tytułem i opisem SEO, w kolejności preferencji (#103).
+ * Ta sama zasada co przy robots: `wpa_` jest docelowe, `cc_` historyczne.
+ */
+const WP_RANK_MATH_META_FIELDS = ['wpa_rank_math', 'cc_rank_math'];
+
+/** Która z nazw pola z tytułem i opisem jest obecna w odpowiedzi; '' gdy żadna. */
+function rankMathFieldName_(page) {
+  const found = WP_RANK_MATH_META_FIELDS.filter(function (name) {
+    return Object.prototype.hasOwnProperty.call(page || {}, name);
+  });
+  return found.length ? found[0] : '';
 }
 
 /** Która z nazw pola robots jest obecna w odpowiedzi; '' gdy żadna. */
@@ -1177,12 +1244,31 @@ function updateRankMathField_(command) {
     );
   }
 
+  // Dla robots samo post meta nie wystarcza: liczy się znacznik na stronie (#88).
+  let liveNote = '';
+  if (isRobots) {
+    const live = verifyRobotsOnPage_(after, robotsValue);
+    if (live.checked && !live.matches) {
+      throw new Error(
+        'Rank Math zapisał robots, ale publiczna strona nadal serwuje co innego. ' +
+        live.detail + '. Strona oddaje: „' + live.served + '”. ' +
+        'Post meta jest poprawne, więc to nie jest błąd zapisu. Najczęstsza przyczyna to ' +
+        'pamięć podręczna strony albo CDN, których zapis przez REST nie unieważnia, w odróżnieniu ' +
+        'od zapisu z edytora. Wyczyść cache dla tego adresu i sprawdź ponownie; jeśli to nie pomoże, ' +
+        'otwórz stronę w edytorze i zapisz ją ręcznie.'
+      );
+    }
+    liveNote = live.checked
+      ? ' Strona na żywo potwierdza ustawienie.'
+      : ' UWAGA: nie sprawdzono strony na żywo (' + live.detail + ').';
+  }
+
   const saved = savePageResult_(after, command.id);
   saved.httpCode = response.code;
   saved.message =
     'Zaktualizowano ' + command.field +
     ' strony ID ' + command.target +
-    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
+    '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot) + liveNote;
 
   return saved;
 }

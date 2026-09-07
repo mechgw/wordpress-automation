@@ -17,6 +17,21 @@ It deliberately exposes only three GeneratePress page-level settings:
 
 The write endpoint copies presence as well as value. If the source page does not have a whitelisted meta key, a stale value on the target page is deleted. The response is then read back and compared before success is returned.
 
+## Rank Math SEO meta bridge
+
+`seo-meta-rest-bridge.php` implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-meta` and the read-only REST field carrying the Rank Math SEO title and description. Until #103 this bridge existed only as a snippet inside the installation, outside version control, which is why its field name still carried a company-derived prefix.
+
+The field is registered under two names from a single definition: `wpa_rank_math` (target) and `cc_rank_math` (historical, kept only while installations catch up). The script reads the target name and falls back to the historical one, so the snippet and the script can be updated in either order.
+
+Design notes:
+
+- only `rank_math_title` and `rank_math_description` may be written; anything else is a 400 before any write, so the bridge cannot become a door to arbitrary post meta;
+- an empty value deletes the meta, which for Rank Math means falling back to the template rather than setting an empty title;
+- the write is verified by reading the meta back, exactly like the layout copy and the robots bridge;
+- permissions check input first (400), then whether the page exists (404), then `edit_post`; otherwise a nonexistent id would look like a permissions problem.
+
+**Before replacing your current snippet, compare it with this file.** This version reproduces the contract `WordPress.gs` relies on, but your installation may carry extra behaviour that is not visible from the client side.
+
 ## Rank Math robots bridge
 
 The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and a read-only REST field with the robots value on pages. The field is registered under two names: `wpa_rank_math_robots` (target name, matching the function prefix in this file) and `cc_rank_math_robots` (historical name, kept only while installations catch up). The script reads the target name and falls back to the historical one; *WordPress → Test Rank Math bridge* says which one the installation exposes. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
