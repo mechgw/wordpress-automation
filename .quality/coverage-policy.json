@@ -121,6 +121,11 @@
       "pattern": "src/PendingChanges.gs",
       "threshold": 95,
       "rationale": "Nowy w #130 z pełnym pokryciem: mapowanie pól na różnice, dopasowanie po adresie, próg oczekiwania i warunki, które NIE wyciszają alertu."
+    },
+    {
+      "pattern": "src/Performance.gs",
+      "threshold": 95,
+      "rationale": "Nowy w #124 z pełnym pokryciem: konfiguracja, CrUX z INSUFFICIENT_DATA, PSI z próbami i medianą, upsert i rozróżnione powody odmowy."
     }
   ]
 }

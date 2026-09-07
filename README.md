@@ -99,6 +99,18 @@ Próg nieaktualności jest ustawiany per zadanie: doba z okładem dla zadań cod
 
 Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorujące bez zainstalowanego triggera, które nigdy nie działało, jest nieużywane, a nie zepsute, i milczy. Zadanie z triggerem, które jeszcze nie zapisało przebiegu, dostaje swój własny próg na pierwsze uruchomienie: tak wygląda instalacja tuż po włączeniu monitoringu, gdzie trigger jest od dawna, a znacznik dopiero się pojawił. Dopiero gdy próg minie bez ani jednego przebiegu, otwiera się incydent. Brak importu jest zgłaszany zawsze, bo import jest zawsze oczekiwany. Drugi wyjątek to sam strażnik alertów: gdyby stanął, nie miałby jak zgłosić własnej awarii, więc wykrywa go diagnostyka sprawdzająca zainstalowane triggery.
 
+### Pomiar wydajności: CrUX i PageSpeed Insights
+
+*SEO / GSC → Przygotuj pomiar wydajności* zakłada trzy zakładki: `PERFORMANCE URLS` z listą monitorowanych adresów, `CWV FIELD` z danymi terenowymi i `PAGESPEED LAB` z pomiarami laboratoryjnymi. *Zmierz wydajność* uruchamia oba pomiary.
+
+Potrzebny jest klucz API z Google Cloud, w Script Property `PAGESPEED_API_KEY`, z włączonymi PageSpeed Insights API oraz Chrome UX Report API. Obie usługi działają na klucz w parametrze zapytania, bez OAuth, więc włączenie tej funkcji nie wymaga ponownej autoryzacji projektu.
+
+**Dane terenowe i laboratoryjne są trzymane osobno i nigdy nie uśredniane w jedną liczbę.** CrUX pokazuje, co przeżyli prawdziwi użytkownicy, PSI to jeden przebieg Lighthouse na maszynie Google. Zlepienie ich dałoby wskaźnik, który nie znaczy nic.
+
+Dwie decyzje wpływające na wiarygodność. Brak danych terenowych jest zapisywany jako `INSUFFICIENT_DATA`, nigdy jako zero: zero znaczyłoby wynik doskonały, czyli dokładną odwrotność prawdy. Pomiar laboratoryjny wykonuje trzy próby na adres i strategię, zapisuje każdą osobno i porównuje przez medianę, bo Lighthouse jest zmienny i pojedynczy słaby wynik nie jest dowodem regresji.
+
+Zapis jest idempotentny: ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować, a historia wcześniejszych okresów zostaje.
+
 ### Google Business Profile
 
 Import wydajności i miesięcznych fraz wyszukiwania do zakładek `GBP PERFORMANCE RAW` i `GBP SEARCH KEYWORDS`. *SEO / GSC → Przygotuj Business Profile* zakłada obie i mówi, czego jeszcze brakuje do uruchomienia.

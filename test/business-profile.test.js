@@ -230,6 +230,10 @@ describe('#123: menu', () => {
     const gas = project();
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn).slice(-2), ['przygotujBusinessProfile', 'importujBusinessProfile']);
+    // Po sekcji Business Profile zaczyna się pomiar wydajności, więc kotwiczymy
+    // się na parze, a nie na końcu menu.
+    const fns = seo.items.map(i => i.fn);
+    const at = fns.indexOf('przygotujBusinessProfile');
+    assert.deepEqual(fns.slice(at, at + 2), ['przygotujBusinessProfile', 'importujBusinessProfile']);
   });
 });
