@@ -220,7 +220,7 @@ function seoLiveIndexLookup_() {
  */
 function runSeoLiveCheck_() {
   const sheet = ensureSheetWithHeader_(SEO_LIVE_SHEET, SEO_LIVE_HEADER);
-  const summary = { checked: 0, ok: 0, warnings: 0, errors: 0, empty: false, problems: [], newProblems: [] };
+  const summary = { checked: 0, ok: 0, warnings: 0, errors: 0, pending: 0, empty: false, problems: [], newProblems: [] };
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
     summary.empty = true;
@@ -232,7 +232,12 @@ function runSeoLiveCheck_() {
   const index = seoLiveIndexLookup_();
   // Reguły semantyczne czytamy raz na przebieg, nie raz na adres (#110).
   const schemaExpectations = schemaExpectations_();
-  const now = formatImportTime_(new Date().toISOString());
+  // Oczekujące, zatwierdzone polecenia: różnica, którą naprawi przygotowana
+  // zmiana, nie powinna budzić alertu o regresji (#130). Tu potrzebna jest
+  // prawdziwa data do liczenia wieku polecenia, a nie sformatowany czas wpisu.
+  const startedAt = new Date();
+  const pending = pendingChangeIndex_(startedAt);
+  const now = formatImportTime_(startedAt.toISOString());
 
   values.forEach((line, i) => {
     const url = String(line[0] || '').trim();
@@ -246,10 +251,28 @@ function runSeoLiveCheck_() {
       const expect = seoLiveExpectations_(line);
       expect.schemaRules = schemaRulesFor_(schemaExpectations, url);
       const diffs = seoLiveCompare_(url, expect, fetched, seoLiveExtract_(fetched.html, fetched.headers));
-      result = diffs.length ? 'UWAGA: ' + diffs.length + ' różnic(e)' : 'OK';
+      const change = classifyPendingChange_(diffs, pending[seoLiveNormalizeUrl_(url)]);
       details = diffs.join('; ');
       summary.checked++;
-      if (diffs.length) summary.warnings++; else summary.ok++;
+
+      if (!diffs.length) {
+        result = 'OK';
+        summary.ok++;
+      } else if (change.covered && !change.overdue) {
+        // Zmiana jest przygotowana i zatwierdzona: to nie jest regresja, tylko
+        // stan przejściowy. Wiersz mówi wprost, które polecenie na to czeka.
+        result = 'PENDING CHANGE: ' + diffs.length + ' różnic(e)';
+        details = details + ' | oczekuje polecenie: ' + change.ids.join(', ');
+        summary.pending++;
+      } else if (change.covered) {
+        result = 'UWAGA: zmiana oczekuje zbyt długo';
+        details = details + ' | polecenie ' + change.ids.join(', ') +
+          ' czeka dłużej niż ' + change.grace + ' h i nadal nie zostało wykonane';
+        summary.warnings++;
+      } else {
+        result = 'UWAGA: ' + diffs.length + ' różnic(e)';
+        summary.warnings++;
+      }
     } catch (e) {
       result = 'BŁĄD';
       details = String(e && e.message ? e.message : e);
@@ -257,7 +280,9 @@ function runSeoLiveCheck_() {
     }
     const indexVerdict = index[seoLiveNormalizeUrl_(url)] || 'brak w ' + URL_INSPECTION_SHEET;
     sheet.getRange(i + 2, 9, 1, 4).setValues([[result, details, now, indexVerdict]]);
-    if (result !== 'OK') {
+    // PENDING CHANGE nie jest problemem: zmiana jest znana i zatwierdzona,
+    // a alert o niej byłby powtórzeniem tego, co i tak wiadomo z kolejki.
+    if (result !== 'OK' && result.indexOf('PENDING CHANGE') !== 0) {
       const lineText = url + ': ' + result + (details ? ' – ' + details : '');
       summary.problems.push(lineText);
       if (previous === '' || previous === 'OK') summary.newProblems.push(lineText);
@@ -273,7 +298,9 @@ function seoLiveSummaryText_(summary) {
   }
   const lines = [
     'Live SEO check (stan opublikowanej strony teraz; stan w indeksie Google jest w kolumnie L):',
-    'Sprawdzono: ' + (summary.checked + summary.errors) + ' | OK: ' + summary.ok + ' | UWAGA: ' + summary.warnings + ' | BŁĄD: ' + summary.errors
+    'Sprawdzono: ' + (summary.checked + summary.errors) + ' | OK: ' + summary.ok +
+      ' | UWAGA: ' + summary.warnings + ' | BŁĄD: ' + summary.errors +
+      (summary.pending ? ' | ZMIANA OCZEKUJE: ' + summary.pending : '')
   ];
   if (summary.problems.length) {
     lines.push('');
