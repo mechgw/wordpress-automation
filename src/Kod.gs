@@ -26,6 +26,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Przygotuj Business Profile', 'przygotujBusinessProfile')
     .addItem('Importuj Business Profile', 'importujBusinessProfile')
+    .addItem('Przygotuj pomiar wydajności', 'przygotujPomiarWydajnosci')
+    .addItem('Zmierz wydajność (CrUX + PSI)', 'zmierzWydajnosc')
     .addToUi();
 
     addGa4Menu_();
