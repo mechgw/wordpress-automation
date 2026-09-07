@@ -8,7 +8,8 @@
  *
  * Wszystko liczone z danych, które już mamy, bez żadnego zapytania do API:
  *   `SITEMAP URLS`   – `lastmod`, czyli data zmiany wg witryny,
- *   `Dziennik zmian` – ręczny rejestr zmian (nadpisuje `lastmod`, gdy nowszy),
+ *   rejestr zmian – ręczny arkusz (nadpisuje `lastmod`, gdy nowszy); nazwa
+ *     z CHANGE_LOG_SHEET_NAME, domyślnie `Dziennik zmian`,
  *   `URL INSPEKCJA`  – ostatni crawl i werdykt Google,
  *   `SEO LIVE`       – stan produkcyjny i celowe wyjątki (noindex, przekierowania).
  *
@@ -19,7 +20,19 @@
 
 const RECRAWL_SHEET = 'RECRAWL QUEUE';
 /** Ręczny rejestr zmian prowadzony przez człowieka; rozpoznawany po nagłówkach. */
-const RECRAWL_CHANGELOG_SHEET = 'Dziennik zmian';
+/**
+ * Domyślna nazwa ręcznego rejestru zmian. Instalacja może użyć własnej przez
+ * Script Property CHANGE_LOG_SHEET_NAME (#126): repozytorium jest publiczne
+ * i nie powinno znać nazwy procesu konkretnej firmy, a w cudzej instalacji
+ * „Dziennik zmian” może już znaczyć co innego.
+ */
+const RECRAWL_CHANGELOG_DEFAULT = 'Dziennik zmian';
+
+/** Nazwa arkusza rejestru zmian: skonfigurowana albo domyślna. */
+function recrawlChangeLogSheetName_() {
+  const configured = String(PropertiesService.getScriptProperties().getProperty('CHANGE_LOG_SHEET_NAME') || '').trim();
+  return configured || RECRAWL_CHANGELOG_DEFAULT;
+}
 const RECRAWL_HEADER = [
   'URL',
   'Data zmiany',
@@ -91,20 +104,23 @@ function recrawlSitemapIndex_() {
 }
 
 /**
- * Najnowsza data zmiany per URL z arkusza `Dziennik zmian`. Arkusz jest ręczny,
+ * Najnowsza data zmiany per URL z ręcznego rejestru zmian. Arkusz jest ręczny,
  * więc kolumny rozpoznajemy po nagłówku: pierwsza z „url” i pierwsza z „data”.
  * Brak którejkolwiek = dziennik jest pomijany, co raport mówi wprost.
  */
 function recrawlChangeLog_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(RECRAWL_CHANGELOG_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return { used: false, reason: 'brak arkusza „' + RECRAWL_CHANGELOG_SHEET + '”', map: {} };
+  const sheetName = recrawlChangeLogSheetName_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  // Brak arkusza jest zgłaszany, a nie zastępowany pustym źródłem dat: cicha
+  // pustka wyglądałaby jak „nic się nie zmieniło”, co jest fałszem.
+  if (!sheet || sheet.getLastRow() < 2) return { used: false, reason: 'brak arkusza „' + sheetName + '”', map: {} };
 
   const width = Math.min(sheet.getLastColumn(), 26);
   const header = sheet.getRange(1, 1, 1, width).getValues()[0].map(h => String(h || '').toLowerCase());
   const urlCol = header.findIndex(h => h.indexOf('url') >= 0 || h.indexOf('adres') >= 0);
   const dateCol = header.findIndex(h => h.indexOf('data') >= 0);
   if (urlCol < 0 || dateCol < 0) {
-    return { used: false, reason: 'nie znaleziono kolumn z adresem i datą w „' + RECRAWL_CHANGELOG_SHEET + '”', map: {} };
+    return { used: false, reason: 'nie znaleziono kolumn z adresem i datą w „' + sheetName + '”', map: {} };
   }
 
   const map = {};
@@ -169,7 +185,7 @@ function classifyRecrawl_(url, inspection, sitemap, live, changedAt, nowMs, stal
     };
   }
   if (changedAt === null) {
-    return { status: RECRAWL_STATUS.unknown, reason: 'brak wiarygodnej daty zmiany (lastmod ani Dziennik zmian)', recommend: false };
+    return { status: RECRAWL_STATUS.unknown, reason: 'brak wiarygodnej daty zmiany (ani lastmod, ani rejestr zmian)', recommend: false };
   }
   if (crawledAt >= changedAt) {
     return { status: RECRAWL_STATUS.current, reason: 'crawl po ostatniej zmianie', recommend: false };
@@ -223,7 +239,7 @@ function refreshRecrawlQueue_() {
       .filter(v => v !== null && v !== undefined)
       .reduce((best, v) => (best === null || v > best ? v : best), null);
     const source = changedAt === null ? ''
-      : (logged !== undefined && logged === changedAt ? RECRAWL_CHANGELOG_SHEET : 'lastmod z sitemapy');
+      : (logged !== undefined && logged === changedAt ? recrawlChangeLogSheetName_() : 'lastmod z sitemapy');
 
     const verdictRow = { lastCrawl: row[5], verdict: row[1], coverage: row[2] };
     const decision = classifyRecrawl_(url, verdictRow, sitemapEntry, live[key], changedAt, nowMs, staleDays);

@@ -157,6 +157,40 @@ describe('#92: źródło daty zmiany', () => {
     assert.equal(row.Status, 'AKTUALNE');
   });
 
+  test('#126: nazwa rejestru zmian jest konfigurowalna, a brak configu zachowuje dotychczasową', () => {
+    assert.equal(project({}).recrawlChangeLogSheetName_(), 'Dziennik zmian', 'bez configu jak dotąd');
+    assert.equal(project({}, { CHANGE_LOG_SHEET_NAME: 'Rejestr publikacji' }).recrawlChangeLogSheetName_(), 'Rejestr publikacji');
+    assert.equal(project({}, { CHANGE_LOG_SHEET_NAME: '   ' }).recrawlChangeLogSheetName_(), 'Dziennik zmian', 'pusta wartość to brak configu');
+  });
+
+  test('#126: kolejka czyta skonfigurowany arkusz, a nie nazwę domyślną', () => {
+    const gas = project(
+      Object.assign({}, base, {
+        'Rejestr publikacji': [['Data', 'URL'], ['2026-09-04', U('a')]],
+        [LOG]: [['Data', 'URL'], ['2020-01-01', U('a')]]
+      }),
+      { CHANGE_LOG_SHEET_NAME: 'Rejestr publikacji' }
+    );
+    gas.kolejkaRecrawl();
+    const row = queueRow(gas, U('a'));
+    assert.equal(row['Data zmiany'].slice(0, 10), '2026-09-04', 'data z arkusza wskazanego w konfiguracji');
+    assert.equal(row['Źródło daty zmiany'], 'Rejestr publikacji');
+  });
+
+  test('#126: brak skonfigurowanego arkusza jest zgłaszany jego nazwą, bez cichego pustego źródła', () => {
+    const gas = project(base, { CHANGE_LOG_SHEET_NAME: 'Rejestr publikacji' });
+    gas.kolejkaRecrawl();
+    assert.match(gas.$alerts[0][0], /brak arkusza „Rejestr publikacji”/);
+  });
+
+  test('#126: katalog arkuszy pokazuje skonfigurowaną nazwę', () => {
+    const gas = project({}, { CHANGE_LOG_SHEET_NAME: 'Rejestr publikacji' });
+    const entry = plain(gas.sheetCatalog_()).filter(e => e.name === 'Rejestr publikacji')[0];
+    assert.ok(entry, 'katalog zna arkusz pod skonfigurowaną nazwą');
+    assert.equal(entry.category, 'wlasne');
+    assert.equal(entry.owner, 'człowiek');
+  });
+
   test('Dziennik zmian bez rozpoznawalnych kolumn jest pomijany, a raport mówi o tym wprost', () => {
     const gas = project(Object.assign({}, base, { [LOG]: [['Co zmieniono', 'Kto'], ['title', 'GW']] }));
     gas.kolejkaRecrawl();
