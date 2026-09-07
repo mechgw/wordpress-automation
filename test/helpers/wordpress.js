@@ -7,7 +7,7 @@
  * Obsługiwane trasy (prefiks bazy dowolny):
  *   GET  /wp-json/wp/v2/pages?slug=…            lista stron o slugu (po statusie z query, jeśli podano)
  *   GET  /wp-json/wp/v2/pages?status=…&page=N   stronicowana lista (nagłówek X-WP-TotalPages)
- *   GET  /wp-json/wp/v2/pages/:id               jedna strona (context=edit → pola raw + cc_rank_math)
+ *   GET  /wp-json/wp/v2/pages/:id               jedna strona (context=edit → pola raw + wpa_rank_math)
  *   POST /wp-json/wp/v2/pages                   utworzenie (nadaje id)
  *   POST /wp-json/wp/v2/pages/:id               aktualizacja pól title/excerpt/content/status/slug
  *   GET  /wp-json/wp/v2/media/:id, /media?search=…
@@ -35,7 +35,8 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false,
       // legacyRobotsField: instalacja ze starym snippetem, wystawiająca pole pod
       // historyczną nazwą cc_rank_math_robots (#103).
-      legacyRobotsField: Boolean(p.legacyRobotsField)
+      legacyRobotsField: Boolean(p.legacyRobotsField),
+      legacyMetaField: Boolean(p.legacyMetaField)
     };
   }
   function normalizeMedia(m) {
@@ -45,10 +46,15 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       mime_type: m.mime_type || 'image/jpeg', modified: m.modified || '2026-09-01T00:00:00', media_details: m.media_details || { width: 800, height: 600 }
     };
   }
+  /** Nazwa pola z tytułem i opisem: docelowa albo historyczna (#103). */
+  const rankMathField_ = p => {
+    const value = { title: p.rankMath.title, description: p.rankMath.description };
+    return p.legacyMetaField ? { cc_rank_math: value } : { wpa_rank_math: value };
+  };
   const pageJson = p => ({
     id: p.id, slug: p.slug, status: p.status, link: p.link,
     title: { raw: p.title, rendered: p.title }, excerpt: { raw: p.excerpt, rendered: p.excerpt }, content: { raw: p.content, rendered: p.content },
-    modified: p.modified, ...(p.hasRankMath ? { cc_rank_math: { title: p.rankMath.title, description: p.rankMath.description } } : {}),
+    modified: p.modified, ...(p.hasRankMath ? rankMathField_(p) : {}),
     ...(p.hasRobots ? (p.legacyRobotsField ? { cc_rank_math_robots: p.robots } : { wpa_rank_math_robots: p.robots }) : {})
   });
   const mediaJson = m => ({

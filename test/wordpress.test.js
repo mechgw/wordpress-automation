@@ -125,6 +125,19 @@ describe('WordPress.gs response helpers', () => {
     assert.deepEqual(plain(gas.getRankMathData_(null)), Object.assign({ available: false, title: '', description: '' }, noRobots));
   });
 
+  test('#103: tytuł i opis też mają nazwę docelową i awaryjną', () => {
+    const meta = { title: 'T', description: 'D' };
+    const both = plain(gas.getRankMathData_({ wpa_rank_math: meta, cc_rank_math: { title: 'stare', description: 'stare' } }));
+    assert.equal(both.title, 'T', 'przy obu nazwach wygrywa docelowa');
+
+    const legacy = plain(gas.getRankMathData_({ cc_rank_math: meta }));
+    assert.equal(legacy.available, true, 'stary snippet nadal jest obsługiwany');
+    assert.equal(legacy.description, 'D');
+
+    const none = plain(gas.getRankMathData_({}));
+    assert.equal(none.available, false);
+  });
+
   test('#103: nowa nazwa pola jest preferowana, stara działa jako awaryjna', () => {
     const both = plain(gas.getRankMathData_({ cc_rank_math: {}, wpa_rank_math_robots: 'noindex', cc_rank_math_robots: 'follow' }));
     assert.equal(both.robots, 'noindex', 'przy obu nazwach wygrywa docelowa');
