@@ -327,6 +327,24 @@ Potem utwórz ignorowany przez gita `.clasp.json` z identyfikatorem projektu:
 
 ## Przebieg pracy
 
+### Audyt specyfikacji przed implementacją
+
+Issue objęta bramką i będąca w zakresie — `P0`, `P1` albo `P2`, **lub** `T2` albo `T3` — ma jawny stan audytu specyfikacji. Powód: `review-ack` z Copilotem i Codexem patrzy na kod, a nie na to, czy zadanie w ogóle było dobrze postawione, i błąd w specyfikacji ujawnia się dopiero na PR-ze.
+
+| etykieta | znaczenie |
+| --- | --- |
+| `audit:pending` | specyfikacja czeka na audyt; praca się nie zaczyna |
+| `audit:ok` | specyfikacja zaakceptowana w obecnej wersji treści |
+| `audit:changes` | recenzent zgłosił zastrzeżenia; issue wraca do autora |
+
+**Nie zaczynaj pracy nad issue oznaczoną `audit:pending` albo `audit:changes`.** Brak etykiety `audit:*` oznacza, że issue jest poza bramką — praca może się zacząć.
+
+Recenzent rozstrzyga komentarzem zaczynającym się od `/audit-ok` albo `/audit-changes` (liczą się tylko właściciel, członkowie i współpracownicy). Edycja treści issue unieważnia rozstrzygnięcie: komenda starsza niż ostatnia zmiana treści przestaje obowiązywać i stan wraca do `audit:pending`. Zmieniając treść w trakcie audytu, napisz w komentarzu, co zmieniłeś — etykieta powie, że stan się cofnął, ale nie powie dlaczego.
+
+Bramka nie objęła wstecz issue sprzed swojego wdrożenia i nie jest mechanicznym zamkiem: GitHub nie potrafi zablokować pracy nad issue, więc egzekwuje ją dyscyplina, a nie mechanizm. Logika żyje w `scripts/quality/issue-audit-gate.js` (workflow *Issue audit gate*), testy w `test/issue-audit-gate.test.js`.
+
+### Pull requesty
+
 `main` jest chroniony: zmiany wchodzą wyłącznie przez pull requesty, CI musi przejść, force-push jest zablokowany. Ochrona jest ścisła, więc gałąź musi być aktualna względem `main`; PR w konflikcie nie dostaje w ogóle checków `pull_request`, dopóki nie zmergujesz `main` do gałęzi.
 
 Tytuły PR-ów muszą trzymać się Conventional Commits (pilnuje tego check *PR title*). Release Drafter używa prefiksu do ustalenia kolejnej wersji:

@@ -1,0 +1,82 @@
+name: Issue audit gate
+
+# Bramka audytu specyfikacji issue (#139).
+#
+# Issue objęta bramką i będąca w zakresie (`P0`/`P1`/`P2` albo `T2`/`T3`) ma
+# jawny stan audytu: `audit:pending`, `audit:ok` albo `audit:changes`. Recenzent
+# rozstrzyga komentarzem zaczynającym się od `/audit-ok` albo `/audit-changes`;
+# edycja treści unieważnia rozstrzygnięcie i cofa stan do `audit:pending`.
+#
+# Ten workflow NIE jest zestawem handlerów zdarzeń. Przy `cancel-in-progress:
+# false` GitHub trzyma w grupie tylko jeden run `pending` i ANULUJE go, gdy
+# przyjdzie kolejne zdarzenie — zdarzenie nie jest opóźniane, tylko tracone.
+# Dlatego każdy run czyta aktualny stan issue i wylicza z niego etykietę
+# docelową (reconciler). Utrata jednego runu nie gubi semantyki, bo kolejny
+# naprawia stan. Cała logika decyzyjna i jej testy żyją w
+# scripts/quality/issue-audit-gate.js (test/issue-audit-gate.test.js).
+#
+# Bramka jest konwencją, nie mechanicznym zamkiem: GitHub nie potrafi
+# zablokować pracy nad issue. Etykieta jest sygnałem dla agenta i dla człowieka.
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+# Nie anulujemy runów w locie: reconciler ma dokończyć zapis etykiety.
+concurrency:
+  group: issue-audit-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # GitHub wysyła `issue_comment` także dla pull requestów — bez tego guarda
+    # `/audit-ok` napisane w PR manipulowałoby etykietami PR-a.
+    #
+    # Komentarze zawężamy do osób, które i tak mogą rozstrzygać; ktokolwiek inny
+    # nie pali minut Actions. Sam komentarz-znacznik publikuje `github-actions`,
+    # który tu nie przechodzi, więc nie ma pętli.
+    if: >-
+      !github.event.issue.pull_request &&
+      (github.event_name == 'issues' ||
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - name: Checkout gate script
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            scripts/quality/issue-audit-gate.js
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Reconcile audit state
+        id: gate
+        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE"
+
+      # Etykieta mówi, że stan się cofnął, ale nie mówi dlaczego, a historii
+      # edycji issue nikt nie czyta. Marker jest śladem dla człowieka —
+      # poprawność bramki NIE zależy od tego, czy powstał.
+      - name: Leave a marker comment on reset
+        if: >-
+          steps.gate.outputs.action == 'set' &&
+          steps.gate.outputs.label == 'audit:pending' &&
+          steps.gate.outputs.previous != '' &&
+          steps.gate.outputs.previous != 'audit:pending'
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+            "Treść issue zmieniona po rozstrzygnięciu \`${{ steps.gate.outputs.previous }}\`; stan cofnięty do \`audit:pending\`. Opisz w komentarzu, co się zmieniło — sama etykieta tego nie powie."
