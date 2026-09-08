@@ -125,13 +125,18 @@ function performanceApiRequest_(url) {
   return text ? JSON.parse(text) : {};
 }
 
-/** Zapytanie CrUX o jeden adres i jeden form factor. */
-function cruxRequest_(url, formFactor, key) {
+/**
+ * Zapytanie CrUX o jeden form factor. Domyślnie pyta o konkretny adres;
+ * z `byOrigin` o całą domenę, co jest jedynym sensownym wyjściem, gdy
+ * pojedyncza podstrona ma za mało ruchu.
+ */
+function cruxRequest_(target, formFactor, key, byOrigin) {
+  const scope = byOrigin ? { origin: target } : { url: target };
   const res = UrlFetchApp.fetch(CRUX_API + '?key=' + encodeURIComponent(key), {
     method: 'post',
     contentType: 'application/json',
     muteHttpExceptions: true,
-    payload: JSON.stringify({ url: url, formFactor: formFactor, metrics: CRUX_METRICS })
+    payload: JSON.stringify(Object.assign({ formFactor: formFactor, metrics: CRUX_METRICS }, scope))
   });
   const code = res.getResponseCode();
   const text = res.getContentText() || '';
@@ -147,6 +152,12 @@ function cruxRequest_(url, formFactor, key) {
   return text ? JSON.parse(text) : null;
 }
 
+/** Domena adresu w postaci, której oczekuje CrUX: schemat i host, bez ścieżki. */
+function cruxOrigin_(url) {
+  const match = /^(https?:\/\/[^/?#]+)/i.exec(String(url || '').trim());
+  return match ? match[1] : '';
+}
+
 /** Ostatni dzień okresu zbiorczego CrUX jako `RRRR-MM-DD`. */
 function cruxPeriodEnd_(record) {
   const last = record && record.collectionPeriod && record.collectionPeriod.lastDate;
@@ -159,7 +170,7 @@ function cruxPeriodEnd_(record) {
  * Wiersze danych terenowych. Brak metryki jest zapisywany jako
  * INSUFFICIENT_DATA, nigdy jako zero: zero znaczyłoby doskonały wynik.
  */
-function parseCruxRecord_(record, url, formFactor, now) {
+function parseCruxRecord_(record, url, formFactor, now, source) {
   const period = cruxPeriodEnd_(record && record.record);
   const metrics = (record && record.record && record.record.metrics) || {};
   return CRUX_METRICS.map(function (name) {
@@ -173,7 +184,7 @@ function parseCruxRecord_(record, url, formFactor, now) {
       name,
       has ? Number(p75) : '',
       has ? 'OK' : 'INSUFFICIENT_DATA',
-      'CRUX',
+      source || 'CRUX',
       now
     ];
   });
@@ -252,21 +263,46 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows) {
 function runCruxMeasurement_() {
   const key = performanceApiKey_();
   const urls = performanceUrls_();
-  if (!urls.length) return { rows: 0, urls: 0, missing: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
+  // Kształt wyniku jest ten sam niezależnie od tego, czy było co mierzyć:
+  // wywołujący nie powinien sprawdzać obecności pól.
+  if (!urls.length) {
+    return { rows: 0, urls: 0, missing: 0, fromOrigin: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
+  }
 
   const now = new Date();
   const rows = [];
   let missing = 0;
+  let fromOrigin = 0;
+  // Dane dla całej domeny są takie same dla każdego adresu, więc pytamy o nie
+  // raz na domenę i form factor, zamiast raz na adres.
+  const originCache = {};
 
   urls.forEach(function (entry) {
     ['PHONE', 'DESKTOP'].forEach(function (formFactor) {
       const record = cruxRequest_(entry.url, formFactor, key);
-      if (!record) {
-        missing++;
-        rows.push(['', entry.url, formFactor, 'wszystkie', '', 'INSUFFICIENT_DATA', 'CRUX', now]);
+      if (record) {
+        parseCruxRecord_(record, entry.url, formFactor, now, 'CRUX').forEach(function (row) { rows.push(row); });
         return;
       }
-      parseCruxRecord_(record, entry.url, formFactor, now).forEach(function (row) { rows.push(row); });
+
+      // Pojedyncza podstrona rzadko ma dość ruchu, żeby CrUX ją opisał, a cała
+      // domena zwykle ma. Dane domeny są mniej precyzyjne, więc zapisujemy je
+      // z innym źródłem: liczba opisuje serwis, nie tę stronę.
+      const origin = cruxOrigin_(entry.url);
+      const cacheKey = origin + ' ' + formFactor;
+      if (!Object.prototype.hasOwnProperty.call(originCache, cacheKey)) {
+        originCache[cacheKey] = origin ? cruxRequest_(origin, formFactor, key, true) : null;
+      }
+      const originRecord = originCache[cacheKey];
+
+      if (originRecord) {
+        fromOrigin++;
+        parseCruxRecord_(originRecord, entry.url, formFactor, now, 'CRUX (domena)').forEach(function (row) { rows.push(row); });
+        return;
+      }
+
+      missing++;
+      rows.push(['', entry.url, formFactor, 'wszystkie', '', 'INSUFFICIENT_DATA', 'CRUX', now]);
     });
   });
 
@@ -275,8 +311,10 @@ function runCruxMeasurement_() {
     rows: rows.length,
     urls: urls.length,
     missing: missing,
+    fromOrigin: fromOrigin,
     detail: rows.length + ' pomiarów terenowych dla ' + urls.length + ' adresów' +
-      (missing ? ', w tym ' + missing + ' bez wystarczających danych' : '')
+      (fromOrigin ? ', w tym ' + fromOrigin + ' z danych całej domeny zamiast pojedynczej strony' : '') +
+      (missing ? ', ' + missing + ' bez wystarczających danych' : '')
   };
 }
 

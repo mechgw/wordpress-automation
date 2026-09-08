@@ -80,7 +80,7 @@ describe('#124: dane terenowe z CrUX', () => {
   test('zapisuje p75 dla każdej metryki i obu form factorów', () => {
     const gas = project({ fetch: () => ({ code: 200, text: JSON.stringify(cruxRecord()) }) });
     const out = plain(gas.runCruxMeasurement_());
-    assert.equal(out.rows, 6, 'trzy metryki razy dwa form factory');
+    assert.equal(out.rows, 6, 'trzy metryki razy dwa warianty urządzenia');
     const rows = gas.$sheet(FIELD).slice(1);
     const phone = rows.filter(r => r[2] === 'PHONE');
     assert.equal(phone.length, 3);
@@ -94,11 +94,68 @@ describe('#124: dane terenowe z CrUX', () => {
     // doskonały, czyli dokładnie odwrotność prawdy.
     const gas = project({ fetch: () => ({ code: 404, text: '{}' }) });
     const out = plain(gas.runCruxMeasurement_());
-    assert.equal(out.missing, 2, 'oba form factory bez danych');
+    assert.equal(out.missing, 2, 'oba warianty urządzenia bez danych');
     const rows = gas.$sheet(FIELD).slice(1);
     assert.equal(rows.length, 2);
     assert.equal(rows[0][4], '', 'pusta wartość, nie zero');
     assert.equal(rows[0][5], 'INSUFFICIENT_DATA');
+  });
+
+  test('#124: gdy adres nie ma danych, pytamy o całą domenę', () => {
+    // Realny przypadek z produkcji: wszystkie pięć adresów wróciło bez danych,
+    // bo pojedyncza podstrona rzadko ma dość ruchu, a cała domena zwykle ma.
+    const gas = project({
+      fetch: (url, params) => {
+        const body = JSON.parse(params.payload);
+        return body.origin
+          ? { code: 200, text: JSON.stringify(cruxRecord()) }
+          : { code: 404, text: '{}' };
+      }
+    });
+    const out = plain(gas.runCruxMeasurement_());
+    assert.equal(out.missing, 0, 'dane się znalazły');
+    assert.equal(out.fromOrigin, 2, 'oba warianty urządzenia z poziomu domeny');
+    assert.match(out.detail, /z danych całej domeny zamiast pojedynczej strony/);
+  });
+
+  test('#124: dane domeny są oznaczone innym źródłem, żeby nie udawały danych strony', () => {
+    const gas = project({
+      fetch: (url, params) => (JSON.parse(params.payload).origin
+        ? { code: 200, text: JSON.stringify(cruxRecord()) }
+        : { code: 404, text: '{}' })
+    });
+    gas.runCruxMeasurement_();
+    const sources = [...new Set(gas.$sheet(FIELD).slice(1).map(r => r[6]))];
+    assert.deepEqual(sources, ['CRUX (domena)'], 'liczba opisuje serwis, nie tę stronę');
+  });
+
+  test('#124: o domenę pytamy raz, a nie raz na adres', () => {
+    const many = [1, 2, 3].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(many) },
+      fetch: (url, params) => (JSON.parse(params.payload).origin
+        ? { code: 200, text: JSON.stringify(cruxRecord()) }
+        : { code: 404, text: '{}' })
+    });
+    gas.runCruxMeasurement_();
+    const originCalls = gas.$fetchCalls.filter(c => JSON.parse(c.params.payload).origin);
+    assert.equal(originCalls.length, 2, 'jedno zapytanie na form factor, nie na adres');
+  });
+
+  test('#124: brak danych także dla domeny nadal daje INSUFFICIENT_DATA', () => {
+    const gas = project({ fetch: () => ({ code: 404, text: '{}' }) });
+    const out = plain(gas.runCruxMeasurement_());
+    assert.equal(out.missing, 2);
+    assert.equal(out.fromOrigin, 0);
+    assert.equal(gas.$sheet(FIELD)[1][5], 'INSUFFICIENT_DATA');
+  });
+
+  test('#124: domena jest wyliczana ze schematu i hosta, bez ścieżki', () => {
+    const gas = project();
+    assert.equal(gas.cruxOrigin_('https://www.example.pl/a/b/?x=1#y'), 'https://www.example.pl');
+    assert.equal(gas.cruxOrigin_('http://example.pl'), 'http://example.pl');
+    assert.equal(gas.cruxOrigin_('nonsens'), '');
   });
 
   test('brak pojedynczej metryki też jest oznaczony, a nie zerowany', () => {
@@ -137,6 +194,13 @@ describe('#124: dane terenowe z CrUX', () => {
   test('odmowa i limit mają osobne komunikaty', () => {
     assert.throws(() => project({ fetch: () => ({ code: 403, text: '{}' }) }).runCruxMeasurement_(), /Włącz Chrome UX Report API/);
     assert.throws(() => project({ fetch: () => ({ code: 429, text: '{}' }) }).runCruxMeasurement_(), /limit zapytań \(429\)/);
+  });
+
+  test('#124: wynik ma ten sam kształt także wtedy, gdy nie było co mierzyć', () => {
+    const empty = plain(project({ urls: [] }).runCruxMeasurement_());
+    const measured = plain(project({ fetch: () => ({ code: 200, text: JSON.stringify(cruxRecord()) }) }).runCruxMeasurement_());
+    assert.deepEqual(Object.keys(empty).sort(), Object.keys(measured).sort(), 'te same pola w obu przypadkach');
+    assert.equal(empty.fromOrigin, 0);
   });
 
   test('brak adresów nie jest błędem', () => {
