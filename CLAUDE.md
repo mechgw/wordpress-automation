@@ -43,10 +43,15 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    zewnętrznego albo od właściciela, a zgadywanie autorstwa byłoby dokładnie tym błędem,
    któremu ta reguła zapobiega.
 
-   Autorstwo rozpoznajesz więc po kolejności: podpis wskazuje stronę wprost; prefiks
-   `/audit-ok` albo `/audit-changes` to werdykt agenta zewnętrznego; autor
-   `github-actions` to workflow; brak podpisu po granicy to właściciel; brak podpisu
-   sprzed 2026-09-08 jest **nieustalony** i nie wolno go domyślnie przypisać.
+   Autorstwo rozpoznajesz po kolejności:
+
+   1. jest podpis → autorem jest podpisana strona;
+   2. treść zaczyna się od `/audit-ok` albo `/audit-changes` → agent zewnętrzny;
+   3. autor to `github-actions` → workflow bramki;
+   4. brak podpisu, wpis po granicy → właściciel;
+   5. brak podpisu, wpis sprzed 2026-09-08 → **autorstwo pozostaje nieustalone**.
+      Nie przypisuj takiego wpisu żadnej ze stron i nie traktuj go jako potwierdzenia
+      z zewnątrz.
 
    Podpis mówi **kto pisze**, nie jaką rolę akurat pełni: role zmieniają się zależnie
    od repozytorium, bo w prywatnym backlogu operacyjnym issue pisze agent zewnętrzny,
