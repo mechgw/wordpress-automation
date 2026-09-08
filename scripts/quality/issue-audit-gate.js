@@ -26,7 +26,7 @@
  * Moduł eksportuje czystą funkcję `reconcile()` (testowaną jednostkowo) oraz
  * tryb CLI, który pobiera dane przez `gh` i nakłada etykiety:
  *   node scripts/quality/issue-audit-gate.js --issue <numer> [--repo owner/name]
- *     [--event-label <nazwa>] [--dry-run]
+ *     [--dry-run]
  */
 
 const { execFileSync } = require('child_process');
@@ -57,9 +57,15 @@ function inScope(labels, cfg) {
   return (labels || []).some(name => cfg.scopeLabels.includes(name));
 }
 
+/** Wszystkie obecne etykiety rodziny audit. Kardynalność ma być 0 lub 1, ale
+ *  ręczna edycja albo awaria potrafi zostawić dwie — reconciler musi to widzieć. */
+function auditLabelsPresent(labels, cfg) {
+  return (labels || []).filter(name => cfg.auditLabels.includes(name));
+}
+
 /** Etykieta stanu audytu obecna na issue; '' gdy żadnej. */
 function currentAuditLabel(labels, cfg) {
-  return (labels || []).filter(name => cfg.auditLabels.includes(name))[0] || '';
+  return auditLabelsPresent(labels, cfg)[0] || '';
 }
 
 /** Rodzaj komendy w treści komentarza; '' gdy komentarz nie jest komendą. */
@@ -83,18 +89,35 @@ function latestDecision(comments, barrier, cfg) {
 }
 
 /**
- * Czy zdarzenie `labeled`/`unlabeled` daje realne przejście `out → in`.
+ * Kiedy issue OSTATNI raz weszła w zakres bramki (`out → in`); '' gdy nigdy.
  *
- * Zakresu „przed” nie da się odczytać ze stanu — trzeba go odtworzyć z etykiety
- * w payloadzie. To jedno z dwóch miejsc, w których zdarzenie w ogóle wpływa
- * na decyzję.
+ * Pierwotny projekt czytał to z payloadu zdarzenia `labeled`, bo założyliśmy,
+ * że zakresu „przed” nie da się odtworzyć ze stanu. To założenie było błędne
+ * i miało dokładnie tę wadę, którą reszta reconcilera eliminuje: gdy run od
+ * pierwszej etykiety zakresu zostanie anulowany przez kolejne zdarzenie,
+ * następny run dostaje już inną etykietę w payloadzie, jej usunięcie nie
+ * wyprowadza issue z zakresu i przejście przepada bezpowrotnie.
+ *
+ * Timeline etykiet jest źródłem autorytatywnym. Odtwarzamy stan wstecz od
+ * bieżącego zestawu: idąc od najnowszego zdarzenia cofamy jego skutek i
+ * pytamy, czy w tym momencie zakres zmienił się z „poza” na „w”.
  */
-function isScopeEntry(labels, eventLabel, cfg) {
-  if (!eventLabel || !cfg.scopeLabels.includes(eventLabel)) return false;
-  const after = labels || [];
-  if (!inScope(after, cfg)) return false;
-  const before = after.filter(name => name !== eventLabel);
-  return !inScope(before, cfg);
+function lastScopeEntryAt(currentLabels, labelEvents, cfg) {
+  const events = (labelEvents || [])
+    .filter(e => e && e.label && e.createdAt)
+    .slice()
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+
+  let labels = (currentLabels || []).slice();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    const after = inScope(labels, cfg);
+    labels = event.type === 'LABELED'
+      ? labels.filter(name => name !== event.label)
+      : labels.concat([event.label]);
+    if (after && !inScope(labels, cfg)) return event.createdAt;
+  }
+  return '';
 }
 
 /**
@@ -114,7 +137,8 @@ function revisionBarrier(issueNode) {
 function isEngaged(input, barrier, decision, cfg) {
   if (currentAuditLabel(input.labels, cfg)) return true;
   if (barrier >= cfg.gateActiveSince) return true;
-  if (isScopeEntry(input.labels, input.eventLabel, cfg)) return true;
+  const entry = lastScopeEntryAt(input.labels, input.labelEvents, cfg);
+  if (entry && entry >= cfg.gateActiveSince) return true;
   // Dobrowolne wejście przez komendę. Warunek liczymy ze stanu (istnieje ważna
   // komenda po barierze), a nie z rodzaju bieżącego zdarzenia — dzięki temu
   // zachowanie jest takie samo także wtedy, gdy run od komentarza przepadł
@@ -128,13 +152,14 @@ function isEngaged(input, barrier, decision, cfg) {
  * @param {string[]} input.labels      aktualne etykiety issue
  * @param {string}   input.barrier     ISO: ostatnia edycja treści albo createdAt
  * @param {Array}    input.comments    [{ body, authorAssociation, createdAt }]
- * @param {string}   [input.eventLabel] etykieta z payloadu labeled/unlabeled
+ * @param {Array}    [input.labelEvents] [{ type: 'LABELED'|'UNLABELED', label, createdAt }]
  * @param {object}   [config]
  * @returns {{ action: 'none'|'set'|'clear', label: string, reason: string }}
  */
 function reconcile(input, config = {}) {
   const cfg = Object.assign({}, DEFAULT_CONFIG, config);
-  const current = currentAuditLabel(input.labels, cfg);
+  const present = auditLabelsPresent(input.labels, cfg);
+  const current = present[0] || '';
 
   // Zamknięcie kończy temat. Świadome odstępstwo od czystego reconcilera:
   // czyszczenie etykiet po fakcie zaśmiecałoby archiwum.
@@ -144,7 +169,7 @@ function reconcile(input, config = {}) {
   if (!barrier) return { action: 'none', label: current, reason: 'brak bariery rewizji (fail-closed)' };
 
   if (!inScope(input.labels, cfg)) {
-    return current
+    return present.length
       ? { action: 'clear', label: '', reason: 'issue poza zakresem bramki' }
       : { action: 'none', label: '', reason: 'issue poza zakresem bramki' };
   }
@@ -159,7 +184,16 @@ function reconcile(input, config = {}) {
     ? 'rozstrzygnięcie z ' + decision.createdAt + ' nowsze niż rewizja ' + barrier
     : 'brak ważnego rozstrzygnięcia dla rewizji ' + barrier;
 
-  if (desired === current) return { action: 'none', label: current, reason: reason + ' (bez zmiany)' };
+  // Zgodność samej pierwszej etykiety nie wystarcza: przy duplikacie rodziny
+  // (np. `audit:ok` obok `audit:pending`) trzeba wymusić zapis, żeby `apply`
+  // usunęło nadmiarową. Inaczej kardynalność „0 lub 1” zostałaby złamana
+  // na stałe, bo kolejne przebiegi widziałyby stan jako zgodny.
+  if (desired === current && present.length === 1) {
+    return { action: 'none', label: current, reason: reason + ' (bez zmiany)' };
+  }
+  if (present.length > 1) {
+    return { action: 'set', label: desired, reason: reason + ' (usuwam duplikat rodziny audit:*)' };
+  }
   return { action: 'set', label: desired, reason: reason };
 }
 
@@ -175,14 +209,26 @@ function gh(args) {
  */
 function fetchInput(repo, issue) {
   const [owner, name] = repo.split('/');
-  const query = `
-    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
+  // Obie kolekcje stronicujemy do końca, każdą osobno: najnowsza komenda
+  // potrafi być daleko poza pierwszą stroną, a historia etykiet decyduje
+  // o objęciu bramką. Wspólna pętla dla dwóch niezależnych kursorów duplikuje
+  // wyniki tej kolekcji, która skończyła się wcześniej.
+  const issueQuery = `
+    query($owner:String!, $name:String!, $number:Int!) {
       repository(owner:$owner, name:$name) {
         issue(number:$number) {
           state
           createdAt
           labels(first:100) { nodes { name } }
           userContentEdits(last:1) { nodes { editedAt } }
+        }
+      }
+    }`;
+
+  const commentsQuery = `
+    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
+      repository(owner:$owner, name:$name) {
+        issue(number:$number) {
           comments(first:100, after:$cursor) {
             pageInfo { hasNextPage endCursor }
             nodes { body authorAssociation createdAt }
@@ -191,27 +237,56 @@ function fetchInput(repo, issue) {
       }
     }`;
 
-  const comments = [];
-  let cursor = null;
-  let issueNode = null;
+  const timelineQuery = `
+    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
+      repository(owner:$owner, name:$name) {
+        issue(number:$number) {
+          timelineItems(first:100, after:$cursor, itemTypes:[LABELED_EVENT, UNLABELED_EVENT]) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              __typename
+              ... on LabeledEvent { createdAt label { name } }
+              ... on UnlabeledEvent { createdAt label { name } }
+            }
+          }
+        }
+      }
+    }`;
 
-  for (;;) {
+  const ask = (query, cursor) => {
     const args = ['api', 'graphql', '-f', 'query=' + query,
       '-F', 'owner=' + owner, '-F', 'name=' + name, '-F', 'number=' + issue];
     if (cursor) args.push('-F', 'cursor=' + cursor);
-    const page = JSON.parse(gh(args)).data.repository.issue;
-    if (!page) throw new Error('Nie znaleziono issue #' + issue + ' w ' + repo);
-    issueNode = issueNode || page;
-    comments.push(...page.comments.nodes);
-    if (!page.comments.pageInfo.hasNextPage) break;
-    cursor = page.comments.pageInfo.endCursor;
-  }
+    const node = JSON.parse(gh(args)).data.repository.issue;
+    if (!node) throw new Error('Nie znaleziono issue #' + issue + ' w ' + repo);
+    return node;
+  };
+
+  const collect = (query, field) => {
+    const all = [];
+    let cursor = null;
+    for (;;) {
+      const page = ask(query, cursor)[field];
+      all.push(...page.nodes);
+      if (!page.pageInfo.hasNextPage) return all;
+      cursor = page.pageInfo.endCursor;
+    }
+  };
+
+  const issueNode = ask(issueQuery, null);
+  const comments = collect(commentsQuery, 'comments');
+  const labelEvents = collect(timelineQuery, 'timelineItems').map(node => ({
+    type: node.__typename === 'LabeledEvent' ? 'LABELED' : 'UNLABELED',
+    label: node.label && node.label.name,
+    createdAt: node.createdAt
+  }));
 
   return {
     state: String(issueNode.state || '').toLowerCase(),
     labels: issueNode.labels.nodes.map(l => l.name),
     barrier: revisionBarrier(issueNode),
-    comments: comments
+    comments: comments,
+    labelEvents: labelEvents
   };
 }
 
@@ -234,16 +309,15 @@ function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--issue') args.issue = argv[++i];
     else if (argv[i] === '--repo') args.repo = argv[++i];
-    else if (argv[i] === '--event-label') args.eventLabel = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
   }
   const repo = args.repo || process.env.GITHUB_REPOSITORY;
   if (!args.issue || !repo) {
-    console.error('Usage: node scripts/quality/issue-audit-gate.js --issue <number> [--repo owner/name] [--event-label <name>] [--dry-run]');
+    console.error('Usage: node scripts/quality/issue-audit-gate.js --issue <number> [--repo owner/name] [--dry-run]');
     process.exit(2);
   }
 
-  const input = Object.assign(fetchInput(repo, args.issue), { eventLabel: args.eventLabel || '' });
+  const input = fetchInput(repo, args.issue);
   const previous = currentAuditLabel(input.labels, DEFAULT_CONFIG);
   const result = reconcile(input);
   const summary = '#' + args.issue + ': ' + result.action +
@@ -268,7 +342,8 @@ module.exports = {
   parseCommand,
   latestDecision,
   revisionBarrier,
-  isScopeEntry,
+  lastScopeEntryAt,
+  auditLabelsPresent,
   currentAuditLabel,
   DEFAULT_CONFIG,
   AUDIT_PENDING,

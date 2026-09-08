@@ -25,6 +25,9 @@ const NEW = '2026-09-08T10:00:00Z';
 const LATER = '2026-09-08T12:00:00Z';
 const LATEST = '2026-09-08T14:00:00Z';
 
+const labeled = (label, createdAt) => ({ type: 'LABELED', label, createdAt });
+const unlabeled = (label, createdAt) => ({ type: 'UNLABELED', label, createdAt });
+
 const cmd = (kind, createdAt, extra = {}) => Object.assign({
   body: '/audit-' + kind + '\n\nUzasadnienie.',
   authorAssociation: 'OWNER',
@@ -63,17 +66,23 @@ describe('#139 zakres bramki', () => {
     assert.equal(result.label, '');
   });
 
-  test('5: labeled dające out → in obejmuje bramką nawet starą issue', () => {
-    const result = reconcile(issue({ labels: ['P2'], barrier: OLD, eventLabel: 'P2' }));
+  test('5: wejście w zakres po wdrożeniu obejmuje bramką nawet starą issue', () => {
+    const result = reconcile(issue({ labels: ['P2'], barrier: OLD, labelEvents: [labeled('P2', NEW)] }));
     assert.equal(result.action, 'set');
     assert.equal(result.label, AUDIT_PENDING);
   });
 
   test('6: zmiana etykiety przy zakresie in → in nie obejmuje bramką niczego', () => {
-    // Etykieta spoza rodziny zakresu.
-    assert.equal(reconcile(issue({ labels: ['P2', 'area:seo'], barrier: OLD, eventLabel: 'area:seo' })).action, 'none');
+    // Etykieta spoza rodziny zakresu: dołożona po wdrożeniu, ale zakres się nie zmienił.
+    assert.equal(reconcile(issue({
+      labels: ['P2', 'area:seo'], barrier: OLD,
+      labelEvents: [labeled('P2', OLD), labeled('area:seo', NEW)]
+    })).action, 'none');
     // Etykieta zakresu, ale issue była w zakresie także bez niej.
-    assert.equal(reconcile(issue({ labels: ['P1', 'T2'], barrier: OLD, eventLabel: 'T2' })).action, 'none');
+    assert.equal(reconcile(issue({
+      labels: ['P1', 'T2'], barrier: OLD,
+      labelEvents: [labeled('P1', OLD), labeled('T2', NEW)]
+    })).action, 'none');
   });
 
   test('7: wyjście z zakresu usuwa rodzinę audit:*', () => {
@@ -96,7 +105,36 @@ describe('#139 rollout bez backfillu', () => {
   });
 
   test('10: stara issue z realnym out → in wchodzi do bramki', () => {
-    assert.equal(reconcile(issue({ labels: ['T2'], barrier: OLD, eventLabel: 'T2' })).label, AUDIT_PENDING);
+    assert.equal(reconcile(issue({
+      labels: ['T2'], barrier: OLD, labelEvents: [labeled('T2', NEW)]
+    })).label, AUDIT_PENDING);
+  });
+
+  test('10a: utracony run od pierwszej etykiety zakresu nie gubi objęcia bramką', () => {
+    // Copilot/Codex na PR #141: przy szybkim P2 → T2 concurrency anuluje run od
+    // P2, a payload kolejnego runu zawiera już tylko T2. Odtworzenie zakresu
+    // z osi czasu etykiet nie zależy od tego, który run przeżył.
+    const result = reconcile(issue({
+      labels: ['P2', 'T2'], barrier: OLD,
+      labelEvents: [labeled('P2', NEW), labeled('T2', LATER)]
+    }));
+    assert.equal(result.label, AUDIT_PENDING, 'przejście out → in zapisane trwale w historii');
+  });
+
+  test('10b: wejście w zakres sprzed wdrożenia nadal nie obejmuje bramką', () => {
+    const result = reconcile(issue({
+      labels: ['P2'], barrier: OLD, labelEvents: [labeled('P2', '2026-08-20T09:00:00Z')]
+    }));
+    assert.equal(result.action, 'none');
+    assert.match(result.reason, /nieobjęta bramką/);
+  });
+
+  test('10c: powrót do zakresu po wypadnięciu liczy się jako nowe wejście', () => {
+    const result = reconcile(issue({
+      labels: ['P2'], barrier: OLD,
+      labelEvents: [labeled('P2', '2026-08-01T09:00:00Z'), unlabeled('P2', '2026-08-15T09:00:00Z'), labeled('P2', NEW)]
+    }));
+    assert.equal(result.label, AUDIT_PENDING, 'liczy się OSTATNIE wejście, nie pierwsze');
   });
 
   test('granica GATE_ACTIVE_SINCE jest domknięta od dołu', () => {
@@ -187,7 +225,6 @@ describe('#139 odporność na utracone i przestawione runy', () => {
     const result = reconcile(issue({
       labels: ['P2', 'T2', AUDIT_OK],
       barrier: LATER,
-      eventLabel: 'area:seo',
       comments: [cmd('ok', NEW)]
     }));
     assert.equal(result.action, 'set');
@@ -222,6 +259,25 @@ describe('#139 odporność na utracone i przestawione runy', () => {
       const applied = result.action === 'clear' ? [] : [result.label].filter(Boolean);
       assert.ok(applied.length <= 1, JSON.stringify(result));
     }
+  });
+
+  test('25a: duplikat rodziny audit:* jest sprzątany, mimo zgodnej pierwszej etykiety', () => {
+    // Copilot/Codex na PR #141: przy `desired === current` wcześniejsza wersja
+    // wracała z `none` i nadmiarowa etykieta zostawała na zawsze, bo każdy
+    // kolejny przebieg widział stan jako zgodny.
+    const result = reconcile(issue({
+      labels: ['P2', AUDIT_OK, AUDIT_PENDING],
+      comments: [cmd('ok', LATER)]
+    }));
+    assert.equal(result.action, 'set', 'zapis wymuszony, żeby apply usunęło duplikat');
+    assert.equal(result.label, AUDIT_OK);
+    assert.match(result.reason, /duplikat/);
+  });
+
+  test('25b: duplikat na issue poza zakresem jest czyszczony w całości', () => {
+    const result = reconcile(issue({ labels: ['P3', 'T1', AUDIT_OK, AUDIT_CHANGES] }));
+    assert.equal(result.action, 'clear');
+    assert.equal(result.label, '');
   });
 
   test('26: powtórzony run bez zmiany stanu nie zapisuje nic', () => {

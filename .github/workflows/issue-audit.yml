@@ -51,9 +51,6 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       ISSUE: ${{ github.event.issue.number }}
-      # Pusta dla zdarzeń innych niż labeled/unlabeled. Zakresu „przed” nie da
-      # się odtworzyć ze stanu, więc tylko tutaj payload wpływa na decyzję.
-      EVENT_LABEL: ${{ github.event.label.name }}
     steps:
       - name: Checkout gate script
         uses: actions/checkout@v7
@@ -69,7 +66,7 @@ jobs:
 
       - name: Reconcile audit state
         id: gate
-        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE" --event-label "$EVENT_LABEL"
+        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE"
 
       # Etykieta mówi, że stan się cofnął, ale nie mówi dlaczego, a historii
       # edycji issue nikt nie czyta. Marker jest śladem dla człowieka —
