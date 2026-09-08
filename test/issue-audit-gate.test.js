@@ -15,7 +15,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
+const { spawnSync } = require('child_process');
+
 const gate = require('../scripts/quality/issue-audit-gate.js');
+const SCRIPT = path.join(__dirname, '..', 'scripts', 'quality', 'issue-audit-gate.js');
 const { reconcile, DEFAULT_CONFIG, AUDIT_PENDING, AUDIT_OK, AUDIT_CHANGES } = gate;
 
 const GATE_ACTIVE = DEFAULT_CONFIG.gateActiveSince;
@@ -339,6 +342,47 @@ describe('#139 ślad dla człowieka', () => {
     const result = reconcile(issue({ comments: [marker] }));
     assert.equal(result.label, AUDIT_PENDING);
     assert.equal(gate.latestDecision([marker], NEW, DEFAULT_CONFIG), null);
+  });
+});
+
+describe('#139 CLI: konfiguracja daty startu nie może zawieść po cichu', () => {
+  // Wywołanie bez sieci: walidacja argumentów następuje przed pierwszym `gh`,
+  // więc błędne wejście kończy się kodem 2, zanim cokolwiek zostanie pobrane.
+  const run = (extra, env = {}) => spawnSync(process.execPath,
+    [SCRIPT, '--issue', '1', '--repo', 'owner/name', '--dry-run', ...extra],
+    { encoding: 'utf8', env: { ...process.env, AUDIT_GATE_ACTIVE_SINCE: '', ...env } });
+
+  test('flaga bez wartości kończy przebieg kodem 2, zamiast wracać do domyślnej', () => {
+    const r = run(['--gate-active-since']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /bez wartości/);
+  });
+
+  test('pusta wartość flagi też jest błędem', () => {
+    // W workflow `--gate-active-since "$ZMIENNA"` z pustą zmienną przekazuje
+    // właśnie pusty argument. To najgroźniejszy wariant, bo wygląda poprawnie.
+    const r = run(['--gate-active-since', '']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /bez wartości/);
+  });
+
+  test('wartość, która nie jest datą, kończy przebieg kodem 2', () => {
+    const r = run(['--gate-active-since', 'wczoraj']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /ISO 8601/);
+  });
+
+  test('poprawna data i brak flagi przechodzą walidację', () => {
+    // Odcinamy `gh` z PATH, żeby test nie dotykał sieci: skrypt ma dojść
+    // do pobierania stanu i dopiero tam polec, a nie odrzucić poprawne wejście.
+    // Windows używa `Path`, POSIX `PATH` — czyścimy oba.
+    const offline = { PATH: '', Path: '' };
+    for (const extra of [[], ['--gate-active-since', '2026-09-08T07:00:00Z']]) {
+      const r = run(extra, offline);
+      assert.doesNotMatch(String(r.stderr), /gate-active-since/,
+        'walidacja odrzuciła poprawne wejście: ' + JSON.stringify(extra));
+      assert.notEqual(r.status, 2, r.stderr);
+    }
   });
 });
 

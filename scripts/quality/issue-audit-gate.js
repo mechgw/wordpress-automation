@@ -318,10 +318,11 @@ function apply(repo, issue, result, labels, cfg) {
 
 function main(argv) {
   const args = {};
+  let sinceGiven = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--issue') args.issue = argv[++i];
     else if (argv[i] === '--repo') args.repo = argv[++i];
-    else if (argv[i] === '--gate-active-since') args.gateActiveSince = argv[++i];
+    else if (argv[i] === '--gate-active-since') { sinceGiven = true; args.gateActiveSince = argv[++i]; }
     else if (argv[i] === '--dry-run') args.dryRun = true;
   }
   const repo = args.repo || process.env.GITHUB_REPOSITORY;
@@ -336,7 +337,18 @@ function main(argv) {
   // Zła wartość cofa moment startu i robi cichy backfill całego archiwum,
   // dlatego niepoprawną odrzucamy, zamiast po cichu wracać do domyślnej.
   const config = {};
-  const since = args.gateActiveSince || process.env.AUDIT_GATE_ACTIVE_SINCE || '';
+  const since = sinceGiven ? args.gateActiveSince : (process.env.AUDIT_GATE_ACTIVE_SINCE || '');
+
+  // Podana flaga bez wartości albo z pustą wartością to najgroźniejszy przypadek:
+  // w workflow `--gate-active-since "$GATE_ACTIVE_SINCE"` z niezdefiniowaną
+  // zmienną przekazuje pusty argument. Milczące zejście do wartości domyślnej
+  // cofnęłoby moment startu bramki i objęło audytem całe archiwum — dlatego
+  // brak wartości jest błędem, nie sygnałem „użyj domyślnej”.
+  if (sinceGiven && !String(since || '').trim()) {
+    console.error('::error::--gate-active-since podano bez wartości; nie zgaduję daty uruchomienia bramki.');
+    process.exit(2);
+  }
+
   if (since) {
     if (isNaN(new Date(since).getTime())) {
       console.error('::error::--gate-active-since musi być datą ISO 8601; otrzymano: ' + since);
