@@ -80,7 +80,7 @@ describe('#124: dane terenowe z CrUX', () => {
   test('zapisuje p75 dla każdej metryki i obu form factorów', () => {
     const gas = project({ fetch: () => ({ code: 200, text: JSON.stringify(cruxRecord()) }) });
     const out = plain(gas.runCruxMeasurement_());
-    assert.equal(out.rows, 6, 'trzy metryki razy dwa form factory');
+    assert.equal(out.rows, 6, 'trzy metryki razy dwa warianty urządzenia');
     const rows = gas.$sheet(FIELD).slice(1);
     const phone = rows.filter(r => r[2] === 'PHONE');
     assert.equal(phone.length, 3);
@@ -94,7 +94,7 @@ describe('#124: dane terenowe z CrUX', () => {
     // doskonały, czyli dokładnie odwrotność prawdy.
     const gas = project({ fetch: () => ({ code: 404, text: '{}' }) });
     const out = plain(gas.runCruxMeasurement_());
-    assert.equal(out.missing, 2, 'oba form factory bez danych');
+    assert.equal(out.missing, 2, 'oba warianty urządzenia bez danych');
     const rows = gas.$sheet(FIELD).slice(1);
     assert.equal(rows.length, 2);
     assert.equal(rows[0][4], '', 'pusta wartość, nie zero');
@@ -114,7 +114,7 @@ describe('#124: dane terenowe z CrUX', () => {
     });
     const out = plain(gas.runCruxMeasurement_());
     assert.equal(out.missing, 0, 'dane się znalazły');
-    assert.equal(out.fromOrigin, 2, 'oba form factory z poziomu domeny');
+    assert.equal(out.fromOrigin, 2, 'oba warianty urządzenia z poziomu domeny');
     assert.match(out.detail, /z danych całej domeny zamiast pojedynczej strony/);
   });
 
@@ -194,6 +194,13 @@ describe('#124: dane terenowe z CrUX', () => {
   test('odmowa i limit mają osobne komunikaty', () => {
     assert.throws(() => project({ fetch: () => ({ code: 403, text: '{}' }) }).runCruxMeasurement_(), /Włącz Chrome UX Report API/);
     assert.throws(() => project({ fetch: () => ({ code: 429, text: '{}' }) }).runCruxMeasurement_(), /limit zapytań \(429\)/);
+  });
+
+  test('#124: wynik ma ten sam kształt także wtedy, gdy nie było co mierzyć', () => {
+    const empty = plain(project({ urls: [] }).runCruxMeasurement_());
+    const measured = plain(project({ fetch: () => ({ code: 200, text: JSON.stringify(cruxRecord()) }) }).runCruxMeasurement_());
+    assert.deepEqual(Object.keys(empty).sort(), Object.keys(measured).sort(), 'te same pola w obu przypadkach');
+    assert.equal(empty.fromOrigin, 0);
   });
 
   test('brak adresów nie jest błędem', () => {

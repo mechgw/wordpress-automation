@@ -125,7 +125,11 @@ function performanceApiRequest_(url) {
   return text ? JSON.parse(text) : {};
 }
 
-/** Zapytanie CrUX o jeden adres i jeden form factor. */
+/**
+ * Zapytanie CrUX o jeden form factor. Domyślnie pyta o konkretny adres;
+ * z `byOrigin` o całą domenę, co jest jedynym sensownym wyjściem, gdy
+ * pojedyncza podstrona ma za mało ruchu.
+ */
 function cruxRequest_(target, formFactor, key, byOrigin) {
   const scope = byOrigin ? { origin: target } : { url: target };
   const res = UrlFetchApp.fetch(CRUX_API + '?key=' + encodeURIComponent(key), {
@@ -259,7 +263,11 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows) {
 function runCruxMeasurement_() {
   const key = performanceApiKey_();
   const urls = performanceUrls_();
-  if (!urls.length) return { rows: 0, urls: 0, missing: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
+  // Kształt wyniku jest ten sam niezależnie od tego, czy było co mierzyć:
+  // wywołujący nie powinien sprawdzać obecności pól.
+  if (!urls.length) {
+    return { rows: 0, urls: 0, missing: 0, fromOrigin: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
+  }
 
   const now = new Date();
   const rows = [];
