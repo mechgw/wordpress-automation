@@ -8,7 +8,8 @@
     "blocked": "near-black = blocked, not urgent",
     "area": "one green color for the whole area:* family",
     "policy": "one purple color for the whole policy:* family",
-    "audit": "one teal color for the whole audit:* family"
+    "audit": "one teal color for the whole audit:* family",
+    "by": "one slate color for the whole by:* family"
   },
   "families": {
     "priority": {
@@ -43,6 +44,12 @@
       "color": "0FA5A5",
       "cardinality": "0 lub 1",
       "note": "Stan audytu specyfikacji (#139). Etykietami zarządza workflow issue-audit.yml; nie ustawiaj ich ręcznie poza sytuacją awaryjną."
+    },
+    "by": {
+      "prefix": "by:",
+      "color": "475569",
+      "cardinality": "0 lub 1",
+      "note": "Kto napisał specyfikację. Nadaje ją wyłącznie agent lokalny dla własnych Issue; BRAK etykiety znaczy „autorem jest recenzent zewnętrzny”. Rozstrzyga, która strona prowadzi audyt (cross-audyt)."
     }
   },
   "labels": [
@@ -249,6 +256,12 @@
       "color": "0FA5A5",
       "description": "Recenzent zgłosił zastrzeżenia do specyfikacji; issue wraca do autora.",
       "family": "audit"
+    },
+    {
+      "name": "by:agent",
+      "color": "475569",
+      "description": "Specyfikację napisał agent lokalny; audytuje recenzent zewnętrzny.",
+      "family": "by"
     }
   ],
   "migrations": {

@@ -19,7 +19,13 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 ## Przebieg pracy
 
-0. **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
+0. **Cross-audyt**: kto napisał specyfikację, ten jej nie audytuje. Etykietę `by:agent`
+   nadaje **wyłącznie agent lokalny** (Claude Code pracujący na klonie repozytorium)
+   i tylko własnym issue. Recenzent zewnętrzny (GPT działający przez API GitHuba)
+   **nie nadaje jej nigdy** — brak etykiety jest właśnie sygnałem, że autor jest
+   zewnętrzny. Issue z `by:agent` audytuje recenzent zewnętrzny; issue bez niej
+   audytuje agent lokalny.
+   **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
    czeka na audyt albo wróciła z zastrzeżeniami. Brak etykiety `audit:*` znaczy, że issue
    jest poza bramką i praca może się zacząć. Rozstrzyga komentarz zaczynający się od
    `/audit-ok` albo `/audit-changes`; edycja treści unieważnia starsze rozstrzygnięcie.
