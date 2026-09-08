@@ -25,6 +25,28 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    **nie nadaje jej nigdy** — brak etykiety jest właśnie sygnałem, że autor jest
    zewnętrzny. Issue z `by:agent` audytuje recenzent zewnętrzny; issue bez niej
    audytuje agent lokalny.
+
+   **Podpisuj każdą treść issue i każdy komentarz**, który piszesz — ostatnią linijką:
+
+   - agent lokalny: `_— agent lokalny (Claude Code)_`
+   - recenzent zewnętrzny: `_— recenzent zewnętrzny (GPT)_`
+
+   Wszystko idzie z jednego konta GitHuba, więc bez podpisu nie da się później odróżnić
+   własnego, niezweryfikowanego twierdzenia od audytu drugiej strony — a to jest różnica
+   między „twierdziłem” a „zostało potwierdzone”. Podpisuj **wszystkie**, nie wybrane:
+   oznaczanie selektywne degraduje się do braku oznaczeń.
+
+   Konwencja obowiązuje od **2026-09-09T00:00:00Z**. Wpisy sprzed tej chwili są
+   niepodpisane i ich autorstwa **nie da się ustalić** — 8 września powstało kilkadziesiąt
+   komentarzy obu stron, więc granica dzienna klasyfikowałaby je jako wpisy właściciela
+   i odtwarzała błąd, któremu ta reguła zapobiega. Dopiero brak podpisu **po** tej chwili
+   znaczy „napisał właściciel”.
+
+   Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt
+   recenzenta zewnętrznego, więc te wpisy pozostają rozpoznawalne także bez podpisu.
+
+   Etykieta `by:agent` zostaje mimo to, bo działa na listach i filtrach, których podpis
+   nie obsługuje.
    **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
    czeka na audyt albo wróciła z zastrzeżeniami. Brak etykiety `audit:*` znaczy, że issue
    jest poza bramką i praca może się zacząć. Rozstrzyga komentarz zaczynający się od
