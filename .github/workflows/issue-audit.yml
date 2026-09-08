@@ -51,6 +51,11 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       ISSUE: ${{ github.event.issue.number }}
+      # Moment uruchomienia bramki W TYM repozytorium. Trzymamy go w workflow,
+      # a nie w skrypcie, bo ten sam skrypt obsługuje też prywatny backlog
+      # operacyjny, który wszedł do bramki innego dnia. Cofnięcie tej daty
+      # zrobiłoby cichy backfill całego archiwum.
+      GATE_ACTIVE_SINCE: "2026-09-08T00:00:00Z"
     steps:
       - name: Checkout gate script
         uses: actions/checkout@v7
@@ -66,7 +71,7 @@ jobs:
 
       - name: Reconcile audit state
         id: gate
-        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE"
+        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE" --gate-active-since "$GATE_ACTIVE_SINCE"
 
       # Etykieta mówi, że stan się cofnął, ale nie mówi dlaczego, a historii
       # edycji issue nikt nie czyta. Marker jest śladem dla człowieka —

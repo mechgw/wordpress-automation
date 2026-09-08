@@ -140,6 +140,20 @@ describe('#139 rollout bez backfillu', () => {
   test('granica GATE_ACTIVE_SINCE jest domknięta od dołu', () => {
     assert.equal(reconcile(issue({ barrier: GATE_ACTIVE })).label, AUDIT_PENDING);
   });
+
+  test('data startu bramki jest konfigurowalna per repozytorium', () => {
+    // Ten sam skrypt obsługuje kilka repozytoriów, a każde weszło do bramki
+    // innego dnia. Zaszyta data zrobiłaby w drugim repo cichy backfill.
+    const later = { gateActiveSince: '2026-09-09T00:00:00Z' };
+    assert.equal(reconcile(issue({ barrier: NEW }), later).action, 'none',
+      'przy późniejszej dacie startu ta sama issue jest jeszcze nieobjęta');
+    assert.equal(reconcile(issue({ barrier: NEW })).label, AUDIT_PENDING,
+      'a przy domyślnej — objęta');
+
+    const earlier = { gateActiveSince: '2026-08-01T00:00:00Z' };
+    assert.equal(reconcile(issue({ barrier: OLD }), earlier).label, AUDIT_PENDING,
+      'wcześniejsza data startu obejmuje starsze issue');
+  });
 });
 
 describe('#139 komenda audytu', () => {
@@ -341,6 +355,11 @@ describe('#139 kontrakt workflow', () => {
   test('concurrency serializuje per issue i nie anuluje runów w locie', () => {
     assert.match(workflow, /group:\s*issue-audit-\$\{\{[^}]*issue\.number/);
     assert.match(workflow, /cancel-in-progress:\s*false/);
+  });
+
+  test('workflow podaje datę startu bramki jawnie, zamiast polegać na domyślnej', () => {
+    assert.match(workflow, /GATE_ACTIVE_SINCE:\s*"\d{4}-\d{2}-\d{2}T/);
+    assert.match(workflow, /--gate-active-since\s+"\$GATE_ACTIVE_SINCE"/);
   });
 
   test('obsłużone są wszystkie zdarzenia z kryteriów akceptacji', () => {
