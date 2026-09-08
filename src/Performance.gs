@@ -27,7 +27,9 @@ const PERF_FINDINGS_SHEET = 'PAGESPEED FINDINGS';
 // dzięki temu ustalenie da się połączyć z konkretnym wierszem metryki.
 const PERF_FINDINGS_HEADER = [
   'Pomiar', 'URL', 'Strategia', 'Próba', 'Rodzaj', 'Nazwa', 'Szczegół',
-  'Czas (ms)', 'Transfer (KB)', 'Potencjalna oszczędność (ms)', 'Potencjalna oszczędność (KB)',
+  // KiB, nie KB: przeliczamy przez 1024, tak samo jak raport PageSpeed, więc
+  // liczby są wprost porównywalne z tym, co widać w interfejsie.
+  'Czas (ms)', 'Transfer (KiB)', 'Potencjalna oszczędność (ms)', 'Potencjalna oszczędność (KiB)',
   'Źródło', 'Pobrano'
 ];
 

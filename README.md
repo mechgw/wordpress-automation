@@ -121,7 +121,7 @@ Zapis jest idempotentny: ponowny pomiar tego samego okresu CrUX podmienia wiersz
 
 Same metryki mówią, **że** strona jest wolna, ale nie **dlaczego**. Odpowiedź PSI zawiera już diagnozę, więc obok liczb zapisujemy trzy rodzaje ustaleń: `ELEMENT LCP` (selektor albo fragment elementu, który wyznacza LCP), `SZANSA` (audyty typu opportunity z szacowaną oszczędnością) oraz `THIRD-PARTY` (transfer i czas wątku głównego na podmiot).
 
-**Koszt i potencjalna oszczędność mają osobne kolumny.** `Czas (ms)` i `Transfer (KB)` opisują to, co strona realnie zużywa; `Potencjalna oszczędność (ms)` i `Potencjalna oszczędność (KB)` to, co da się odzyskać. Podsumowanie third-party trafia wyłącznie do kolumn kosztu — wpisanie go do oszczędności sprawiłoby, że arkusz kłamałby semantycznie.
+**Koszt i potencjalna oszczędność mają osobne kolumny.** `Czas (ms)` i `Transfer (KiB)` opisują to, co strona realnie zużywa; `Potencjalna oszczędność (ms)` i `Potencjalna oszczędność (KiB)` to, co da się odzyskać. Jednostką jest **KiB**, czyli 1024 bajty — tak samo jak w raporcie PageSpeed, żeby liczby dało się porównywać wprost. Podsumowanie third-party trafia wyłącznie do kolumn kosztu — wpisanie go do oszczędności sprawiłoby, że arkusz kłamałby semantycznie.
 
 **To jest snapshot bieżącej diagnozy, nie historia.** Udany pomiar zastępuje cały zakres `(URL, strategia)`, więc ustalenie, którego nie ma w nowej odpowiedzi, znika z arkusza. Zwykły upsert zostawiłby nieaktualne szanse jako obowiązującą diagnozę. Historia liczb jest w `PAGESPEED LAB` i tam należy. Zakres bez ani jednej udanej próby nie jest ruszany: nieudany przebieg nie kasuje ostatniej dobrej diagnozy.
 
