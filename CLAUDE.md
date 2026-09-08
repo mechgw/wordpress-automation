@@ -46,7 +46,10 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    Autorstwo rozpoznajesz po kolejności:
 
    1. jest podpis → autorem jest podpisana strona;
-   2. treść zaczyna się od `/audit-ok` albo `/audit-changes` → agent zewnętrzny;
+   2. treść zaczyna się od `/audit-ok` albo `/audit-changes` → to **werdykt audytu**,
+      a nie wskazanie strony. Autora wskazuje etykieta issue: przy `by:agent` audytuje
+      agent zewnętrzny, bez niej — lokalny, bo audytuje zawsze ta strona, która
+      specyfikacji nie pisała;
    3. autor to `github-actions` → workflow bramki;
    4. brak podpisu, wpis po granicy → właściciel;
    5. brak podpisu, wpis sprzed 2026-09-08 → **autorstwo pozostaje nieustalone**.
