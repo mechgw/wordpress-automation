@@ -101,6 +101,63 @@ describe('#124: dane terenowe z CrUX', () => {
     assert.equal(rows[0][5], 'INSUFFICIENT_DATA');
   });
 
+  test('#124: gdy adres nie ma danych, pytamy o całą domenę', () => {
+    // Realny przypadek z produkcji: wszystkie pięć adresów wróciło bez danych,
+    // bo pojedyncza podstrona rzadko ma dość ruchu, a cała domena zwykle ma.
+    const gas = project({
+      fetch: (url, params) => {
+        const body = JSON.parse(params.payload);
+        return body.origin
+          ? { code: 200, text: JSON.stringify(cruxRecord()) }
+          : { code: 404, text: '{}' };
+      }
+    });
+    const out = plain(gas.runCruxMeasurement_());
+    assert.equal(out.missing, 0, 'dane się znalazły');
+    assert.equal(out.fromOrigin, 2, 'oba form factory z poziomu domeny');
+    assert.match(out.detail, /z danych całej domeny zamiast pojedynczej strony/);
+  });
+
+  test('#124: dane domeny są oznaczone innym źródłem, żeby nie udawały danych strony', () => {
+    const gas = project({
+      fetch: (url, params) => (JSON.parse(params.payload).origin
+        ? { code: 200, text: JSON.stringify(cruxRecord()) }
+        : { code: 404, text: '{}' })
+    });
+    gas.runCruxMeasurement_();
+    const sources = [...new Set(gas.$sheet(FIELD).slice(1).map(r => r[6]))];
+    assert.deepEqual(sources, ['CRUX (domena)'], 'liczba opisuje serwis, nie tę stronę');
+  });
+
+  test('#124: o domenę pytamy raz, a nie raz na adres', () => {
+    const many = [1, 2, 3].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(many) },
+      fetch: (url, params) => (JSON.parse(params.payload).origin
+        ? { code: 200, text: JSON.stringify(cruxRecord()) }
+        : { code: 404, text: '{}' })
+    });
+    gas.runCruxMeasurement_();
+    const originCalls = gas.$fetchCalls.filter(c => JSON.parse(c.params.payload).origin);
+    assert.equal(originCalls.length, 2, 'jedno zapytanie na form factor, nie na adres');
+  });
+
+  test('#124: brak danych także dla domeny nadal daje INSUFFICIENT_DATA', () => {
+    const gas = project({ fetch: () => ({ code: 404, text: '{}' }) });
+    const out = plain(gas.runCruxMeasurement_());
+    assert.equal(out.missing, 2);
+    assert.equal(out.fromOrigin, 0);
+    assert.equal(gas.$sheet(FIELD)[1][5], 'INSUFFICIENT_DATA');
+  });
+
+  test('#124: domena jest wyliczana ze schematu i hosta, bez ścieżki', () => {
+    const gas = project();
+    assert.equal(gas.cruxOrigin_('https://www.example.pl/a/b/?x=1#y'), 'https://www.example.pl');
+    assert.equal(gas.cruxOrigin_('http://example.pl'), 'http://example.pl');
+    assert.equal(gas.cruxOrigin_('nonsens'), '');
+  });
+
   test('brak pojedynczej metryki też jest oznaczony, a nie zerowany', () => {
     const partial = cruxRecord({ largest_contentful_paint: 2100 });
     const gas = project({ fetch: () => ({ code: 200, text: JSON.stringify(partial) }) });

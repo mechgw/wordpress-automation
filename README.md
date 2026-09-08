@@ -107,6 +107,8 @@ Potrzebny jest klucz API z Google Cloud, w Script Property `PAGESPEED_API_KEY`, 
 
 **Dane terenowe i laboratoryjne są trzymane osobno i nigdy nie uśredniane w jedną liczbę.** CrUX pokazuje, co przeżyli prawdziwi użytkownicy, PSI to jeden przebieg Lighthouse na maszynie Google. Zlepienie ich dałoby wskaźnik, który nie znaczy nic.
 
+Pojedyncza podstrona rzadko ma dość ruchu, żeby CrUX ją opisał, a cała domena zwykle ma. Gdy adres wraca bez danych, pytamy więc o całą domenę i zapisujemy wynik ze źródłem `CRUX (domena)`. To rozróżnienie jest istotne: liczba opisuje wtedy serwis, a nie tę stronę, i nie wolno jej czytać jako pomiaru konkretnego adresu. O domenę pytamy raz na form factor, a nie raz na adres.
+
 Dwie decyzje wpływające na wiarygodność. Brak danych terenowych jest zapisywany jako `INSUFFICIENT_DATA`, nigdy jako zero: zero znaczyłoby wynik doskonały, czyli dokładną odwrotność prawdy. Pomiar laboratoryjny wykonuje trzy próby na adres i strategię, zapisuje każdą osobno i porównuje przez medianę, bo Lighthouse jest zmienny i pojedynczy słaby wynik nie jest dowodem regresji.
 
 Nieudany przebieg Lighthouse nie przerywa pomiaru. PageSpeed potrafi zwrócić błąd dla pojedynczego adresu i zdarza się to losowo po stronie Google; taka próba jest liczona jako nieudana, pozostałe idą dalej, a raport wymienia adres i strategię wraz z liczbą udanych prób. Przerwanie następuje wyłącznie przy błędzie systemowym, czyli złym kluczu albo wyczerpanym limicie, bo kolejne próby dałyby to samo i tylko zużyły limit.
