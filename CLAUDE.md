@@ -36,11 +36,17 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    między „twierdziłem” a „zostało potwierdzone”. Podpisuj **wszystkie**, nie wybrane:
    oznaczanie selektywne degraduje się do braku oznaczeń.
 
-   Konwencja obowiązuje od **2026-09-09T00:00:00Z**. Wpisy sprzed tej chwili są
-   niepodpisane i ich autorstwa **nie da się ustalić** — 8 września powstało kilkadziesiąt
-   komentarzy obu stron, więc granica dzienna klasyfikowałaby je jako wpisy właściciela
-   i odtwarzała błąd, któremu ta reguła zapobiega. Dopiero brak podpisu **po** tej chwili
-   znaczy „napisał właściciel”.
+   Konwencja obowiązuje od **2026-09-09T00:00:00Z**; dopiero brak podpisu po tej chwili
+   znaczy „napisał właściciel”. Wpisy z 2026-09-08 w otwartych issue zostały podpisane
+   wstecz, bo pochodziły z jednej sesji i dało się je ustalić z pamięcią sesji. Wpisów
+   **sprzed 2026-09-08 nie podpisano** — mogą pochodzić z wcześniejszych sesji, od agenta
+   zewnętrznego albo od właściciela, a zgadywanie autorstwa byłoby dokładnie tym błędem,
+   któremu ta reguła zapobiega.
+
+   Autorstwo rozpoznajesz więc po kolejności: podpis wskazuje stronę wprost; prefiks
+   `/audit-ok` albo `/audit-changes` to werdykt agenta zewnętrznego; autor
+   `github-actions` to workflow; brak podpisu po granicy to właściciel; brak podpisu
+   sprzed 2026-09-08 jest **nieustalony** i nie wolno go domyślnie przypisać.
 
    Podpis mówi **kto pisze**, nie jaką rolę akurat pełni: role zmieniają się zależnie
    od repozytorium, bo w prywatnym backlogu operacyjnym issue pisze agent zewnętrzny,
