@@ -216,6 +216,22 @@ describe('#139 bariera rewizji', () => {
     assert.equal(gate.revisionBarrier({ createdAt: NEW }), NEW, 'brak pola nie wywraca odczytu');
     assert.equal(gate.revisionBarrier(null), '', 'a brak issue daje pustą barierę → fail-closed');
   });
+
+  test('21a: barierą jest NAJNOWSZA edycja treści, czyli pierwszy węzeł', () => {
+    // `userContentEdits` zwraca edycje od najnowszej. Wersja z `last: 1` brała
+    // edycję najstarszą i cofała barierę o godziny — spóźnione `/audit-ok`
+    // wyglądało wtedy na nowsze od treści i było przyjmowane.
+    const nodes = [{ editedAt: LATEST }, { editedAt: LATER }, { editedAt: NEW }];
+    assert.equal(gate.revisionBarrier({ createdAt: OLD, userContentEdits: { nodes } }), LATEST);
+  });
+
+  test('21b: zapytanie pobiera pierwszą, nie ostatnią edycję', () => {
+    // Kolejność jest własnością API, nie funkcji: pilnujemy jej na źródle,
+    // bo pomyłka `first`/`last` jest cicha i wyłącza barierę rewizji.
+    const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'quality', 'issue-audit-gate.js'), 'utf8');
+    assert.match(source, /userContentEdits\(first:\s*1\)/);
+    assert.doesNotMatch(source, /userContentEdits\(last:/);
+  });
 });
 
 describe('#139 odporność na utracone i przestawione runy', () => {
