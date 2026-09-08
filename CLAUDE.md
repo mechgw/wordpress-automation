@@ -19,6 +19,11 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 ## Przebieg pracy
 
+0. **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
+   czeka na audyt albo wróciła z zastrzeżeniami. Brak etykiety `audit:*` znaczy, że issue
+   jest poza bramką i praca może się zacząć. Rozstrzyga komentarz zaczynający się od
+   `/audit-ok` albo `/audit-changes`; edycja treści unieważnia starsze rozstrzygnięcie.
+   Zmieniając treść issue w trakcie audytu, opisz zmianę w komentarzu.
 1. Gałąź od `main`, PR z tytułem w konwencji Conventional Commits.
 2. Wypełnij szablon PR-a: macierz testów + macierz dowodów
    ([docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md)).
@@ -54,7 +59,7 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 - Trzy punkty kontrolne, zawsze: testy lokalnie przed commitem, CI przed merge'em, workflow deployu
   przed `clasp push`. Nigdy nie omijaj jednego, żeby dotrzeć do następnego.
 - Same bramki też są testowane: `test/coverage-gate.test.js`, `test/apps-script-compare.test.js`,
-  `test/review-ack.test.js`, `test/pr-template.test.js`.
+  `test/review-ack.test.js`, `test/pr-template.test.js`, `test/issue-audit-gate.test.js`.
 - Standardy: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
 
 ## Rób / nie rób

@@ -7,7 +7,8 @@
     "tier": "cool colors = operational risk",
     "blocked": "near-black = blocked, not urgent",
     "area": "one green color for the whole area:* family",
-    "policy": "one purple color for the whole policy:* family"
+    "policy": "one purple color for the whole policy:* family",
+    "audit": "one teal color for the whole audit:* family"
   },
   "families": {
     "priority": {
@@ -36,6 +37,12 @@
       "prefix": "policy:",
       "color": "8B5CF6",
       "cardinality": "0 or more"
+    },
+    "audit": {
+      "prefix": "audit:",
+      "color": "0FA5A5",
+      "cardinality": "0 lub 1",
+      "note": "Stan audytu specyfikacji (#139). Etykietami zarządza workflow issue-audit.yml; nie ustawiaj ich ręcznie poza sytuacją awaryjną."
     }
   },
   "labels": [
@@ -224,6 +231,24 @@
       "color": "8B5CF6",
       "description": "Degraduj się łagodnie i działaj dalej, gdy taki fallback jest zamierzony.",
       "family": "policy"
+    },
+    {
+      "name": "audit:pending",
+      "color": "0FA5A5",
+      "description": "Specyfikacja czeka na audyt; praca się nie zaczyna.",
+      "family": "audit"
+    },
+    {
+      "name": "audit:ok",
+      "color": "0FA5A5",
+      "description": "Specyfikacja zaakceptowana w obecnej wersji treści.",
+      "family": "audit"
+    },
+    {
+      "name": "audit:changes",
+      "color": "0FA5A5",
+      "description": "Recenzent zgłosił zastrzeżenia do specyfikacji; issue wraca do autora.",
+      "family": "audit"
     }
   ],
   "migrations": {
