@@ -339,6 +339,8 @@ Issue objęta bramką i będąca w zakresie — `P0`, `P1` albo `P2`, **lub** `T
 
 **Nie zaczynaj pracy nad issue oznaczoną `audit:pending` albo `audit:changes`.** Brak etykiety `audit:*` oznacza, że issue jest poza bramką — praca może się zacząć.
 
+**Kto napisał specyfikację, ten jej nie audytuje.** Ponieważ wszystko idzie z jednego konta GitHuba, autora nie da się odczytać z pola `author` — rozstrzyga etykieta `by:agent`, którą agent lokalny nadaje wyłącznie własnym issue. Issue z `by:agent` audytuje recenzent zewnętrzny; issue bez niej audytuje agent lokalny. Jedna etykieta zamiast pary, bo wtedy brak jest wartością domyślną, a pomyłka jest samonaprawiająca się: nieoznaczona własna issue trafia z powrotem do autora, który rozpozna własny tekst.
+
 Recenzent rozstrzyga komentarzem zaczynającym się od `/audit-ok` albo `/audit-changes` (liczą się tylko właściciel, członkowie i współpracownicy). Edycja treści issue unieważnia rozstrzygnięcie: komenda starsza niż ostatnia zmiana treści przestaje obowiązywać i stan wraca do `audit:pending`. Zmieniając treść w trakcie audytu, napisz w komentarzu, co zmieniłeś — etykieta powie, że stan się cofnął, ale nie powie dlaczego.
 
 Bramka nie objęła wstecz issue sprzed swojego wdrożenia i nie jest mechanicznym zamkiem: GitHub nie potrafi zablokować pracy nad issue, więc egzekwuje ją dyscyplina, a nie mechanizm. Logika żyje w `scripts/quality/issue-audit-gate.js` (workflow *Issue audit gate*), testy w `test/issue-audit-gate.test.js`.

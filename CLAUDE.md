@@ -19,7 +19,10 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 ## Przebieg pracy
 
-0. **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
+0. **Cross-audyt**: zakładając issue, dodaj etykietę `by:agent`. Brak tej etykiety znaczy,
+   że autorem jest recenzent zewnętrzny. Kto napisał specyfikację, ten jej nie audytuje —
+   `by:agent` idzie do audytu zewnętrznego, issue bez niej audytujesz ty.
+   **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
    czeka na audyt albo wróciła z zastrzeżeniami. Brak etykiety `audit:*` znaczy, że issue
    jest poza bramką i praca może się zacząć. Rozstrzyga komentarz zaczynający się od
    `/audit-ok` albo `/audit-changes`; edycja treści unieważnia starsze rozstrzygnięcie.
