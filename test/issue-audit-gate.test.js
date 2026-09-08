@@ -15,7 +15,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
+const { spawnSync } = require('child_process');
+
 const gate = require('../scripts/quality/issue-audit-gate.js');
+const SCRIPT = path.join(__dirname, '..', 'scripts', 'quality', 'issue-audit-gate.js');
 const { reconcile, DEFAULT_CONFIG, AUDIT_PENDING, AUDIT_OK, AUDIT_CHANGES } = gate;
 
 const GATE_ACTIVE = DEFAULT_CONFIG.gateActiveSince;
@@ -139,6 +142,20 @@ describe('#139 rollout bez backfillu', () => {
 
   test('granica GATE_ACTIVE_SINCE jest domknięta od dołu', () => {
     assert.equal(reconcile(issue({ barrier: GATE_ACTIVE })).label, AUDIT_PENDING);
+  });
+
+  test('data startu bramki jest konfigurowalna per repozytorium', () => {
+    // Ten sam skrypt obsługuje kilka repozytoriów, a każde weszło do bramki
+    // innego dnia. Zaszyta data zrobiłaby w drugim repo cichy backfill.
+    const later = { gateActiveSince: '2026-09-09T00:00:00Z' };
+    assert.equal(reconcile(issue({ barrier: NEW }), later).action, 'none',
+      'przy późniejszej dacie startu ta sama issue jest jeszcze nieobjęta');
+    assert.equal(reconcile(issue({ barrier: NEW })).label, AUDIT_PENDING,
+      'a przy domyślnej — objęta');
+
+    const earlier = { gateActiveSince: '2026-08-01T00:00:00Z' };
+    assert.equal(reconcile(issue({ barrier: OLD }), earlier).label, AUDIT_PENDING,
+      'wcześniejsza data startu obejmuje starsze issue');
   });
 });
 
@@ -328,6 +345,64 @@ describe('#139 ślad dla człowieka', () => {
   });
 });
 
+describe('#139 CLI: konfiguracja daty startu nie może zawieść po cichu', () => {
+  // Wywołanie bez sieci: walidacja argumentów następuje przed pierwszym `gh`,
+  // więc błędne wejście kończy się kodem 2, zanim cokolwiek zostanie pobrane.
+  const run = (extra, env = {}) => spawnSync(process.execPath,
+    [SCRIPT, '--issue', '1', '--repo', 'owner/name', '--dry-run', ...extra],
+    { encoding: 'utf8', env: { ...process.env, AUDIT_GATE_ACTIVE_SINCE: '', ...env } });
+
+  test('flaga bez wartości kończy przebieg kodem 2, zamiast wracać do domyślnej', () => {
+    const r = run(['--gate-active-since']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /bez wartości/);
+  });
+
+  test('pusta wartość flagi też jest błędem', () => {
+    // W workflow `--gate-active-since "$ZMIENNA"` z pustą zmienną przekazuje
+    // właśnie pusty argument. To najgroźniejszy wariant, bo wygląda poprawnie.
+    const r = run(['--gate-active-since', '']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /bez wartości/);
+  });
+
+  test('wartość, która nie jest datą, kończy przebieg kodem 2', () => {
+    const r = run(['--gate-active-since', 'wczoraj']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /RRRR-MM-DD/);
+  });
+
+  test('daty, które new Date() po cichu normalizuje, są odrzucane', () => {
+    // Zmierzone w Node 24: '0' → 1999-12-31, '2026' → 2026-01-01,
+    // '2026-09-08' → północ UTC, a '2026-02-30T00:00:00Z' → 2 marca.
+    // Każdy wariant cofnąłby moment startu bramki i objął audytem archiwum.
+    for (const value of ['0', '2026', '2026-09-08', '2026-9-8T07:00:00Z', '2026-09-08T07:00:00']) {
+      const r = run(['--gate-active-since', value]);
+      assert.equal(r.status, 2, value + ' → ' + r.stderr);
+      assert.match(r.stderr, /RRRR-MM-DD/, value);
+    }
+  });
+
+  test('kształt poprawny, ale data nieistniejąca, też jest odrzucana', () => {
+    const r = run(['--gate-active-since', '2026-02-30T00:00:00Z']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /nie istnieje/);
+  });
+
+  test('poprawna data i brak flagi przechodzą walidację', () => {
+    // Odcinamy `gh` z PATH, żeby test nie dotykał sieci: skrypt ma dojść
+    // do pobierania stanu i dopiero tam polec, a nie odrzucić poprawne wejście.
+    // Windows używa `Path`, POSIX `PATH` — czyścimy oba.
+    const offline = { PATH: '', Path: '' };
+    for (const extra of [[], ['--gate-active-since', '2026-09-08T07:00:00Z']]) {
+      const r = run(extra, offline);
+      assert.doesNotMatch(String(r.stderr), /gate-active-since/,
+        'walidacja odrzuciła poprawne wejście: ' + JSON.stringify(extra));
+      assert.notEqual(r.status, 2, r.stderr);
+    }
+  });
+});
+
 describe('#139 kontrakt workflow', () => {
   // Część kryteriów żyje w YAML-u, nie w logice: guard na komentarze w PR-ach,
   // serializacja i lista zdarzeń. Bez tego testu przeszłyby niezauważone.
@@ -341,6 +416,11 @@ describe('#139 kontrakt workflow', () => {
   test('concurrency serializuje per issue i nie anuluje runów w locie', () => {
     assert.match(workflow, /group:\s*issue-audit-\$\{\{[^}]*issue\.number/);
     assert.match(workflow, /cancel-in-progress:\s*false/);
+  });
+
+  test('workflow podaje datę startu bramki jawnie, zamiast polegać na domyślnej', () => {
+    assert.match(workflow, /GATE_ACTIVE_SINCE:\s*"\d{4}-\d{2}-\d{2}T/);
+    assert.match(workflow, /--gate-active-since\s+"\$GATE_ACTIVE_SINCE"/);
   });
 
   test('obsłużone są wszystkie zdarzenia z kryteriów akceptacji', () => {

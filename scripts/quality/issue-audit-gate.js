@@ -49,6 +49,11 @@ const DEFAULT_CONFIG = {
   // Bramka nie obejmuje wstecz issue sprzed swojego wdrożenia. Bez tej stałej
   // reconciler wyliczyłby `audit:pending` dla całego archiwum, czyli zrobiłby
   // backfill, którego świadomie nie chcemy.
+  //
+  // Wartość domyślna dotyczy TEGO repozytorium. Skrypt obsługuje też inne
+  // (np. prywatny backlog operacyjny), a każde weszło do bramki innego dnia —
+  // tam datę podaje się przez `--gate-active-since` albo
+  // `AUDIT_GATE_ACTIVE_SINCE`.
   gateActiveSince: '2026-09-08T00:00:00Z'
 };
 
@@ -313,20 +318,62 @@ function apply(repo, issue, result, labels, cfg) {
 
 function main(argv) {
   const args = {};
+  let sinceGiven = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--issue') args.issue = argv[++i];
     else if (argv[i] === '--repo') args.repo = argv[++i];
+    else if (argv[i] === '--gate-active-since') { sinceGiven = true; args.gateActiveSince = argv[++i]; }
     else if (argv[i] === '--dry-run') args.dryRun = true;
   }
   const repo = args.repo || process.env.GITHUB_REPOSITORY;
   if (!args.issue || !repo) {
-    console.error('Usage: node scripts/quality/issue-audit-gate.js --issue <number> [--repo owner/name] [--dry-run]');
+    console.error('Usage: node scripts/quality/issue-audit-gate.js --issue <number> [--repo owner/name]');
+    console.error('         [--gate-active-since <ISO>] [--dry-run]');
     process.exit(2);
+  }
+
+  // Data uruchomienia bramki jest własnością repozytorium, nie skryptu: ten sam
+  // skrypt obsługuje kilka repozytoriów, a każde weszło do bramki innego dnia.
+  // Zła wartość cofa moment startu i robi cichy backfill całego archiwum,
+  // dlatego niepoprawną odrzucamy, zamiast po cichu wracać do domyślnej.
+  const config = {};
+  const since = sinceGiven ? args.gateActiveSince : (process.env.AUDIT_GATE_ACTIVE_SINCE || '');
+
+  // Podana flaga bez wartości albo z pustą wartością to najgroźniejszy przypadek:
+  // w workflow `--gate-active-since "$GATE_ACTIVE_SINCE"` z niezdefiniowaną
+  // zmienną przekazuje pusty argument. Milczące zejście do wartości domyślnej
+  // cofnęłoby moment startu bramki i objęło audytem całe archiwum — dlatego
+  // brak wartości jest błędem, nie sygnałem „użyj domyślnej”.
+  if (sinceGiven && !String(since || '').trim()) {
+    console.error('::error::--gate-active-since podano bez wartości; nie zgaduję daty uruchomienia bramki.');
+    process.exit(2);
+  }
+
+  if (since) {
+    // `new Date()` jest zbyt pobłażliwe, żeby użyć go jako walidacji.
+    // Zmierzone w Node 24: '0' → 1999-12-31, '2026' → 2026-01-01, a '2026-02-30'
+    // (także w pełnej formie z 'Z') → 2026-03-02. Każdy z tych wariantów cofa
+    // moment startu bramki i po cichu obejmuje audytem archiwum, czyli robi
+    // dokładnie to, czemu ten parametr ma zapobiegać. Stąd format wymuszony
+    // wzorcem, a potem sprawdzenie, że data w ogóle istnieje w kalendarzu.
+    const shape = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+    if (!shape.test(since)) {
+      console.error('::error::--gate-active-since musi mieć postać RRRR-MM-DDTGG:MM:SSZ (UTC); otrzymano: ' + since);
+      process.exit(2);
+    }
+    const parsed = new Date(since);
+    // Round-trip wyłapuje daty poprawne co do kształtu, a nieistniejące:
+    // '2026-02-30T00:00:00Z' przechodzi wzorzec, ale wraca jako 2 marca.
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 19) !== since.slice(0, 19)) {
+      console.error('::error::--gate-active-since wskazuje datę, która nie istnieje: ' + since);
+      process.exit(2);
+    }
+    config.gateActiveSince = parsed.toISOString();
   }
 
   const input = fetchInput(repo, args.issue);
   const previous = currentAuditLabel(input.labels, DEFAULT_CONFIG);
-  const result = reconcile(input);
+  const result = reconcile(input, config);
   const summary = '#' + args.issue + ': ' + result.action +
     (result.label ? ' -> ' + result.label : '') + ' - ' + result.reason;
 
