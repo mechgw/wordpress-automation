@@ -350,11 +350,25 @@ function main(argv) {
   }
 
   if (since) {
-    if (isNaN(new Date(since).getTime())) {
-      console.error('::error::--gate-active-since musi być datą ISO 8601; otrzymano: ' + since);
+    // `new Date()` jest zbyt pobłażliwe, żeby użyć go jako walidacji.
+    // Zmierzone w Node 24: '0' → 1999-12-31, '2026' → 2026-01-01, a '2026-02-30'
+    // (także w pełnej formie z 'Z') → 2026-03-02. Każdy z tych wariantów cofa
+    // moment startu bramki i po cichu obejmuje audytem archiwum, czyli robi
+    // dokładnie to, czemu ten parametr ma zapobiegać. Stąd format wymuszony
+    // wzorcem, a potem sprawdzenie, że data w ogóle istnieje w kalendarzu.
+    const shape = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+    if (!shape.test(since)) {
+      console.error('::error::--gate-active-since musi mieć postać RRRR-MM-DDTGG:MM:SSZ (UTC); otrzymano: ' + since);
       process.exit(2);
     }
-    config.gateActiveSince = new Date(since).toISOString();
+    const parsed = new Date(since);
+    // Round-trip wyłapuje daty poprawne co do kształtu, a nieistniejące:
+    // '2026-02-30T00:00:00Z' przechodzi wzorzec, ale wraca jako 2 marca.
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 19) !== since.slice(0, 19)) {
+      console.error('::error::--gate-active-since wskazuje datę, która nie istnieje: ' + since);
+      process.exit(2);
+    }
+    config.gateActiveSince = parsed.toISOString();
   }
 
   const input = fetchInput(repo, args.issue);

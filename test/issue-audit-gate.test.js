@@ -369,7 +369,24 @@ describe('#139 CLI: konfiguracja daty startu nie może zawieść po cichu', () =
   test('wartość, która nie jest datą, kończy przebieg kodem 2', () => {
     const r = run(['--gate-active-since', 'wczoraj']);
     assert.equal(r.status, 2, r.stderr);
-    assert.match(r.stderr, /ISO 8601/);
+    assert.match(r.stderr, /RRRR-MM-DD/);
+  });
+
+  test('daty, które new Date() po cichu normalizuje, są odrzucane', () => {
+    // Zmierzone w Node 24: '0' → 1999-12-31, '2026' → 2026-01-01,
+    // '2026-09-08' → północ UTC, a '2026-02-30T00:00:00Z' → 2 marca.
+    // Każdy wariant cofnąłby moment startu bramki i objął audytem archiwum.
+    for (const value of ['0', '2026', '2026-09-08', '2026-9-8T07:00:00Z', '2026-09-08T07:00:00']) {
+      const r = run(['--gate-active-since', value]);
+      assert.equal(r.status, 2, value + ' → ' + r.stderr);
+      assert.match(r.stderr, /RRRR-MM-DD/, value);
+    }
+  });
+
+  test('kształt poprawny, ale data nieistniejąca, też jest odrzucana', () => {
+    const r = run(['--gate-active-since', '2026-02-30T00:00:00Z']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /nie istnieje/);
   });
 
   test('poprawna data i brak flagi przechodzą walidację', () => {
