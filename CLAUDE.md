@@ -28,8 +28,8 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
    **Podpisuj każdą treść issue i każdy komentarz**, który piszesz — ostatnią linijką:
 
-   - agent lokalny: `_— agent lokalny (Claude Code)_`
-   - recenzent zewnętrzny: `_— recenzent zewnętrzny (GPT)_`
+   - agent lokalny: `_— Claude Code (agent lokalny)_`
+   - agent zewnętrzny: `_— GPT (agent zewnętrzny)_`
 
    Wszystko idzie z jednego konta GitHuba, więc bez podpisu nie da się później odróżnić
    własnego, niezweryfikowanego twierdzenia od audytu drugiej strony — a to jest różnica
@@ -42,8 +42,13 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    i odtwarzała błąd, któremu ta reguła zapobiega. Dopiero brak podpisu **po** tej chwili
    znaczy „napisał właściciel”.
 
-   Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt
-   recenzenta zewnętrznego, więc te wpisy pozostają rozpoznawalne także bez podpisu.
+   Podpis mówi **kto pisze**, nie jaką rolę akurat pełni: role zmieniają się zależnie
+   od repozytorium, bo w prywatnym backlogu operacyjnym issue pisze agent zewnętrzny,
+   a audytuje lokalny. Nawias opisuje trwałą różnicę w dostępie — lokalny widzi arkusz,
+   dane GSC i GA4 oraz kod, zewnętrzny samo repozytorium.
+
+   Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt audytu,
+   więc te wpisy pozostają rozpoznawalne także bez podpisu.
 
    Etykieta `by:agent` zostaje mimo to, bo działa na listach i filtrach, których podpis
    nie obsługuje.
