@@ -123,10 +123,17 @@ function lastScopeEntryAt(currentLabels, labelEvents, cfg) {
 /**
  * Bariera rewizji: czas ostatniej edycji TREŚCI. Issue nigdy nieedytowana nie ma
  * wpisu w `userContentEdits` — wtedy barierą jest moment utworzenia.
+ *
+ * UWAGA: `userContentEdits` zwraca edycje **od najnowszej**, więc najnowszą daje
+ * `first: 1`, a `last: 1` — najstarszą. Pomyłka tutaj jest cicha i groźna:
+ * bariera cofa się do pierwszej edycji, przez co spóźniona komenda `/audit-ok`
+ * wygląda na nowszą od treści i zostaje przyjęta dla wersji, której nikt nie
+ * czytał. Sprawdzone empirycznie na #139 (first:3 → 06:13, 06:13, 06:13;
+ * last:3 → 05:10, 04:55, 04:46).
  */
 function revisionBarrier(issueNode) {
   const edits = (issueNode && issueNode.userContentEdits && issueNode.userContentEdits.nodes) || [];
-  return (edits.length && edits[edits.length - 1].editedAt) || (issueNode && issueNode.createdAt) || '';
+  return (edits.length && edits[0].editedAt) || (issueNode && issueNode.createdAt) || '';
 }
 
 /**
@@ -220,7 +227,7 @@ function fetchInput(repo, issue) {
           state
           createdAt
           labels(first:100) { nodes { name } }
-          userContentEdits(last:1) { nodes { editedAt } }
+          userContentEdits(first:1) { nodes { editedAt } }
         }
       }
     }`;

@@ -216,6 +216,30 @@ describe('#139 bariera rewizji', () => {
     assert.equal(gate.revisionBarrier({ createdAt: NEW }), NEW, 'brak pola nie wywraca odczytu');
     assert.equal(gate.revisionBarrier(null), '', 'a brak issue daje pustą barierę → fail-closed');
   });
+
+  test('21a: barierą jest NAJNOWSZA edycja treści, czyli pierwszy węzeł', () => {
+    // `userContentEdits` zwraca edycje od najnowszej. Wersja z `last: 1` brała
+    // edycję najstarszą i cofała barierę o godziny — spóźnione `/audit-ok`
+    // wyglądało wtedy na nowsze od treści i było przyjmowane.
+    const nodes = [{ editedAt: LATEST }, { editedAt: LATER }, { editedAt: NEW }];
+    assert.equal(gate.revisionBarrier({ createdAt: OLD, userContentEdits: { nodes } }), LATEST);
+  });
+
+  test('21b: każde zapytanie o historię edycji pobiera pierwszą, nie ostatnią', () => {
+    // Kolejność jest własnością API, nie funkcji: `revisionBarrier()` dostaje
+    // gotową listę i nie wie, skąd pochodzi. Pilnujemy więc kształtu zapytania
+    // na źródle, bo pomyłka `first`/`last` jest cicha i wyłącza barierę rewizji.
+    //
+    // Sprawdzamy ARGUMENTY każdego wywołania, a nie dosłowny tekst: inaczej
+    // spacja albo dodatkowy parametr (`after:`) przepuściłyby regresję.
+    const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'quality', 'issue-audit-gate.js'), 'utf8');
+    const calls = [...source.matchAll(/userContentEdits\s*\(([^)]*)\)/g)].map(m => m[1]);
+    assert.ok(calls.length, 'zapytanie musi w ogóle pobierać historię edycji treści');
+    for (const args of calls) {
+      assert.match(args, /\bfirst\s*:\s*1\b/, 'najnowsza edycja to first: 1');
+      assert.doesNotMatch(args, /\blast\s*:/, '`last:` zwraca edycję NAJSTARSZĄ');
+    }
+  });
 });
 
 describe('#139 odporność na utracone i przestawione runy', () => {
