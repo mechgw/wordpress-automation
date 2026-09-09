@@ -63,8 +63,24 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
    Podpis mówi **kto pisze**, nie jaką rolę akurat pełni: role zmieniają się zależnie
    od repozytorium, bo w prywatnym backlogu operacyjnym issue pisze agent zewnętrzny,
-   a audytuje lokalny. Nawias opisuje trwałą różnicę w dostępie — lokalny widzi arkusz,
-   dane GSC i GA4 oraz kod, zewnętrzny samo repozytorium.
+   a audytuje lokalny.
+
+   **Uzasadnieniem cross-audytu jest wyłącznie to, że autor nie audytuje własnej
+   specyfikacji.** Nic poza tym — a już na pewno nie domniemana różnica w dostępie
+   do narzędzi.
+
+   Wcześniejsze wersje tego akapitu wyliczały, co która strona widzi, i **dwa razy
+   z rzędu okazało się to nieprawdą**: najpierw przypisano stronie lokalnej arkusz,
+   którego nie ma, potem przypisano jej na wyłączność przeglądanie stron, które ma
+   też strona zewnętrzna. Takich list się tu nie prowadzi, bo dezaktualizują się
+   ciszej, niż powstają, a reguła oparta na nieaktualnej liście myli się bez ostrzeżenia.
+
+   **Nie zakładaj, czego druga strona nie potrafi — zapytaj albo sprawdź.** Jedyna
+   różnica warta zapisania jest operacyjna i wynika z miejsca uruchomienia: agent
+   lokalny pracuje na klonie repozytorium, więc uruchamia testy, bramki jakości i git;
+   agent zewnętrzny działa przez API i pisze do arkusza. Zadanie wymagające zapisu
+   do arkusza opisujemy więc w issue z **gotowymi wierszami**, a nie z opisem, co mniej
+   więcej wpisać.
 
    Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt audytu,
    więc te wpisy pozostają rozpoznawalne także bez podpisu.
