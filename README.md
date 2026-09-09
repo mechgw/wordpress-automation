@@ -101,7 +101,7 @@ Trzy sytuacje są rozróżniane, bo każda znaczy co innego. Zadanie monitorują
 
 ### Pomiar wydajności: CrUX i PageSpeed Insights
 
-*SEO / GSC → Przygotuj pomiar wydajności* zakłada trzy zakładki: `PERFORMANCE URLS` z listą monitorowanych adresów, `CWV FIELD` z danymi terenowymi i `PAGESPEED LAB` z pomiarami laboratoryjnymi. *Zmierz wydajność* uruchamia oba pomiary.
+*SEO / GSC → Przygotuj pomiar wydajności* zakłada cztery zakładki: `PERFORMANCE URLS` z listą monitorowanych adresów, `CWV FIELD` z danymi terenowymi, `PAGESPEED LAB` z pomiarami laboratoryjnymi i `PAGESPEED FINDINGS` z diagnozą. *Zmierz wydajność* uruchamia oba pomiary.
 
 Potrzebny jest klucz API z Google Cloud, w Script Property `PAGESPEED_API_KEY`, z włączonymi PageSpeed Insights API oraz Chrome UX Report API. Obie usługi działają na klucz w parametrze zapytania, bez OAuth, więc włączenie tej funkcji nie wymaga ponownej autoryzacji projektu.
 
@@ -116,6 +116,16 @@ Nieudany przebieg Lighthouse nie przerywa pomiaru. PageSpeed potrafi zwrócić b
 Pomiar laboratoryjny ma budżet czasu. Jedno wywołanie PSI trwa kilkanaście do kilkudziesięciu sekund, a przy trzech próbach i dwóch strategiach daje sześć wywołań na adres, więc kilka adresów przekroczyłoby limit czasu wykonania Apps Script. Przebieg mierzy tyle adresów, ile mieści się w budżecie czterech minut, i zapamiętuje, gdzie skończył; kolejny zaczyna od następnego adresu. Przy cyklicznym uruchamianiu wszystkie doczekają się pomiaru, a komunikat mówi, ile zostało na później. Budżet jest sprawdzany przed rozpoczęciem adresu, nie w trakcie, bo mediana z dwóch prób zamiast trzech jest gorsza niż jej brak.
 
 Zapis jest idempotentny: ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować, a historia wcześniejszych okresów zostaje.
+
+#### Diagnoza: `PAGESPEED FINDINGS`
+
+Same metryki mówią, **że** strona jest wolna, ale nie **dlaczego**. Odpowiedź PSI zawiera już diagnozę, więc obok liczb zapisujemy trzy rodzaje ustaleń: `ELEMENT LCP` (selektor albo fragment elementu, który wyznacza LCP), `SZANSA` (audyty typu opportunity z szacowaną oszczędnością) oraz `THIRD-PARTY` (transfer i czas wątku głównego na podmiot).
+
+**Koszt i potencjalna oszczędność mają osobne kolumny.** `Czas (ms)` i `Transfer (KiB)` opisują to, co strona realnie zużywa; `Potencjalna oszczędność (ms)` i `Potencjalna oszczędność (KiB)` to, co da się odzyskać. Jednostką jest **KiB**, czyli 1024 bajty — tak samo jak w raporcie PageSpeed, żeby liczby dało się porównywać wprost. Podsumowanie third-party trafia wyłącznie do kolumn kosztu — wpisanie go do oszczędności sprawiłoby, że arkusz kłamałby semantycznie.
+
+**To jest snapshot bieżącej diagnozy, nie historia.** Udany pomiar zastępuje cały zakres `(URL, strategia)`, więc ustalenie, którego nie ma w nowej odpowiedzi, znika z arkusza. Zwykły upsert zostawiłby nieaktualne szanse jako obowiązującą diagnozę. Historia liczb jest w `PAGESPEED LAB` i tam należy. Zakres bez ani jednej udanej próby nie jest ruszany: nieudany przebieg nie kasuje ostatniej dobrej diagnozy.
+
+Ustalenia pochodzą z ostatniej **udanej** próby, a kolumna `Próba` mówi z której — dzięki temu diagnozę da się połączyć z konkretnym wierszem metryki w `PAGESPEED LAB`. Szanse są kwalifikowane progiem (50 ms albo 20 KiB) i ograniczone do pięciu na adres i strategię, w deterministycznej kolejności; bez tego arkusz zapełniłby się pozycjami bez znaczenia praktycznego.
 
 ### Google Business Profile
 
