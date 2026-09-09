@@ -66,15 +66,21 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    a audytuje lokalny.
 
    **Uzasadnieniem cross-audytu jest wyłącznie to, że autor nie audytuje własnej
-   specyfikacji.** Nie różnica w dostępie do danych: żadna strona nie ma dostępu
-   szerszego od drugiej. Agent lokalny ma repozytorium, wykonywanie kodu i pobieranie
-   publicznych stron, ale **nie ma arkusza**. Agent zewnętrzny ma repozytorium
-   i arkusz, ale nie wykonuje kodu lokalnie. Wcześniejsza wersja tego akapitu
-   twierdziła inaczej i była po prostu nieprawdziwa.
+   specyfikacji.** Nic poza tym — a już na pewno nie domniemana różnica w dostępie
+   do narzędzi.
 
-   Praktyczna konsekwencja: zadanie wymagające zapisu do arkusza opisujemy w issue
-   na tyle dokładnie, żeby agent zewnętrzny mógł je wykonać — z gotowymi wierszami,
-   nie z opisem, co mniej więcej wpisać.
+   Wcześniejsze wersje tego akapitu wyliczały, co która strona widzi, i **dwa razy
+   z rzędu okazało się to nieprawdą**: najpierw przypisano stronie lokalnej arkusz,
+   którego nie ma, potem przypisano jej na wyłączność przeglądanie stron, które ma
+   też strona zewnętrzna. Takich list się tu nie prowadzi, bo dezaktualizują się
+   ciszej, niż powstają, a reguła oparta na nieaktualnej liście myli się bez ostrzeżenia.
+
+   **Nie zakładaj, czego druga strona nie potrafi — zapytaj albo sprawdź.** Jedyna
+   różnica warta zapisania jest operacyjna i wynika z miejsca uruchomienia: agent
+   lokalny pracuje na klonie repozytorium, więc uruchamia testy, bramki jakości i git;
+   agent zewnętrzny działa przez API i pisze do arkusza. Zadanie wymagające zapisu
+   do arkusza opisujemy więc w issue z **gotowymi wierszami**, a nie z opisem, co mniej
+   więcej wpisać.
 
    Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt audytu,
    więc te wpisy pozostają rozpoznawalne także bez podpisu.
