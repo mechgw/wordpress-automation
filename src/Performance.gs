@@ -22,6 +22,28 @@ const PERF_URLS_HEADER = ['URL', 'Rola', 'Uwagi'];
 const PERF_FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', 'Stan', 'Źródło', 'Pobrano'];
 const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano'];
 
+const PERF_FINDINGS_SHEET = 'PAGESPEED FINDINGS';
+// Nazwy czterech pierwszych kolumn są celowo takie same jak w PAGESPEED LAB:
+// dzięki temu ustalenie da się połączyć z konkretnym wierszem metryki.
+const PERF_FINDINGS_HEADER = [
+  'Pomiar', 'URL', 'Strategia', 'Próba', 'Rodzaj', 'Nazwa', 'Szczegół',
+  // KiB, nie KB: przeliczamy przez 1024, tak samo jak raport PageSpeed, więc
+  // liczby są wprost porównywalne z tym, co widać w interfejsie.
+  'Czas (ms)', 'Transfer (KiB)', 'Potencjalna oszczędność (ms)', 'Potencjalna oszczędność (KiB)',
+  'Źródło', 'Pobrano'
+];
+
+const PSI_FINDING_LCP = 'ELEMENT LCP';
+const PSI_FINDING_OPPORTUNITY = 'SZANSA';
+const PSI_FINDING_THIRD_PARTY = 'THIRD-PARTY';
+
+// Ile szans zapisujemy na parę URL/strategia i od jakiej wielkości w ogóle je
+// bierzemy pod uwagę. Bez progu arkusz zapełniłby się pozycjami wartymi
+// kilkanaście milisekund, które niczego nie zmieniają.
+const PSI_OPPORTUNITY_LIMIT = 5;
+const PSI_OPPORTUNITY_MIN_MS = 50;
+const PSI_OPPORTUNITY_MIN_BYTES = 20 * 1024;
+
 const CRUX_API = 'https://chromeuxreport.googleapis.com/v1/records:queryRecord';
 const PSI_API = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 
@@ -212,6 +234,134 @@ function parsePsiRun_(response, url, strategy, attempt, measuredAt, now) {
   return rows;
 }
 
+/**
+ * Węzeł elementu LCP z audytu; `null`, gdy audyt go nie zawiera.
+ *
+ * Kształt `details.items` bywa jedno- albo dwupoziomowy w zależności od wersji
+ * Lighthouse, więc szukamy węzła na obu poziomach zamiast zakładać jeden.
+ */
+function psiLcpNode_(audit) {
+  const groups = (audit && audit.details && audit.details.items) || [];
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    if (group && group.node) return group.node;
+    const inner = (group && group.items) || [];
+    for (let j = 0; j < inner.length; j++) {
+      if (inner[j] && inner[j].node) return inner[j].node;
+    }
+  }
+  return null;
+}
+
+/** Czytelny opis węzła: selektor, a gdy go brak — etykieta albo fragment HTML. */
+function psiNodeLabel_(node) {
+  if (!node) return '';
+  return String((node.selector || node.nodeLabel || node.snippet) || '').trim();
+}
+
+/** Nazwa podmiotu third-party; API zwraca ją raz jako tekst, raz jako obiekt. */
+function psiEntityName_(entity) {
+  if (!entity) return '';
+  if (typeof entity === 'string') return entity.trim();
+  return String((entity.text || entity.name) || '').trim();
+}
+
+/**
+ * Szanse warte zapisania, w deterministycznej kolejności.
+ *
+ * Jedna szansa może mieć oszczędność w milisekundach, w bajtach albo w obu,
+ * więc porządek musi być zdefiniowany jawnie: milisekundy malejąco, przy remisie
+ * bajty malejąco, a przy pełnym remisie identyfikator audytu — inaczej wynik
+ * zależałby od kolejności kluczy w odpowiedzi API.
+ */
+function psiOpportunities_(audits) {
+  const found = [];
+  Object.keys(audits || {}).forEach(function (id) {
+    const audit = audits[id];
+    const details = audit && audit.details;
+    if (!details || details.type !== 'opportunity') return;
+    const ms = Number(details.overallSavingsMs || 0);
+    const bytes = Number(details.overallSavingsBytes || 0);
+    if (ms < PSI_OPPORTUNITY_MIN_MS && bytes < PSI_OPPORTUNITY_MIN_BYTES) return;
+    found.push({ id: id, title: String(audit.title || ''), ms: ms, bytes: bytes });
+  });
+  found.sort(function (a, b) {
+    return (b.ms - a.ms) || (b.bytes - a.bytes) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  });
+  return found.slice(0, PSI_OPPORTUNITY_LIMIT);
+}
+
+/**
+ * Ustalenia diagnostyczne z jednego przebiegu PSI.
+ *
+ * Koszt i potencjalna oszczędność mają OSOBNE kolumny. `third-party-summary`
+ * opisuje rzeczywisty transfer i czas wątku głównego, a nie to, co da się
+ * zaoszczędzić; wpisanie go do kolumn oszczędności sprawiłoby, że arkusz
+ * kłamałby semantycznie.
+ */
+function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now) {
+  const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
+  const rows = [];
+  const add = function (kind, name, detail, timeMs, transferKb, savingsMs, savingsKb) {
+    rows.push([
+      measuredAt, url, strategy, attempt, kind, name, cellSafeText_(detail).text,
+      timeMs, transferKb, savingsMs, savingsKb, 'PSI_LAB', now
+    ]);
+  };
+
+  // Brak audytu albo brak użytecznego węzła nie jest błędem i nie tworzy pustego
+  // wiersza: PSI nie zawsze potrafi wskazać element LCP.
+  const label = psiNodeLabel_(psiLcpNode_(audits['largest-contentful-paint-element']));
+  if (label) add(PSI_FINDING_LCP, 'largest-contentful-paint-element', label, '', '', '', '');
+
+  psiOpportunities_(audits).forEach(function (o) {
+    add(PSI_FINDING_OPPORTUNITY, o.id, o.title, '', '',
+      o.ms ? Math.round(o.ms) : '', o.bytes ? Math.round(o.bytes / 1024) : '');
+  });
+
+  const thirdParty = ((audits['third-party-summary'] || {}).details || {}).items || [];
+  thirdParty.forEach(function (item) {
+    const name = psiEntityName_(item && item.entity);
+    const time = Number((item && item.mainThreadTime) || 0);
+    const bytes = Number((item && item.transferSize) || 0);
+    if (!name || (!time && !bytes)) return;
+    add(PSI_FINDING_THIRD_PARTY, name, '', Math.round(time), Math.round(bytes / 1024), '', '');
+  });
+
+  return rows;
+}
+
+/**
+ * Zapis ustaleń jako SNAPSHOT bieżącej diagnozy, nie jako historii.
+ *
+ * Udany pomiar zastępuje CAŁY zakres (URL, strategia), więc ustalenie, którego
+ * nie ma w nowej odpowiedzi, znika z arkusza. Zwykły upsert po kluczach
+ * przychodzących zostawiłby nieistniejące już szanse jako bieżącą diagnozę.
+ * Zakres bez ani jednej udanej próby nie jest ruszany: nieudany przebieg nie
+ * może skasować ostatniej dobrej diagnozy. Historia liczb jest w PAGESPEED LAB.
+ */
+function replaceFindingsScopes_(rows, scopes) {
+  const sheet = ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
+  const width = PERF_FINDINGS_HEADER.length;
+  const scopeOf = function (row) { return String(row[1]) + ' ' + String(row[2]); };
+  const replaced = {};
+  (scopes || []).forEach(function (scope) { replaced[scope] = true; });
+
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : [];
+  const kept = existing.filter(function (row) {
+    return String(row[1] || '') !== '' && !replaced[scopeOf(row)];
+  });
+
+  const combined = kept.concat(rows);
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  if (combined.length) {
+    ensureSheetRows_(sheet, combined.length + 1);
+    sheet.getRange(2, 1, combined.length, width).setValues(combined);
+  }
+  return { written: rows.length, kept: kept.length };
+}
+
 /** Mediana wartości; pusta lista daje pusty wynik, nie zero. */
 function medianOfValues_(values) {
   const sorted = values.slice().filter(function (v) { return typeof v === 'number' && !isNaN(v); }).sort(function (a, b) { return a - b; });
@@ -336,11 +486,17 @@ function runPsiMeasurement_() {
   // w połowie zostawiłoby adres z częścią prób, a mediana z dwóch prób jest
   // gorsza niż jej brak.
   const failures = [];
+  const findings = [];
+  const findingScopes = [];
 
   while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
     const entry = urls[index % urls.length];
     ['mobile', 'desktop'].forEach(function (strategy) {
       let ok = 0;
+      // Ustalenia są jakościowe i stabilne między próbami, więc trzy komplety
+      // byłyby szumem. Bierzemy ostatnią UDANĄ próbę: późniejsza nieudana nie
+      // zmienia wyboru, bo przypisujemy tylko po powodzeniu.
+      let lastGood = null;
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
@@ -349,12 +505,18 @@ function runPsiMeasurement_() {
           parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now)
             .forEach(function (row) { rows.push(row); });
           ok++;
+          lastGood = { response: response, attempt: attempt };
         } catch (e) {
           // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
           // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
           // Lighthouse wywraca się losowo i to normalne.
           if (!e.transient) throw e;
         }
+      }
+      if (lastGood) {
+        findingScopes.push(entry.url + ' ' + strategy);
+        parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
+          .forEach(function (row) { findings.push(row); });
       }
       if (ok < PSI_ATTEMPTS) {
         failures.push(entry.url + ' (' + strategy + '): ' + ok + ' z ' + PSI_ATTEMPTS + ' prób');
@@ -366,6 +528,7 @@ function runPsiMeasurement_() {
 
   savePsiCursor_(index % urls.length);
   upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], rows);
+  replaceFindingsScopes_(findings, findingScopes);
 
   const skipped = urls.length - measured;
   return {
@@ -374,6 +537,7 @@ function runPsiMeasurement_() {
     measured: measured,
     skipped: skipped,
     failures: failures,
+    findings: findings.length,
     medians: psiMedians_(rows),
     detail: rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
       PSI_ATTEMPTS + ' próby na adres i strategię)' +
@@ -387,6 +551,7 @@ function przygotujPomiarWydajnosci() {
   ensureSheetWithHeader_(PERF_URLS_SHEET, PERF_URLS_HEADER);
   ensureSheetWithHeader_(PERF_FIELD_SHEET, PERF_FIELD_HEADER);
   ensureSheetWithHeader_(PERF_LAB_SHEET, PERF_LAB_HEADER);
+  ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
   const configured = isPerformanceConfigured_();
   const urls = performanceUrls_().length;
 
@@ -415,6 +580,7 @@ function zmierzWydajnosc() {
     '',
     'Dane terenowe (CrUX): ' + field.detail + '.',
     'Dane laboratoryjne (PSI): ' + lab.detail + '.',
+    'Ustalenia diagnostyczne: ' + (lab.findings || 0) + ' w arkuszu „' + PERF_FINDINGS_SHEET + '”.',
     '',
     'Brak danych terenowych nie jest błędem strony, tylko informacją o zbyt małym ruchu.',
     (lab.failures && lab.failures.length
