@@ -29,7 +29,7 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    **Podpisuj każdą treść issue i każdy komentarz**, który piszesz — ostatnią linijką:
 
    - agent lokalny: `_— Claude Code (agent lokalny)_`
-   - agent zewnętrzny: `_— GPT (agent zewnętrzny)_`
+   - agent zewnętrzny: `_— ChatGPT_`
 
    Wszystko idzie z jednego konta GitHuba, więc bez podpisu nie da się później odróżnić
    własnego, niezweryfikowanego twierdzenia od audytu drugiej strony — a to jest różnica
@@ -55,6 +55,11 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    5. brak podpisu, wpis sprzed 2026-09-08 → **autorstwo pozostaje nieustalone**.
       Nie przypisuj takiego wpisu żadnej ze stron i nie traktuj go jako potwierdzenia
       z zewnątrz.
+
+   Podpis strony zewnętrznej brzmi `_— ChatGPT_`, bo tak podpisuje się ona w praktyce,
+   konsekwentnie i bez instruowania. Warunek jest spełniony — wiadomo, kto napisał wpis —
+   a dopasowanie się do faktycznego zachowania drugiej strony jest tańsze niż powtarzanie
+   jej dokładnego brzmienia przy każdym audycie.
 
    Podpis mówi **kto pisze**, nie jaką rolę akurat pełni: role zmieniają się zależnie
    od repozytorium, bo w prywatnym backlogu operacyjnym issue pisze agent zewnętrzny,
