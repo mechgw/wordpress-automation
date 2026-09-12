@@ -75,25 +75,38 @@ const findings = gas => gas.$sheet(FINDINGS).slice(1).filter(row => String(row[C
 const ofKind = (gas, kind) => findings(gas).filter(row => row[COL.kind] === kind);
 
 describe('#140: element LCP', () => {
-  test('1: audyt z użytecznym węzłem daje jeden wiersz ELEMENT LCP', () => {
+  // #153 zmieniło kontrakt obu poniższych: element LCP bywa różny między próbami,
+  // więc jest zapisywany z KAŻDEJ udanej próby, a jego brak dostaje własny wiersz.
+  test('1 (#153): audyt z użytecznym węzłem daje wiersz na każdą udaną próbę', () => {
     const gas = project({
       audits: { 'largest-contentful-paint-element': lcpAudit({ selector: 'section.cc-hero', snippet: '<section>' }) }
     });
     gas.zmierzWydajnosc();
     const rows = ofKind(gas, 'ELEMENT LCP');
-    assert.equal(rows.length, 2, 'po jednym na mobile i desktop');
+    assert.equal(rows.length, 6, 'trzy próby na mobile i trzy na desktop');
+    assert.deepEqual(
+      [...new Set(rows.map(row => row[COL.attempt]))].sort(),
+      [1, 2, 3],
+      'każda próba ma własny wiersz, żadna nie ginie'
+    );
     assert.equal(rows[0][COL.detail], 'section.cc-hero', 'selektor ma pierwszeństwo przed fragmentem');
     assert.equal(rows[0][COL.savingsMs], '', 'element LCP to nie oszczędność');
     assert.equal(rows[0][COL.timeMs], '', 'ani koszt');
   });
 
-  test('2: brak audytu albo brak węzła nie tworzy pustego wiersza i nie jest błędem', () => {
+  test('2 (#153): brak węzła jest ustaleniem i dostaje wiersz z adnotacją, nie ciszę', () => {
     for (const audits of [{}, { 'largest-contentful-paint-element': {} },
       { 'largest-contentful-paint-element': lcpAudit({}) },
       { 'largest-contentful-paint-element': { details: { items: [] } } }]) {
       const gas = project({ audits });
       gas.zmierzWydajnosc();
-      assert.deepEqual(ofKind(gas, 'ELEMENT LCP'), [], JSON.stringify(audits));
+      const rows = ofKind(gas, 'ELEMENT LCP');
+      assert.equal(rows.length, 6, JSON.stringify(audits));
+      rows.forEach(row => assert.match(
+        String(row[COL.detail]),
+        /nie wskazał elementu LCP/,
+        'cisza znaczyłaby trzy różne rzeczy naraz'
+      ));
     }
   });
 
@@ -207,7 +220,7 @@ describe('#140: koszt third-party', () => {
 });
 
 describe('#140: wybór próby i model snapshotu', () => {
-  test('8: przy próbach 1 i 2 udanych oraz 3 nieudanej ustalenia pochodzą z próby 2', () => {
+  test('8 (#153): przy próbach 1 i 2 udanych element LCP jest z obu, a szanse z próby 2', () => {
     let call = 0;
     const gas = loadProject({
       properties: KEY,
@@ -217,13 +230,25 @@ describe('#140: wybór próby i model snapshotu', () => {
         call++;
         // Trzecia próba każdej strategii pada; Lighthouse robi to losowo.
         if (call % 3 === 0) return { code: 500, text: 'lighthouseError' };
-        return { code: 200, text: JSON.stringify(psi({ 'largest-contentful-paint-element': lcpAudit({ selector: 'main' }) })) };
+        return {
+          code: 200,
+          text: JSON.stringify(psi({
+            'largest-contentful-paint-element': lcpAudit({ selector: 'main' }),
+            'uses-optimized-images': opportunity(2270, 0)
+          }))
+        };
       }
     });
     gas.zmierzWydajnosc();
+
     const rows = ofKind(gas, 'ELEMENT LCP');
-    assert.equal(rows.length, 2);
-    rows.forEach(row => assert.equal(row[COL.attempt], 2, 'ostatnia UDANA, nie ostatnia w kolejności'));
+    assert.equal(rows.length, 4, 'dwie udane próby razy dwie strategie');
+    assert.deepEqual([...new Set(rows.map(row => row[COL.attempt]))].sort(), [1, 2],
+      'element LCP z każdej udanej próby; trzecia padła, więc jej nie ma');
+
+    const szanse = ofKind(gas, 'SZANSA');
+    assert.equal(szanse.length, 2, 'szansa nadal raz na strategię');
+    szanse.forEach(row => assert.equal(row[COL.attempt], 2, 'ostatnia UDANA, nie ostatnia w kolejności'));
   });
 
   test('9: udany pomiar usuwa ustalenie, którego nie ma już w odpowiedzi', () => {
@@ -292,7 +317,11 @@ describe('#140: granice danych', () => {
         : { code: 404, text: '{}' })
     });
     assert.doesNotThrow(() => gas.zmierzWydajnosc());
-    assert.deepEqual(findings(gas), []);
+    // #153: pusta odpowiedź to nadal udana próba, więc powstaje wiersz z adnotacją
+    // o braku węzła. Nie ma za to ani szans, ani third-party — nie było z czego.
+    const rows = findings(gas);
+    assert.deepEqual([...new Set(rows.map(row => row[COL.kind]))], ['ELEMENT LCP']);
+    rows.forEach(row => assert.match(String(row[COL.detail]), /nie wskazał elementu LCP/));
   });
 
   test('arkusz i podsumowanie mówią o ustaleniach', () => {
@@ -311,3 +340,83 @@ describe('#140: granice danych', () => {
 function gasCellLimit() {
   return require('./helpers/gas').CELL_CHAR_LIMIT;
 }
+
+/**
+ * #153: element LCP z każdej udanej próby.
+ *
+ * Produkcja pokazała rozkład dwutrybowy — w jednym trybie element był
+ * raportowany, w drugim nie było go wcale. Zapis z jednej próby opisywał wtedy
+ * jedno losowanie i nic w arkuszu nie mówiło, które.
+ */
+describe('#153: element LCP per próba', () => {
+  const attemptFetch = responses => {
+    let call = 0;
+    return url => {
+      if (String(url).indexOf('pagespeedonline') < 0) return { code: 404, text: '{}' };
+      const r = responses[call % responses.length];
+      call++;
+      return r;
+    };
+  };
+
+  test('2: różne elementy w kolejnych próbach — trzy wiersze, żaden nie ginie', () => {
+    const selektory = ['section.hero', 'h1.tytul', 'img.banner'];
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']] },
+      fetch: attemptFetch(selektory.map(sel => ({
+        code: 200,
+        text: JSON.stringify(psi({ 'largest-contentful-paint-element': lcpAudit({ selector: sel }) }))
+      })))
+    });
+    gas.zmierzWydajnosc();
+
+    const mobile = ofKind(gas, 'ELEMENT LCP').filter(row => row[COL.strategy] === 'mobile');
+    assert.equal(mobile.length, 3, 'po jednym wierszu na próbę');
+    assert.deepEqual(mobile.map(row => row[COL.detail]), selektory, 'każdy tryb widoczny osobno');
+  });
+
+  test('4: jedna udana próba z trzech daje jeden wiersz i mówi, która to była', () => {
+    let call = 0;
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']] },
+      fetch: url => {
+        if (String(url).indexOf('pagespeedonline') < 0) return { code: 404, text: '{}' };
+        call++;
+        // Udaje się wyłącznie trzecia próba każdej strategii.
+        if (call % 3 !== 0) return { code: 500, text: 'lighthouseError' };
+        return { code: 200, text: JSON.stringify(psi({ 'largest-contentful-paint-element': lcpAudit({ selector: 'main' }) })) };
+      }
+    });
+    gas.zmierzWydajnosc();
+
+    const rows = ofKind(gas, 'ELEMENT LCP');
+    assert.equal(rows.length, 2, 'jedna udana próba na strategię');
+    rows.forEach(row => assert.equal(row[COL.attempt], 3, 'numer próby wskazuje, z której pochodzi'));
+  });
+
+  test('5: zero udanych prób nie rusza poprzedniej diagnozy', () => {
+    const stara = [
+      '2026-09-01 10:00', URL, 'mobile', 2, 'ELEMENT LCP', 'largest-contentful-paint-element',
+      'section.stary-hero', '', '', '', '', 'PSI_LAB', '2026-09-01'
+    ];
+    const gas = loadProject({
+      properties: KEY,
+      sheets: {
+        [URLS]: [URLS_HEADER, [URL, 'homepage', '']],
+        [FINDINGS]: [FINDINGS_HEADER, stara]
+      },
+      fetch: url => (String(url).indexOf('pagespeedonline') >= 0
+        ? { code: 500, text: 'lighthouseError' }
+        : { code: 404, text: '{}' })
+    });
+    gas.zmierzWydajnosc();
+
+    assert.deepEqual(
+      findings(gas).map(row => row[COL.detail]),
+      ['section.stary-hero'],
+      'nieudany przebieg nie kasuje ostatniej dobrej diagnozy'
+    );
+  });
+});

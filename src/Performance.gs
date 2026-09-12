@@ -34,6 +34,8 @@ const PERF_FINDINGS_HEADER = [
 ];
 
 const PSI_FINDING_LCP = 'ELEMENT LCP';
+/** Adnotacja, gdy PSI nie wskazał węzła LCP — brak też jest ustaleniem (#153). */
+const PSI_LCP_UNKNOWN = 'PSI nie wskazał elementu LCP w tej próbie';
 const PSI_FINDING_OPPORTUNITY = 'SZANSA';
 const PSI_FINDING_THIRD_PARTY = 'THIRD-PARTY';
 
@@ -299,6 +301,29 @@ function psiOpportunities_(audits) {
  * zaoszczędzić; wpisanie go do kolumn oszczędności sprawiłoby, że arkusz
  * kłamałby semantycznie.
  */
+/**
+ * Element LCP jednej próby — zawsze jeden wiersz, także gdy PSI go nie wskazał (#153).
+ *
+ * Pozostałe ustalenia bierzemy z ostatniej udanej próby, bo są jakościowe
+ * i stabilne. Element LCP stabilny NIE jest: produkcja pokazała rozkład
+ * dwutrybowy, w którym w jednym trybie element był raportowany, a w drugim
+ * nie było go wcale. Zapis z jednej próby opisywał wtedy jedno losowanie
+ * i nic w arkuszu nie mówiło, które.
+ *
+ * Brak węzła jest więc ustaleniem, nie brakiem danych, i dostaje własny wiersz
+ * z czytelną adnotacją. Wcześniej nie powstawał żaden — a wtedy cisza znaczyła
+ * trzy rzeczy naraz: „PSI nie wskazał”, „kolektor tu nie dotarł” i „zapis
+ * działa, tylko ten rodzaj nigdy nie powstaje”.
+ */
+function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now) {
+  const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
+  const label = psiNodeLabel_(psiLcpNode_(audits['largest-contentful-paint-element']));
+  return [
+    measuredAt, url, strategy, attempt, PSI_FINDING_LCP, 'largest-contentful-paint-element',
+    cellSafeText_(label || PSI_LCP_UNKNOWN).text, '', '', '', '', 'PSI_LAB', now
+  ];
+}
+
 function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now) {
   const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
   const rows = [];
@@ -308,11 +333,6 @@ function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now) {
       timeMs, transferKb, savingsMs, savingsKb, 'PSI_LAB', now
     ]);
   };
-
-  // Brak audytu albo brak użytecznego węzła nie jest błędem i nie tworzy pustego
-  // wiersza: PSI nie zawsze potrafi wskazać element LCP.
-  const label = psiNodeLabel_(psiLcpNode_(audits['largest-contentful-paint-element']));
-  if (label) add(PSI_FINDING_LCP, 'largest-contentful-paint-element', label, '', '', '', '');
 
   psiOpportunities_(audits).forEach(function (o) {
     add(PSI_FINDING_OPPORTUNITY, o.id, o.title, '', '',
@@ -521,10 +541,13 @@ function runPsiMeasurement_() {
 
     ['mobile', 'desktop'].forEach(function (strategy) {
       let ok = 0;
-      // Ustalenia są jakościowe i stabilne między próbami, więc trzy komplety
-      // byłyby szumem. Bierzemy ostatnią UDANĄ próbę: późniejsza nieudana nie
-      // zmienia wyboru, bo przypisujemy tylko po powodzeniu.
+      // Szanse i third-party są jakościowe i stabilne między próbami, więc trzy
+      // komplety byłyby szumem. Bierzemy ostatnią UDANĄ próbę: późniejsza
+      // nieudana nie zmienia wyboru, bo przypisujemy tylko po powodzeniu.
       let lastGood = null;
+      // Element LCP to wyjątek — bywa różny między próbami, więc zapisujemy go
+      // z KAŻDEJ udanej próby (#153). Jeden wiersz na próbę, koszt znikomy.
+      const lcpRows = [];
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
@@ -534,6 +557,7 @@ function runPsiMeasurement_() {
             .forEach(function (row) { addressRows.push(row); });
           ok++;
           lastGood = { response: response, attempt: attempt };
+          lcpRows.push(psiLcpFindingRow_(response, entry.url, strategy, attempt, measuredAt, now));
         } catch (e) {
           // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
           // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
@@ -543,6 +567,7 @@ function runPsiMeasurement_() {
       }
       if (lastGood) {
         addressScopes.push(entry.url + ' ' + strategy);
+        lcpRows.forEach(function (row) { addressFindings.push(row); });
         parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
           .forEach(function (row) { addressFindings.push(row); });
       }
