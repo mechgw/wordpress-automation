@@ -354,12 +354,30 @@ function replaceFindingsScopes_(rows, scopes) {
   });
 
   const combined = kept.concat(rows);
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  writeRowsThenTrim_(sheet, width, combined, lastRow);
+  return { written: rows.length, kept: kept.length };
+}
+
+/**
+ * Podmiana zawartości zakładki BEZ okna, w którym jest ona pusta.
+ *
+ * Najpierw zapis pełnego zestawu, dopiero potem wyczyszczenie nadmiarowego
+ * ogona. Kolejność odwrotna — „wyczyść wszystko, potem zapisz” — zostawia
+ * moment, w którym zakładka nie ma ani jednego wiersza. Przerwanie wykonania
+ * wtedy kasuje całą historię, a nie tylko bieżący zapis.
+ *
+ * Ma to znaczenie od #151: zapis idzie raz na adres, czyli kilka razy w jednym
+ * przebiegu i coraz bliżej limitu czasu Apps Script — czyli dokładnie wtedy,
+ * gdy wykonanie najchętniej jest przerywane. Przerwanie w nowej kolejności
+ * zostawia najwyżej powtórzone wiersze na końcu, co jest odwracalne.
+ */
+function writeRowsThenTrim_(sheet, width, combined, lastRow) {
   if (combined.length) {
     ensureSheetRows_(sheet, combined.length + 1);
     sheet.getRange(2, 1, combined.length, width).setValues(combined);
   }
-  return { written: rows.length, kept: kept.length };
+  const surplus = lastRow - 1 - combined.length;
+  if (surplus > 0) sheet.getRange(combined.length + 2, 1, surplus, width).clearContent();
 }
 
 /** Mediana wartości; pusta lista daje pusty wynik, nie zero. */
@@ -401,11 +419,7 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows) {
   });
 
   const combined = kept.concat(rows);
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, header.length).clearContent();
-  if (combined.length) {
-    ensureSheetRows_(sheet, combined.length + 1);
-    sheet.getRange(2, 1, combined.length, header.length).setValues(combined);
-  }
+  writeRowsThenTrim_(sheet, header.length, combined, lastRow);
   return { written: rows.length, kept: kept.length };
 }
 

@@ -512,3 +512,54 @@ describe('#151: zapis przyrostowy i postęp kursora', () => {
     assert.equal(lab.length, keys.size, 'żaden klucz nie został zdublowany');
   });
 });
+
+/**
+ * Kolejność zapisu w zakładkach pomiarowych (uwaga Codexa do #151).
+ *
+ * Zapis przyrostowy oznacza kilka podmian na przebieg, coraz bliżej limitu czasu
+ * Apps Script. Gdyby podmiana zaczynała się od wyczyszczenia całej zakładki,
+ * przerwanie w tym oknie kasowałoby całą historię zamiast jednego adresu.
+ */
+describe('#151: podmiana zakładki bez okna pustki', () => {
+  const HEADER = ['K', 'URL', 'C'];
+
+  test('zestaw krótszy niż poprzedni nie zostawia ogona', () => {
+    const gas = loadProject({
+      properties: KEY,
+      sheets: {
+        // Dwa wiersze bez URL-a są odrzucane przy przepisaniu, więc zestaw
+        // wynikowy jest krótszy od poprzedniego — to ścieżka przycinania ogona.
+        [LAB]: [HEADER, ['a', 'u1', 1], ['x', '', 0], ['b', 'u2', 2], ['y', '', 0]]
+      }
+    });
+    gas.upsertPerformanceRows_(LAB, HEADER, [0], [['a', 'u1', 9]]);
+    const rows = gas.$sheet(LAB).slice(1).filter(row => String(row[0] || '') !== '');
+    assert.deepEqual(
+      rows.map(row => [row[0], row[2]]).sort((p, q) => String(p[0]).localeCompare(String(q[0]))),
+      [['a', 9], ['b', 2]],
+      'kolidujący klucz podmieniony, niekolidujący zachowany, nadmiar wyczyszczony'
+    );
+  });
+
+  test('dopisanie nowych kluczy zachowuje poprzednie wiersze', () => {
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [LAB]: [HEADER, ['a', 'u1', 1]] }
+    });
+    gas.upsertPerformanceRows_(LAB, HEADER, [0], [['b', 'u2', 2]]);
+    const rows = gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '');
+    assert.deepEqual(rows.map(row => row[0]).sort(), ['a', 'b'], 'historia nie znika przy dopisaniu');
+  });
+
+  test('pusty zestaw nie kasuje historii i nie wywraca się na pustej zakładce', () => {
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [LAB]: [HEADER, ['a', 'u1', 1]] }
+    });
+    // Nic nie przyszło z API — to nie jest powód, żeby skasować to, co jest.
+    gas.upsertPerformanceRows_(LAB, HEADER, [0], []);
+    const rows = gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '');
+    assert.deepEqual(rows, [['a', 'u1', 1]], 'historia przetrwała pusty zapis');
+    assert.doesNotThrow(() => gas.upsertPerformanceRows_('PUSTA ZAKŁADKA', HEADER, [0], []));
+  });
+});
