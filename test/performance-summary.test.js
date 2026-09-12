@@ -171,3 +171,20 @@ describe('#152: kompletność zakresu', () => {
     assert.equal(zmierzone.length, out.measured, 'brak wierszy dla adresów, do których przebieg nie dotarł');
   });
 });
+
+describe('#152/Codex: kompletność liczona z median, nie z braku błędu', () => {
+  test('odpowiedź 200 bez liczbowych audytów nie liczy się jako para z medianą', () => {
+    // `performanceApiRequest_` toleruje pustą odpowiedź, więc próba jest „udana”,
+    // ale nie powstaje z niej ani surowy wiersz, ani mediana.
+    const gas = run({
+      fetch: url => (String(url).indexOf('pagespeedonline') >= 0
+        ? { code: 200, text: '{}' }
+        : { code: 404, text: '{}' })
+    });
+    const out = plain(gas.runPsiMeasurement_());
+
+    assert.deepEqual(rowsOf(gas), [], 'brak median');
+    assert.equal(out.pairs, 0, 'para bez mediany nie jest parą przetworzoną');
+    assert.match(out.detail, /mediany dla 0 z 2 par/, 'komunikat nie może obiecywać median, których nie ma');
+  });
+});

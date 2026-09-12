@@ -616,7 +616,6 @@ function runPsiMeasurement_() {
         }
       }
       if (lastGood) {
-        pairs++;
         addressScopes.push(entry.url + ' ' + strategy);
         lcpRows.forEach(function (row) { addressFindings.push(row); });
         parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
@@ -631,12 +630,25 @@ function runPsiMeasurement_() {
     // Kolejność jest istotna: najpierw dane, potem kursor. Kursor przesunięty
     // przed zapisem oznaczyłby adres jako zrobiony mimo utraconych wyników.
     if (addressRows.length) {
+      // Agregat PRZED surowymi próbami. To dwa osobne zapisy, nie jedna
+      // transakcja: gdyby drugi się nie udał, lepiej mieć medianę bez surowych
+      // prób niż surowe próby bez mediany. Mediana bez prób jest dopuszczalnym
+      // stanem końcowym — po to jest retencja. Odwrotnie: pomiar zostałby
+      // w `PAGESPEED LAB` bez agregatu i nigdy by go nie dostał, bo kursor nie
+      // ruszył, a kolejny przebieg ma już inny `Pomiar`.
+      const summaryRows = psiSummaryRows_(addressRows, now);
+      upsertPerformanceRows_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER, [0, 1, 2, 3], summaryRows);
       upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], addressRows);
-      // Agregat idzie razem z surowymi próbami, w tej samej granicy transakcyjnej
-      // co #151 — inaczej przycinanie prób mogłoby wyprzedzić ich medianę.
-      upsertPerformanceRows_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER, [0, 1, 2, 3],
-        psiSummaryRows_(addressRows, now));
       addressRows.forEach(function (row) { rows.push(row); });
+
+      // Kompletność zakresu liczymy z FAKTYCZNIE powstałych median, nie z tego,
+      // że API odpowiedziało bez błędu. Odpowiedź 200 bez liczbowych audytów
+      // jest tolerowana i nie tworzy ani surowych wierszy, ani mediany —
+      // liczenie jej jako pary dawałoby „mediany dla 2 z 2 par” przy pustym
+      // agregacie.
+      const withMedian = {};
+      summaryRows.forEach(function (row) { withMedian[row[2]] = true; });
+      pairs += Object.keys(withMedian).length;
     }
     // Zakres bez ani jednej udanej próby nie jest ruszany — inaczej nieudany
     // przebieg skasowałby ostatnią dobrą diagnozę (#140).

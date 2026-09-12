@@ -70,6 +70,7 @@ function sheetCatalog_() {
     { name: ga4.businessEventsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: zdarzenia biznesowe. Nie edytuj ręcznie.' },
     { name: ga4.adsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
     { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' },
+    { name: PERF_SUMMARY_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Mediany metryk PSI, jeden wiersz na pomiar, adres, strategię i metrykę. Trwała historia baseline’ów; nie podlega przycinaniu surowych prób.' },
     // Arkusz człowieka: skrypt nie zapisuje do niego danych, ale go czyta, wymienia
     // w spisie START i może przesunąć jego zakładkę. W katalogu jest po to, żeby
     // START mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl.
