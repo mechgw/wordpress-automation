@@ -354,12 +354,30 @@ function replaceFindingsScopes_(rows, scopes) {
   });
 
   const combined = kept.concat(rows);
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  writeRowsThenTrim_(sheet, width, combined, lastRow);
+  return { written: rows.length, kept: kept.length };
+}
+
+/**
+ * Podmiana zawartości zakładki BEZ okna, w którym jest ona pusta.
+ *
+ * Najpierw zapis pełnego zestawu, dopiero potem wyczyszczenie nadmiarowego
+ * ogona. Kolejność odwrotna — „wyczyść wszystko, potem zapisz” — zostawia
+ * moment, w którym zakładka nie ma ani jednego wiersza. Przerwanie wykonania
+ * wtedy kasuje całą historię, a nie tylko bieżący zapis.
+ *
+ * Ma to znaczenie od #151: zapis idzie raz na adres, czyli kilka razy w jednym
+ * przebiegu i coraz bliżej limitu czasu Apps Script — czyli dokładnie wtedy,
+ * gdy wykonanie najchętniej jest przerywane. Przerwanie w nowej kolejności
+ * zostawia najwyżej powtórzone wiersze na końcu, co jest odwracalne.
+ */
+function writeRowsThenTrim_(sheet, width, combined, lastRow) {
   if (combined.length) {
     ensureSheetRows_(sheet, combined.length + 1);
     sheet.getRange(2, 1, combined.length, width).setValues(combined);
   }
-  return { written: rows.length, kept: kept.length };
+  const surplus = lastRow - 1 - combined.length;
+  if (surplus > 0) sheet.getRange(combined.length + 2, 1, surplus, width).clearContent();
 }
 
 /** Mediana wartości; pusta lista daje pusty wynik, nie zero. */
@@ -401,11 +419,7 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows) {
   });
 
   const combined = kept.concat(rows);
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, header.length).clearContent();
-  if (combined.length) {
-    ensureSheetRows_(sheet, combined.length + 1);
-    sheet.getRange(2, 1, combined.length, header.length).setValues(combined);
-  }
+  writeRowsThenTrim_(sheet, header.length, combined, lastRow);
   return { written: rows.length, kept: kept.length };
 }
 
@@ -487,10 +501,24 @@ function runPsiMeasurement_() {
   // gorsza niż jej brak.
   const failures = [];
   const findings = [];
-  const findingScopes = [];
+  const complete = [];
+
+  // Zakładki muszą istnieć także po przebiegu, w którym nic się nie udało.
+  // Wcześniej gwarantował to zapis na końcu, wołany bezwarunkowo; po przejściu
+  // na zapis warunkowy per adres trzeba to powiedzieć wprost.
+  ensureSheetWithHeader_(PERF_LAB_SHEET, PERF_LAB_HEADER);
+  ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
 
   while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
     const entry = urls[index % urls.length];
+    // Dorobek JEDNEGO adresu, zapisywany zanim przejdziemy do następnego (#151).
+    // Wcześniej wszystko leżało w pamięci do końca pętli, więc przerwanie przez
+    // limit czasu Apps Script kasowało cały przebieg naraz.
+    const addressRows = [];
+    const addressFindings = [];
+    const addressScopes = [];
+    let addressOk = 0;
+
     ['mobile', 'desktop'].forEach(function (strategy) {
       let ok = 0;
       // Ustalenia są jakościowe i stabilne między próbami, więc trzy komplety
@@ -503,7 +531,7 @@ function runPsiMeasurement_() {
         try {
           const response = performanceApiRequest_(url);
           parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now)
-            .forEach(function (row) { rows.push(row); });
+            .forEach(function (row) { addressRows.push(row); });
           ok++;
           lastGood = { response: response, attempt: attempt };
         } catch (e) {
@@ -514,34 +542,57 @@ function runPsiMeasurement_() {
         }
       }
       if (lastGood) {
-        findingScopes.push(entry.url + ' ' + strategy);
+        addressScopes.push(entry.url + ' ' + strategy);
         parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
-          .forEach(function (row) { findings.push(row); });
+          .forEach(function (row) { addressFindings.push(row); });
       }
       if (ok < PSI_ATTEMPTS) {
         failures.push(entry.url + ' (' + strategy + '): ' + ok + ' z ' + PSI_ATTEMPTS + ' prób');
       }
+      addressOk += ok;
     });
+
+    // Kolejność jest istotna: najpierw dane, potem kursor. Kursor przesunięty
+    // przed zapisem oznaczyłby adres jako zrobiony mimo utraconych wyników.
+    if (addressRows.length) {
+      upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], addressRows);
+      addressRows.forEach(function (row) { rows.push(row); });
+    }
+    // Zakres bez ani jednej udanej próby nie jest ruszany — inaczej nieudany
+    // przebieg skasowałby ostatnią dobrą diagnozę (#140).
+    if (addressScopes.length) {
+      replaceFindingsScopes_(addressFindings, addressScopes);
+      addressFindings.forEach(function (row) { findings.push(row); });
+    }
+
     measured++;
     index++;
+    savePsiCursor_(index % urls.length);
+
+    if (addressOk === PSI_ATTEMPTS * 2) complete.push(entry.url);
   }
 
-  savePsiCursor_(index % urls.length);
-  upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], rows);
-  replaceFindingsScopes_(findings, findingScopes);
-
   const skipped = urls.length - measured;
+  // Adres, od którego ruszy kolejny przebieg — tylko gdy jest co wznawiać.
+  const resumeAt = skipped ? urls[index % urls.length].url : '';
   return {
     rows: rows.length,
     urls: urls.length,
     measured: measured,
     skipped: skipped,
+    complete: complete,
     failures: failures,
     findings: findings.length,
+    resumeAt: resumeAt,
     medians: psiMedians_(rows),
+    // „Kompletny” i „budżet wyczerpany” muszą wyglądać inaczej: wcześniej oba
+    // kończyły się tym samym zdaniem i operator nie wiedział, czy ma baseline.
     detail: rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
       PSI_ATTEMPTS + ' próby na adres i strategię)' +
-      (skipped ? '; ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu' : '') +
+      (skipped
+        ? '; budżet wyczerpany, ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu, zaczynając od ' + resumeAt
+        : '; przebieg kompletny') +
+      (complete.length ? '; komplet ' + (PSI_ATTEMPTS * 2) + ' prób: ' + complete.join(', ') : '') +
       (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
   };
 }
