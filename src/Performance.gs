@@ -22,6 +22,20 @@ const PERF_URLS_HEADER = ['URL', 'Rola', 'Uwagi'];
 const PERF_FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', 'Stan', 'Źródło', 'Pobrano'];
 const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano'];
 
+/**
+ * Agregat median — jeden wiersz na (pomiar, URL, strategia, metryka) (#152).
+ *
+ * Klucz zawiera `Pomiar` celowo: agregat jest HISTORIĄ median, nie widokiem
+ * „ostatni wynik”. Klucz bez pomiaru nadpisywałby poprzedni baseline, a wtedy
+ * porównanie przed/po — jedyny powód istnienia tej zakładki — przestałoby być
+ * możliwe, zwłaszcza po przycięciu surowych prób.
+ *
+ * `Liczba prób` nie jest ozdobna: mediana z dwóch prób jest słabszą podstawą
+ * niż z trzech i czytający musi to widzieć bez zaglądania w surowe dane.
+ */
+const PERF_SUMMARY_SHEET = 'PERFORMANCE SUMMARY';
+const PERF_SUMMARY_HEADER = ['Pomiar', 'URL', 'Strategia', 'Metryka', 'Mediana', 'Liczba prób', 'Źródło', 'Pobrano'];
+
 const PERF_FINDINGS_SHEET = 'PAGESPEED FINDINGS';
 // Nazwy czterech pierwszych kolumn są celowo takie same jak w PAGESPEED LAB:
 // dzięki temu ustalenie da się połączyć z konkretnym wierszem metryki.
@@ -408,6 +422,39 @@ function medianOfValues_(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+/**
+ * Wiersze agregatu z surowych prób jednego adresu (#152).
+ *
+ * Grupuje po `(Pomiar, URL, Strategia, Metryka)` i liczy medianę wyłącznie
+ * z prób, które się udały. Para bez ani jednej udanej próby **nie dostaje
+ * wiersza** — zero byłoby doskonałym wynikiem, a pusty wiersz sugerowałby
+ * pomiar, którego nie było.
+ *
+ * Metryka nieobecna w części prób daje medianę z tych prób, które ją mają,
+ * a `Liczba prób` to pokazuje — dlatego licznik jest per metryka, nie per para.
+ */
+function psiSummaryRows_(rows, now) {
+  const order = [];
+  const groups = {};
+  rows.forEach(function (row) {
+    const key = [row[0], row[1], row[2], row[4]].join(' ');
+    if (!groups[key]) {
+      groups[key] = { head: [row[0], row[1], row[2], row[4]], values: [] };
+      order.push(key);
+    }
+    const value = row[5];
+    if (typeof value === 'number' && !isNaN(value)) groups[key].values.push(value);
+  });
+
+  const out = [];
+  order.forEach(function (key) {
+    const group = groups[key];
+    if (!group.values.length) return;
+    out.push(group.head.concat([medianOfValues_(group.values), group.values.length, 'PSI_LAB', now]));
+  });
+  return out;
+}
+
 /** Mediany metryk z prób jednego pomiaru; podstawa porównań pre/post. */
 function psiMedians_(rows) {
   const byMetric = {};
@@ -527,7 +574,10 @@ function runPsiMeasurement_() {
   // Wcześniej gwarantował to zapis na końcu, wołany bezwarunkowo; po przejściu
   // na zapis warunkowy per adres trzeba to powiedzieć wprost.
   ensureSheetWithHeader_(PERF_LAB_SHEET, PERF_LAB_HEADER);
+  ensureSheetWithHeader_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER);
   ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
+
+  let pairs = 0;
 
   while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
     const entry = urls[index % urls.length];
@@ -566,6 +616,7 @@ function runPsiMeasurement_() {
         }
       }
       if (lastGood) {
+        pairs++;
         addressScopes.push(entry.url + ' ' + strategy);
         lcpRows.forEach(function (row) { addressFindings.push(row); });
         parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
@@ -581,6 +632,10 @@ function runPsiMeasurement_() {
     // przed zapisem oznaczyłby adres jako zrobiony mimo utraconych wyników.
     if (addressRows.length) {
       upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], addressRows);
+      // Agregat idzie razem z surowymi próbami, w tej samej granicy transakcyjnej
+      // co #151 — inaczej przycinanie prób mogłoby wyprzedzić ich medianę.
+      upsertPerformanceRows_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER, [0, 1, 2, 3],
+        psiSummaryRows_(addressRows, now));
       addressRows.forEach(function (row) { rows.push(row); });
     }
     // Zakres bez ani jednej udanej próby nie jest ruszany — inaczej nieudany
@@ -609,6 +664,10 @@ function runPsiMeasurement_() {
     failures: failures,
     findings: findings.length,
     resumeAt: resumeAt,
+    // Kompletność ZAKRESU (pary URL × strategia z udaną próbą), nie kompletność
+    // prób pojedynczej metryki — te dwa znaczenia „kompletnego” mylą się łatwo.
+    pairs: pairs,
+    pairsExpected: urls.length * 2,
     medians: psiMedians_(rows),
     // „Kompletny” i „budżet wyczerpany” muszą wyglądać inaczej: wcześniej oba
     // kończyły się tym samym zdaniem i operator nie wiedział, czy ma baseline.
@@ -617,6 +676,7 @@ function runPsiMeasurement_() {
       (skipped
         ? '; budżet wyczerpany, ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu, zaczynając od ' + resumeAt
         : '; przebieg kompletny') +
+      '; mediany dla ' + pairs + ' z ' + (urls.length * 2) + ' par (URL × strategia)' +
       (complete.length ? '; komplet ' + (PSI_ATTEMPTS * 2) + ' prób: ' + complete.join(', ') : '') +
       (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
   };
@@ -627,6 +687,7 @@ function przygotujPomiarWydajnosci() {
   ensureSheetWithHeader_(PERF_URLS_SHEET, PERF_URLS_HEADER);
   ensureSheetWithHeader_(PERF_FIELD_SHEET, PERF_FIELD_HEADER);
   ensureSheetWithHeader_(PERF_LAB_SHEET, PERF_LAB_HEADER);
+  ensureSheetWithHeader_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER);
   ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
   const configured = isPerformanceConfigured_();
   const urls = performanceUrls_().length;
