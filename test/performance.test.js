@@ -395,3 +395,120 @@ describe('#124: menu', () => {
     assert.deepEqual(seo.items.map(i => i.fn).slice(-2), ['przygotujPomiarWydajnosci', 'zmierzWydajnosc']);
   });
 });
+
+/**
+ * #151: zapis przyrostowy po każdym adresie i postęp kursora.
+ *
+ * Numeracja odpowiada macierzy z opisu #151. Sedno: przerwanie przebiegu ma
+ * kosztować najwyżej jeden adres, a rotacja ma się posuwać niezależnie od tego,
+ * czy przebieg dobiegł końca.
+ */
+describe('#151: zapis przyrostowy i postęp kursora', () => {
+  const two = [1, 2].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+  const ok200 = () => ({ code: 200, text: JSON.stringify(psiResponse()) });
+  const SECOND = 'example.pl%2F2%2F';
+  const FINDINGS = 'PAGESPEED FINDINGS';
+  const FINDINGS_HEADER = [
+    'Pomiar', 'URL', 'Strategia', 'Próba', 'Rodzaj', 'Nazwa', 'Szczegół',
+    'Czas (ms)', 'Transfer (KiB)', 'Potencjalna oszczędność (ms)',
+    'Potencjalna oszczędność (KiB)', 'Źródło', 'Pobrano'
+  ];
+
+  test('1: wiersze adresu są w arkuszu, zanim ruszy następny adres', () => {
+    let gas = null;
+    let rowsWhenSecondStarted = null;
+    gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(two) },
+      fetch: url => {
+        if (url.includes(SECOND) && rowsWhenSecondStarted === null) {
+          const lab = gas.$sheet(LAB);
+          rowsWhenSecondStarted = lab ? lab.length : 0;
+        }
+        return ok200();
+      }
+    });
+    gas.runPsiMeasurement_();
+    assert.ok(rowsWhenSecondStarted > 1, 'pierwszy adres był zapisany, zanim zaczął się drugi');
+  });
+
+  test('2 i 3: przerwanie na drugim adresie zostawia dane pierwszego, a kursor wskazuje drugi', () => {
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(two) },
+      fetch: url => (url.includes(SECOND) ? { code: 429, text: '{}' } : ok200())
+    });
+    assert.throws(() => gas.runPsiMeasurement_(), /limit zapytań/);
+
+    const lab = gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '');
+    assert.ok(lab.length > 0, 'dorobek pierwszego adresu przetrwał przerwanie');
+    assert.deepEqual([...new Set(lab.map(row => row[1]))], ['https://www.example.pl/1/']);
+    assert.equal(gas.$properties.PAGESPEED_CURSOR, '1', 'kolejny przebieg ruszy od drugiego adresu');
+  });
+
+  test('4: adres bez ani jednej udanej próby nie zatrzymuje rotacji i nie kasuje diagnozy', () => {
+    const stara = ['2026-01-01 10:00', two[0][0], 'mobile', 1, 'SZANSA', 'stara-diagnoza', '', '', '', 400, 90, 'PSI_LAB', '2026-01-01'];
+    const gas = loadProject({
+      properties: KEY,
+      sheets: {
+        [URLS]: [URLS_HEADER].concat(two),
+        [FINDINGS]: [FINDINGS_HEADER, stara]
+      },
+      // 5xx jest awarią pojedynczej próby Lighthouse, nie konfiguracji.
+      fetch: () => ({ code: 500, text: 'lighthouse' })
+    });
+    const out = plain(gas.runPsiMeasurement_());
+
+    assert.equal(out.measured, two.length, 'rotacja przeszła przez oba adresy');
+    assert.equal(gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '').length, 0);
+    const findings = gas.$sheet(FINDINGS).slice(1).filter(row => String(row[1] || '') !== '');
+    assert.deepEqual(findings.map(row => row[5]), ['stara-diagnoza'], 'poprzednia diagnoza nietknięta');
+  });
+
+  test('6: kompletny przebieg mówi „kompletny” i nie wspomina o kolejnym', () => {
+    const gas = project({ fetch: ok200 });
+    const out = plain(gas.runPsiMeasurement_());
+    assert.match(out.detail, /przebieg kompletny/);
+    assert.doesNotMatch(out.detail, /kolejnym przebiegu/);
+    assert.equal(out.resumeAt, '', 'nie ma czego wznawiać');
+    assert.deepEqual(out.complete, [URL], 'komplet prób wymieniony wprost');
+  });
+
+  test('7: wyczerpany budżet wymienia pozostałe adresy i punkt wznowienia', () => {
+    const many = [1, 2, 3, 4].map(n => ['https://www.example.pl/' + n + '/', 'landing', '']);
+    let elapsed = 0;
+    const gas = loadProject({
+      properties: KEY,
+      sheets: { [URLS]: [URLS_HEADER].concat(many) },
+      fetch: () => {
+        elapsed += 30000;
+        return ok200();
+      }
+    });
+    const base = gas.$Date.now();
+    gas.$Date.now = () => base + elapsed;
+
+    const out = plain(gas.runPsiMeasurement_());
+    assert.match(out.detail, /budżet wyczerpany/);
+    assert.ok(out.skipped > 0);
+    assert.ok(out.resumeAt, 'punkt wznowienia podany wprost');
+    assert.ok(out.detail.includes(out.resumeAt), 'i widoczny w podsumowaniu dla operatora');
+  });
+
+  test('8: adres z dwiema udanymi próbami z trzech jest wymieniony jako niekompletny', () => {
+    let calls = 0;
+    const gas = project({ fetch: () => (++calls === 1 ? { code: 500, text: 'lighthouse' } : ok200()) });
+    const out = plain(gas.runPsiMeasurement_());
+    assert.match(out.detail, /nieudane próby:.*2 z 3/);
+    assert.deepEqual(out.complete, [], 'adres bez kompletu nie trafia na listę kompletnych');
+  });
+
+  test('9: zapis przyrostowy pozostaje idempotentny przy powtórzeniu adresu', () => {
+    const gas = project({ fetch: ok200 });
+    gas.runPsiMeasurement_();
+    gas.runPsiMeasurement_();
+    const lab = gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '');
+    const keys = new Set(lab.map(row => [row[0], row[1], row[2], row[3], row[4]].join('|')));
+    assert.equal(lab.length, keys.size, 'żaden klucz nie został zdublowany');
+  });
+});
