@@ -139,5 +139,11 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 - Nie uruchamiaj `clasp push` lokalnie; jedyną drogą do produkcji jest workflow deployu.
 - Nie dotykaj `.clasp.json` / `.clasprc.json` (ignorowane przez gita, poświadczenia).
 - Nie obniżaj progu pokrycia bez uzasadnienia i issue z follow-upem.
+- Twierdzenie o **obecnym** zachowaniu kodu — w treści issue, w komentarzu audytowym, w odpowiedzi —
+  wymaga odwołania `plik:linia` sprawdzonego przed napisaniem. 2026-09-12 audyt odrzucił trzy
+  specyfikacje naraz i każda opisywała stan niezgodny z `main`; jedna kazała wdrożyć klucz upsertu,
+  który był w kodzie od dawna, więc implementacja nie zmieniłaby niczego. Bez odwołania zostaje
+  pamięć, a pamięć myli się po cichu. Cudze twierdzenia o kodzie też weryfikuj — sprawdzenie
+  kosztuje jedno polecenie.
 - Commituj przez `git add -A && git commit`, nie `git commit -a`; sprawdź kod wyjścia commitu, zanim
   odpowiesz w wątkach, wyślesz `/reviewed` albo zmergujesz.
