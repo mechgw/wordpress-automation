@@ -218,6 +218,10 @@ function ensureSheetWithHeader_(name, header) {
       if (!sheet) throw e;
     }
   }
+  // Nagłówek szerszy niż siatka rzuca wyjątkiem o zakresie, a arkusz przycięty
+  // do kilkunastu kolumn to realny przypadek. Miejsce robimy tutaj, bo każda inna
+  // ścieżka zapisu nagłówka i tak przechodzi tędy — wywołujący nie musi pamiętać.
+  ensureSheetColumns_(sheet, header.length);
   if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== header[0]) {
     if (sheet.getLastRow() >= 1 && !sheet.getRange(1, 1, 1, header.length).isBlank()) {
       sheet.insertRowBefore(1);
@@ -236,6 +240,137 @@ function ensureSheetWithHeader_(name, header) {
 function ensureSheetRows_(sheet, rowsNeeded) {
   const max = sheet.getMaxRows();
   if (rowsNeeded > max) sheet.insertRowsAfter(max, rowsNeeded - max);
+  return sheet;
+}
+
+/** To samo dla kolumn: rozszerzenie schematu bywa szersze niż siatka arkusza. */
+function ensureSheetColumns_(sheet, columnsNeeded) {
+  const max = sheet.getMaxColumns();
+  if (columnsNeeded > max) sheet.insertColumnsAfter(max, columnsNeeded - max);
+  return sheet;
+}
+
+/**
+ * Czy zakres jest naprawdę pusty.
+ *
+ * Sama wartość nie wystarcza: formuła zwracająca `""` wraca z `getValues()` jako
+ * pustka, więc kolumna z cudzą formułą wyglądałaby na wolną i zostałaby przejęta
+ * razem z nią (uwaga z audytu #154). Komórka z formułą nie jest pusta, nawet gdy
+ * formuła nic nie wypisuje.
+ */
+function rangeIsEmpty_(range) {
+  const blank = function (value) { return value === undefined || value === null || String(value) === ''; };
+  const all = function (rows) { return rows.every(function (row) { return row.every(blank); }); };
+  return all(range.getValues()) && all(range.getFormulas());
+}
+
+/**
+ * Stan kolumn nagłówka SPRZED jakiejkolwiek zmiany.
+ *
+ * Kolejność ma znaczenie: `ensureSheetWithHeader_()` potrafi wstawić wiersz nad
+ * danymi i wpisać komplet etykiet. Gdyby zajętość badać po nim, cudza treść
+ * leżałaby już pod świeżo wpisaną etykietą i przeszłaby walidację.
+ *
+ * `headed` mówi, czy arkusz ma w ogóle wiersz nagłówka. Bez niego nie ma czego
+ * uzupełniać — nagłówek zakłada wtedy `ensureSheetWithHeader_()` swoją starą
+ * ścieżką naprawczą, a ta funkcja nie rości sobie do niczego prawa.
+ *
+ * Kolumna poza siatką arkusza jest z definicji pusta; czytanie jej rzuciłoby
+ * wyjątkiem o zakresie zamiast dać odpowiedź.
+ */
+function headerColumnsState_(sheet, header) {
+  const maxColumns = sheet.getMaxColumns();
+  const lastRow = sheet.getLastRow();
+  const headed = lastRow >= 1 && String(sheet.getRange(1, 1).getValue() || '') === header[0];
+  if (!headed) return { headed: false, columns: [] };
+
+  const width = Math.min(header.length, maxColumns);
+  const labels = sheet.getRange(1, 1, 1, width).getValues()[0];
+  const headerFormulas = sheet.getRange(1, 1, 1, width).getFormulas()[0];
+  const dataRows = lastRow - 1;
+
+  return {
+    headed: true,
+    columns: header.map(function (label, i) {
+      const column = i + 1;
+      if (column > maxColumns) return { label: '', headerBlank: true, usedBelow: false };
+      const current = String(labels[i] === undefined || labels[i] === null ? '' : labels[i]).trim();
+
+      // Kolumna z etykietą nie jest kandydatem do migracji, więc nie ma czego badać
+      // pod nią. To nie kosmetyka: `PAGESPEED LAB` rośnie bez ograniczeń, a ten helper
+      // wchodzi na początku każdego cyklicznego pomiaru — czytanie całej historii
+      // przy każdym przebiegu zjadałoby budżet czasu, niczego nie ustalając.
+      if (current !== '') return { label: current, headerBlank: false, usedBelow: false };
+
+      return {
+        label: '',
+        // Formuła zwracająca `""` daje pustą wartość, ale komórka pusta nie jest:
+        // wpisanie w nią etykiety skasowałoby cudzą formułę.
+        headerBlank: String(headerFormulas[i] || '') === '',
+        usedBelow: dataRows > 0 && !rangeIsEmpty_(sheet.getRange(2, column, dataRows, 1))
+      };
+    })
+  };
+}
+
+/**
+ * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156, #154).
+ *
+ * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
+ * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
+ * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
+ * wartości do kolumny bez etykiety.
+ *
+ * Kolumnę z pustą etykietą uznajemy za wolną tylko wtedy, gdy pusta jest także
+ * używana część kolumny pod nią. Sam nagłówek nie wystarcza: `M1` bywa puste,
+ * a `M2:M20` trzyma notatki albo formuły operatora. Wpisanie tam etykiety nie
+ * nadpisałoby tych wartości, ale zaczęłoby je **czytać jako konfigurację** — to
+ * nadal przejęcie cudzej kolumny, tylko cichsze.
+ *
+ * Walidacja idzie PRZED jakimkolwiek zapisem: konflikt ma zatrzymać operację,
+ * a nie zostawić arkusza w połowie zmienionego — także przy rozszerzeniu o dwie
+ * kolumny naraz.
+ */
+function ensureHeaderColumns_(sheetName, header) {
+  const existing = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const state = existing ? headerColumnsState_(existing, header) : null;
+
+  // Tylko arkusz, który MA nagłówek, ma luki do uzupełnienia — i tylko wtedy da się
+  // powiedzieć, która kolumna jest nowa: ta z pustą etykietą. W arkuszu bez nagłówka
+  // nic nie odróżnia „naszej” kolumny od cudzej, a zablokowanie zapisu odebrałoby
+  // `ensureSheetWithHeader_()` jego starą ścieżkę naprawczą, z której korzystają też
+  // zakładki prowadzone przez skrypt.
+  if (state && state.headed) {
+    const conflicts = [];
+    state.columns.forEach(function (column, i) {
+      if (column.label === header[i]) return;
+      if (column.label !== '') {
+        conflicts.push('kolumna ' + (i + 1) + ': jest „' + column.label + '”, oczekiwano „' + header[i] + '”');
+        return;
+      }
+      if (!column.headerBlank) {
+        conflicts.push('kolumna ' + (i + 1) + ': komórka nagłówka nie jest pusta (formuła) — nie nadpisujemy jej etykietą „' + header[i] + '”');
+        return;
+      }
+      if (column.usedBelow) {
+        conflicts.push('kolumna ' + (i + 1) + ': nagłówek pusty, ale pod nim są dane — nie przejmujemy jej pod „' + header[i] + '”');
+      }
+    });
+    if (conflicts.length) {
+      throw new Error(
+        'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
+        '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
+      );
+    }
+  }
+
+  const sheet = ensureSheetWithHeader_(sheetName, header);
+  const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  header.forEach(function (label, i) {
+    if (String(current[i] === undefined || current[i] === null ? '' : current[i]).trim() !== label) {
+      sheet.getRange(1, i + 1).setValue(label);
+    }
+  });
   return sheet;
 }
 

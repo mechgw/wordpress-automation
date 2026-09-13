@@ -32,8 +32,42 @@ const SEO_LIVE_HEADER = [
   'Wynik (live)',
   'Różnice',
   'Sprawdzono',
-  'Indeks Google (URL INSPEKCJA)'
+  'Indeks Google (URL INSPEKCJA)',
+  // Kolumny dopisane po `Indeks Google`, a nie wstawione po oczekiwaniach (#154).
+  // Zapis wyników idzie na sztywno od kolumny 9, więc przesunięcie `I`–`L`
+  // sprawiłoby, że skrypt czytałby własny `Wynik` jako oczekiwanie operatora
+  // i nadpisywał je w tym samym przebiegu. Kosztem jest wyłącznie kolejność kolumn.
+  'Oczekiwane w HTML',
+  'Zakazane w HTML'
 ];
+/**
+ * Ile znaków fragmentu pokazujemy w różnicy. Fragment wolno mieć długi — limitem
+ * jest komórka — ale wpisanie go w całości do `Różnic` potrafiłoby przekroczyć ten
+ * sam limit po stronie zapisu, a `setValues` leży poza `try` obsługującym wiersz:
+ * wywróciłoby to cały przebieg, nie jeden adres.
+ */
+const SEO_LIVE_FRAGMENT_PREVIEW = 120;
+
+/**
+ * Ile różnic maksymalnie w jednym mailu. Skrócenie pojedynczego opisu nie wystarcza:
+ * przy setkach monitorowanych adresów suma i tak przekracza limit rozmiaru wiadomości,
+ * a `sendImportAlert_()` łapie błąd wysyłki — więc alert przepada w całości.
+ *
+ * Różnica wobec kolejki recrawl, która tnie tak samo: tam reszta wraca w kolejnych
+ * przebiegach, bo rekomendacja zostaje rekomendacją. Tu **nie wraca** — wiersz jest już
+ * zapisany jako UWAGA, więc w następnym przebiegu nie będzie nowy. Ogon maila musi więc
+ * mówić co innego niż tam: reszta jest w arkuszu i nie przyjdzie później.
+ */
+const SEO_LIVE_MAX_EMAIL_ITEMS = 50;
+
+/** Ile znaków opisu trafia do alertu; pełna treść zostaje w arkuszu. */
+const SEO_LIVE_ALERT_DETAILS = 300;
+const SEO_LIVE_CELL_NOTE = ' … [opis skrócony do limitu komórki]';
+const SEO_LIVE_ALERT_NOTE = '… [pełna treść w arkuszu]';
+
+/** Indeksy nowych kolumn; oczekiwania przestały być ciągłym zakresem `B`–`H`. */
+const SEO_LIVE_COL_REQUIRED_HTML = 12;
+const SEO_LIVE_COL_FORBIDDEN_HTML = 13;
 const SEO_LIVE_MAX_REDIRECTS = 5;
 const SEO_LIVE_TRIGGER_HANDLER = 'sprawdzStronyLiveTrigger';
 const SEO_LIVE_TRIGGER_HOUR = 9;
@@ -144,7 +178,76 @@ function seoLiveQuote_(value) {
   return value ? '„' + value + '”' : 'brak';
 }
 
-/** Oczekiwania wiersza (kolumny B..H) w jednym obiekcie. */
+/**
+ * Lista fragmentów HTML z jednej komórki: jeden fragment na linię.
+ *
+ * Separator znakowy odpada, bo dopasowanie jest dosłowne, a skrypt inline to
+ * jeden z głównych przypadków użycia — `|` występuje w nim normalnie (`||`,
+ * operatory bitowe, teksty konfiguracji). Znak nowej linii nie odbiera żadnego
+ * znaku treści, więc kontrakt jest jednoznaczny i nie wymaga escapowania.
+ */
+function seoLiveFragments_(value, columnLabel) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  if (raw.length > WP_CELL_CHAR_LIMIT) {
+    throw new Error(
+      'Kolumna „' + columnLabel + '” ma ' + raw.length + ' znaków, a limit komórki to ' +
+      WP_CELL_CHAR_LIMIT + '. Skróć listę — milczące obcięcie zamieniłoby część kontroli w fikcję.'
+    );
+  }
+  return raw.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+}
+
+/**
+ * HTML sprowadzony do postaci porównywalnej: ciągi białych znaków do jednej spacji.
+ * Wielkość liter zostaje bez zmian — w HTML bywa znacząca: wartości atrybutów
+ * i treść skryptu inline nie są nieczułe na wielkość liter.
+ */
+function seoLiveNormalizeHtml_(value) {
+  return String(value === undefined || value === null ? '' : value).replace(/\s+/g, ' ');
+}
+
+/**
+ * Różnice z kontroli fragmentów HTML. Celowo osobno od `seoLiveCompare_`:
+ * te kontrole zostają **poza wyciszaniem z #130**, bo dla dowolnego fragmentu
+ * HTML nie ma deterministycznego odwzorowania na oczekujące polecenie, a
+ * dopasowanie „po podobieństwie” udawałoby wiedzę, której nie mamy.
+ */
+function seoLiveFragmentDiffs_(html, expect) {
+  const haystack = seoLiveNormalizeHtml_(html);
+  const diffs = [];
+  (expect.requiredHtml || []).forEach(function (fragment) {
+    if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) < 0) {
+      diffs.push('brak oczekiwanego fragmentu HTML: ' + seoLiveQuote_(seoLiveFragmentPreview_(fragment)));
+    }
+  });
+  (expect.forbiddenHtml || []).forEach(function (fragment) {
+    if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) >= 0) {
+      diffs.push('zakazany fragment HTML obecny: ' + seoLiveQuote_(seoLiveFragmentPreview_(fragment)));
+    }
+  });
+  return diffs;
+}
+
+/** Fragment w różnicy skrócony do podglądu, tak jak wartość w kontrolach schema. */
+function seoLiveFragmentPreview_(value) {
+  const text = String(value === null || value === undefined ? '' : value);
+  return text.length > SEO_LIVE_FRAGMENT_PREVIEW ? text.slice(0, SEO_LIVE_FRAGMENT_PREVIEW) + '…' : text;
+}
+
+/**
+ * Tekst przycięty do limitu, z jawnym śladem, że jest niepełny.
+ *
+ * Skrócenie pojedynczego fragmentu nie wystarcza: różnic bywa wiele, a suma
+ * podglądów też rośnie. Dotyczy to dwóch miejsc o różnych limitach — zapisu
+ * do komórki i treści alertu — bo w obu przekroczenie kończy się cicho utraconą
+ * informacją, tylko inaczej.
+ */
+function seoLiveCap_(text, limit, note) {
+  const value = String(text === null || text === undefined ? '' : text);
+  return value.length > limit ? value.slice(0, limit - note.length) + note : value;
+}
+
+/** Oczekiwania wiersza (kolumny B..H oraz M, N) w jednym obiekcie. */
 function seoLiveExpectations_(line) {
   return {
     // Pusty = 200; liczba = ta liczba; cokolwiek innego zostaje tekstem i da różnicę,
@@ -155,7 +258,9 @@ function seoLiveExpectations_(line) {
     h1: String(line[4] || '').trim(),
     canonical: String(line[5] || '').trim(),
     robots: String(line[6] || '').trim().toLowerCase(),
-    schema: String(line[7] || '').split(',').map(s => s.trim()).filter(Boolean)
+    schema: String(line[7] || '').split(',').map(s => s.trim()).filter(Boolean),
+    requiredHtml: seoLiveFragments_(line[SEO_LIVE_COL_REQUIRED_HTML], SEO_LIVE_HEADER[SEO_LIVE_COL_REQUIRED_HTML]),
+    forbiddenHtml: seoLiveFragments_(line[SEO_LIVE_COL_FORBIDDEN_HTML], SEO_LIVE_HEADER[SEO_LIVE_COL_FORBIDDEN_HTML])
   };
 }
 
@@ -219,7 +324,9 @@ function seoLiveIndexLookup_() {
  * i werdykt z indeksu. Zwraca podsumowanie z listą nowych rozbieżności.
  */
 function runSeoLiveCheck_() {
-  const sheet = ensureSheetWithHeader_(SEO_LIVE_SHEET, SEO_LIVE_HEADER);
+  // Nie `ensureSheetWithHeader_`: istniejący arkusz ma `A1` = `URL`, więc tamta
+  // funkcja nie tknęłaby nagłówka i nowe kolumny zostałyby bez etykiet (#154).
+  const sheet = ensureHeaderColumns_(SEO_LIVE_SHEET, SEO_LIVE_HEADER);
   const summary = { checked: 0, ok: 0, warnings: 0, errors: 0, pending: 0, empty: false, problems: [], newProblems: [] };
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
@@ -251,7 +358,14 @@ function runSeoLiveCheck_() {
       const expect = seoLiveExpectations_(line);
       expect.schemaRules = schemaRulesFor_(schemaExpectations, url);
       const diffs = seoLiveCompare_(url, expect, fetched, seoLiveExtract_(fetched.html, fetched.headers));
-      const change = classifyPendingChange_(diffs, pending[seoLiveNormalizeUrl_(url)]);
+      // Kontrole fragmentów HTML idą obok wyciszania (#130): dla dowolnego fragmentu
+      // nie ma deterministycznego odwzorowania na oczekujące polecenie, więc znaleziona
+      // różnica jest zawsze regresją — także wtedy, gdy reszta różnic jest pokryta.
+      const strict = seoLiveFragmentDiffs_(fetched.html, expect);
+      const change = strict.length
+        ? { covered: false, overdue: false, ids: [] }
+        : classifyPendingChange_(diffs, pending[seoLiveNormalizeUrl_(url)]);
+      diffs.push.apply(diffs, strict);
       details = diffs.join('; ');
       summary.checked++;
 
@@ -279,13 +393,25 @@ function runSeoLiveCheck_() {
       summary.errors++;
     }
     const indexVerdict = index[seoLiveNormalizeUrl_(url)] || 'brak w ' + URL_INSPECTION_SHEET;
-    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, details, now, indexVerdict]]);
+    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, seoLiveCap_(details, WP_CELL_CHAR_LIMIT, SEO_LIVE_CELL_NOTE), now, indexVerdict]]);
     // PENDING CHANGE nie jest problemem: zmiana jest znana i zatwierdzona,
     // a alert o niej byłby powtórzeniem tego, co i tak wiadomo z kolejki.
     if (result !== 'OK' && result.indexOf('PENDING CHANGE') !== 0) {
-      const lineText = url + ': ' + result + (details ? ' – ' + details : '');
+      // Do alertu idzie skrót, nie cały opis: legalna komórka potrafi rozwinąć się
+      // w setki kilobajtów diagnostyki, a przekroczony limit maila kończy się tym,
+      // że alert nie dociera i nigdy nie zostanie ponowiony — wiersz nie jest już nowy.
+      const lineText = url + ': ' + result +
+        (details ? ' – ' + seoLiveCap_(details, SEO_LIVE_ALERT_DETAILS, SEO_LIVE_ALERT_NOTE) : '');
       summary.problems.push(lineText);
-      if (previous === '' || previous === 'OK') summary.newProblems.push(lineText);
+      // Nowy problem to przejście ze stanu, który problemem NIE był — a według
+      // tego samego kodu kilka linijek wyżej PENDING CHANGE nim nie jest. Bez tego
+      // regresja pojawiająca się w wierszu z oczekującym poleceniem nigdy nie trafia
+      // do alertu: teraz jest wyciszona jako PENDING CHANGE, a w kolejnym przebiegu
+      // poprzednim stanem jest już UWAGA, więc „nowa” nie będzie. Dotyczy to w
+      // szczególności kontroli fragmentów HTML, które z założenia nie są wyciszane.
+      if (previous === '' || previous === 'OK' || previous.indexOf('PENDING CHANGE') === 0) {
+        summary.newProblems.push(lineText);
+      }
     }
   });
 
@@ -322,13 +448,19 @@ function sprawdzStronyLiveTrigger() {
   const summary = recordJobRun_('SEO_LIVE', true, () => withScriptLock_('live check SEO', runSeoLiveCheck_));
   Logger.log(seoLiveSummaryText_(summary));
   if (summary.newProblems.length) {
+    const batch = summary.newProblems.slice(0, SEO_LIVE_MAX_EMAIL_ITEMS);
+    const rest = summary.newProblems.length - batch.length;
+    const tail = [
+      '',
+      'Pozostałe wiersze z UWAGA/BŁĄD z poprzednich dni nie są powtarzane; pełna lista w arkuszu „' + SEO_LIVE_SHEET + '”.'
+    ];
+    if (rest > 0) {
+      tail.unshift('… i ' + rest + ' kolejnych nowych rozbieżności — są w arkuszu i NIE wrócą w następnym mailu.');
+    }
     sendImportAlert_('Live SEO: ' + summary.newProblems.length + ' nowa(e) rozbieżność(ci)', [
       'Codzienny live check znalazł rozbieżności, których poprzednio nie było:',
       ''
-    ].concat(summary.newProblems.map(p => '- ' + p)).concat([
-      '',
-      'Pozostałe wiersze z UWAGA/BŁĄD z poprzednich dni nie są powtarzane; pełna lista w arkuszu „' + SEO_LIVE_SHEET + '”.'
-    ]));
+    ].concat(batch.map(p => '- ' + p)).concat(tail));
   }
   return summary;
 }
