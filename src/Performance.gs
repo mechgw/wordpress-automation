@@ -645,6 +645,16 @@ function performanceKeyPart_(value, dateFormat) {
 }
 
 /**
+ * Chwila zapisu wiersza w milisekundach. Wartość nieczytelna jest traktowana
+ * jako najstarsza, żeby nigdy nie wygrała z odczytaną datą.
+ */
+function performanceRowTime_(value) {
+  if (value instanceof Date) return value.getTime();
+  const parsed = Date.parse(String(value));
+  return isNaN(parsed) ? -Infinity : parsed;
+}
+
+/**
  * Zapis idempotentny po kluczu z kolumn `keyColumns` — liczba znaczy „porównuj
  * surową wartość”, obiekt `{ column, dateFormat }` „sprowadź do tej postaci”.
  * Ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować,
@@ -672,17 +682,29 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows, obsolete) {
   const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, header.length).getValues() : [];
 
   // Duplikaty sprzed kanonicznego klucza zwijamy przy pierwszym zapisie po
-  // poprawce: idąc od końca zostawiamy kopię zapisaną najpóźniej, czyli tę
-  // z najnowszym `Pobrano`. Inaczej zostałyby w arkuszu na zawsze — ich okres
-  // już nigdy nie wróci w danych przychodzących, więc nic by ich nie podmieniło.
-  const seen = {};
-  const kept = existing.slice().reverse().filter(function (row) {
-    if (String(row[1] || '') === '') return false;
+  // poprawce — inaczej zostałyby w arkuszu na zawsze, bo ich okres nigdy już
+  // nie wróci w danych przychodzących i nic by ich nie podmieniło.
+  //
+  // Zostaje kopia z najnowszym `Pobrano`, a nie ta najniżej w arkuszu: pozycja
+  // wiersza nie jest chronologią, bo zakładkę wolno posortować, a kopie potrafią
+  // różnić się wartością — na przykład gdy jedna poszła z danych domeny, a druga
+  // z odczytu adresu. Przy równym albo nieczytelnym `Pobrano` rozstrzyga pozycja.
+  const fetchedAt = header.indexOf('Pobrano');
+  const best = {};
+  existing.forEach(function (row, index) {
+    if (String(row[1] || '') === '') return;
     const key = keyOf(row);
-    if (incoming[key] || seen[key]) return false;
-    seen[key] = true;
-    return !(obsolete && obsolete(row));
-  }).reverse();
+    if (incoming[key]) return;
+    if (obsolete && obsolete(row)) return;
+    const previous = best[key];
+    if (previous === undefined ||
+        performanceRowTime_(row[fetchedAt]) >= performanceRowTime_(existing[previous][fetchedAt])) {
+      best[key] = index;
+    }
+  });
+  const chosen = {};
+  Object.keys(best).forEach(function (key) { chosen[best[key]] = true; });
+  const kept = existing.filter(function (row, index) { return chosen[index] === true; });
 
   const combined = kept.concat(rows);
   writeRowsThenTrim_(sheet, header.length, combined, lastRow);

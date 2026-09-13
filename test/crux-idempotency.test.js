@@ -166,6 +166,69 @@ describe('#155: klucz zapisu jest kanoniczny', () => {
     const stare = s.wiersze().filter(r => okres(r[COL.period]) === '2026-09-01');
     assert.equal(stare.length, 6, 'historia została, ale bez kopii');
   });
+
+  test('11: zwijanie zostawia kopię najnowszą, a nie najniżej położoną', () => {
+    // Kopie potrafią się różnić: jedna z danych domeny, druga z odczytu adresu.
+    // Zakładkę wolno posortować, więc pozycja wiersza nie jest chronologią.
+    const s = scenariusz();
+    s.przebieg(zDomeny(1, 2900));
+    arkuszParsujeDaty(s.gas);
+    const starsze = s.wiersze().map(r => r.slice());
+    starsze.forEach(r => { r[COL.fetched] = new s.gas.$Date(2026, 8, 10); });
+    const nowsze = starsze.map(r => r.slice());
+    nowsze.forEach(r => {
+      r[COL.p75] = 2100;
+      r[COL.source] = 'CRUX';
+      r[COL.fetched] = new s.gas.$Date(2026, 8, 12);
+    });
+
+    // Arkusz posortowany malejąco po „Pobrano”: nowsza kopia leży WYŻEJ.
+    const grid = s.gas.$sheet(FIELD);
+    grid.length = 1;
+    grid.push(...nowsze, ...starsze);
+    assert.equal(s.wiersze().length, 12);
+
+    s.przebieg(zAdresu(8, 2000));
+
+    const stare = s.wiersze().filter(r => okres(r[COL.period]) === '2026-09-01');
+    assert.equal(stare.length, 6, 'po jednej kopii na klucz');
+    assert.deepEqual([...new Set(stare.map(r => r[COL.source]))], ['CRUX'], 'przeżyła kopia nowsza');
+    assert.deepEqual(
+      stare.filter(r => r[COL.metric] === LCP).map(r => r[COL.p75]),
+      [2100, 2100],
+      'wartość z nowszego odczytu, nie z niżej położonego wiersza'
+    );
+  });
+
+  test('12: „Pobrano” bywa tekstem — porównanie działa, a wartość nieczytelna przegrywa', () => {
+    // Kolumna sformatowana jako tekst oddaje łańcuch, nie datę; obie postaci
+    // trafiają obok siebie w tej samej zakładce.
+    const s = scenariusz();
+    s.przebieg(zDomeny(1, 2900));
+    arkuszParsujeDaty(s.gas);
+    const wzor = s.wiersze()[0].slice();
+    const kopia = (p75, pobrano) => {
+      const row = wzor.slice();
+      row[COL.p75] = p75;
+      row[COL.fetched] = pobrano;
+      return row;
+    };
+
+    const grid = s.gas.$sheet(FIELD);
+    grid.length = 1;
+    grid.push(
+      kopia(2700, '2026-09-12'),
+      kopia(2800, 'nie wiadomo'),
+      kopia(2900, new s.gas.$Date(2026, 8, 10))
+    );
+
+    s.przebieg(zAdresu(8, 2000));
+
+    const stare = s.wiersze().filter(r => okres(r[COL.period]) === '2026-09-01');
+    assert.equal(stare.length, 1, 'trzy kopie zwinięte do jednej');
+    assert.equal(stare[0][COL.fetched], '2026-09-12', 'tekstowa data wygrywa z wcześniejszą');
+    assert.equal(stare[0][COL.p75], 2700);
+  });
 });
 
 describe('#155: marker dostępności danych', () => {
