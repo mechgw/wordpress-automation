@@ -17,7 +17,19 @@
  * `failures` pozwala wymusić odpowiedź dla konkretnej trasy: { 'POST /wp-json/wp/v2/pages/7': { code: 500, text: 'boom' } }.
  * Opcja `readBackLies` symuluje WordPress, który przyjął zapis, ale odczyt kontrolny nie odzwierciedla zmiany.
  */
-function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, perPage = 100 } = {}) {
+/**
+ * Nagłówki publicznej strony. Domyślnie odwzorowują trafienie w cache, bo to
+ * stan normalny na produkcji za CDN-em — i dokładnie ten, którego stanu nie zebrano
+ * przy pierwotnym incydencie #88.
+ */
+const DEFAULT_PUBLIC_HEADERS = {
+  'x-litespeed-cache': 'hit',
+  'cache-control': 'public, max-age=604800',
+  Age: '312',
+  Server: 'LiteSpeed'
+};
+
+function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, publicHeaders, perPage = 100 } = {}) {
   const state = {
     pages: new Map(pages.map(p => [Number(p.id), normalizePage(p)])),
     media: new Map(media.map(m => [Number(m.id), normalizeMedia(m)])),
@@ -163,7 +175,7 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
         return {
           code: 200,
           text: `<html><head><title>${page.title}</title><meta name="robots" content="${robots}, max-snippet:-1"></head><body><h1>${page.title}</h1></body></html>`,
-          headers: {}
+          headers: Object.assign({}, DEFAULT_PUBLIC_HEADERS, publicHeaders || {})
         };
       }
     }

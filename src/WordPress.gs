@@ -1029,6 +1029,45 @@ function getRankMathData_(page) {
 const WP_ROBOTS_FIELDS = ['wpa_rank_math_robots', 'cc_rank_math_robots'];
 
 /**
+ * Nagłówki, które mówią, **która warstwa** oddała tę odpowiedź (#88).
+ *
+ * Pierwotnego incydentu — post meta poprawne, publiczny HTML inny — nie udało się
+ * wyjaśnić, bo dowód zniknął przed zebraniem: ręczny zapis w edytorze i czyszczenie
+ * cache usuwają dokładnie to, co wskazałoby przyczynę. Zapisujemy więc stan warstw
+ * **w chwili rozjazdu**, zanim ktokolwiek zdąży cokolwiek naprawić.
+ *
+ * Lista jest jawna i generyczna: to nazwy nagłówków protokołu i popularnych warstw
+ * cache, nie tożsamość żadnej instalacji.
+ */
+const CACHE_DIAGNOSTIC_HEADERS = [
+  'age', 'cache-control', 'expires', 'last-modified', 'etag', 'date', 'server', 'via',
+  'x-cache', 'x-cache-status', 'x-cache-hits', 'x-served-by', 'x-proxy-cache',
+  'cf-cache-status', 'x-litespeed-cache', 'x-litespeed-cache-control', 'x-qc-pop', 'x-qc-cache'
+];
+
+/** Ile znaków diagnostyki mieścimy w komunikacie komendy. */
+const CACHE_DIAGNOSTIC_LIMIT = 600;
+
+/**
+ * Stan warstw z odpowiedzi, jako jedna linia `nagłówek=wartość`.
+ *
+ * Porównanie nazw bez względu na wielkość liter, bo `getAllHeaders()` oddaje je tak,
+ * jak przysłał serwer. Brak nagłówka jest informacją sam w sobie, więc mówimy o tym
+ * wprost zamiast zwracać pustkę.
+ */
+function cacheDiagnostics_(headers) {
+  const found = [];
+  Object.keys(headers || {}).forEach(function (name) {
+    if (CACHE_DIAGNOSTIC_HEADERS.indexOf(String(name).toLowerCase()) < 0) return;
+    const value = headers[name];
+    found.push(String(name).toLowerCase() + '=' + String(value === null || value === undefined ? '' : value));
+  });
+  if (!found.length) return 'brak nagłówków cache w odpowiedzi';
+  const text = found.sort().join('; ');
+  return text.length > CACHE_DIAGNOSTIC_LIMIT ? text.slice(0, CACHE_DIAGNOSTIC_LIMIT) + '…' : text;
+}
+
+/**
  * Sprawdza, co publiczna strona NAPRAWDĘ serwuje w meta robots (#88).
  *
  * Odczyt kontrolny przez REST potwierdza jedynie, że post meta ma nową wartość.
@@ -1051,6 +1090,8 @@ function verifyRobotsOnPage_(page, expectedRobots) {
   }
 
   let served;
+  let diagnostics;
+  let finalUrl;
   try {
     const fetched = seoLiveFetch_(link);
     // Odpowiedź nie-2xx to brak możliwości sprawdzenia, a nie strona bez
@@ -1059,6 +1100,10 @@ function verifyRobotsOnPage_(page, expectedRobots) {
       return { checked: false, detail: 'strona odpowiedziała HTTP ' + fetched.code };
     }
     served = seoLiveExtract_(fetched.html, fetched.headers).robots;
+    // Stan warstw zapisujemy ZAWSZE, nie tylko przy rozjeździe: przy zgodności jest
+    // punktem odniesienia, którego przy pierwszym incydencie nie mieliśmy.
+    diagnostics = cacheDiagnostics_(fetched.headers);
+    finalUrl = String(fetched.finalUrl || link);
   } catch (e) {
     // Brak możliwości sprawdzenia to nie to samo co rozjazd: nie zamieniamy
     // udanego zapisu w błąd, ale mówimy wprost, że nie wiemy.
@@ -1079,7 +1124,9 @@ function verifyRobotsOnPage_(page, expectedRobots) {
     checked: true,
     matches: problems.length === 0,
     served: served || 'brak meta robots',
-    detail: problems.join('; ')
+    detail: problems.join('; '),
+    diagnostics: diagnostics,
+    finalUrl: finalUrl
   };
 }
 
@@ -1252,14 +1299,15 @@ function updateRankMathField_(command) {
       throw new Error(
         'Rank Math zapisał robots, ale publiczna strona nadal serwuje co innego. ' +
         live.detail + '. Strona oddaje: „' + live.served + '”. ' +
-        'Post meta jest poprawne, więc to nie jest błąd zapisu. Najczęstsza przyczyna to ' +
-        'pamięć podręczna strony albo CDN, których zapis przez REST nie unieważnia, w odróżnieniu ' +
-        'od zapisu z edytora. Wyczyść cache dla tego adresu i sprawdź ponownie; jeśli to nie pomoże, ' +
-        'otwórz stronę w edytorze i zapisz ją ręcznie.'
+        'Post meta jest poprawne, więc to nie jest błąd zapisu. ' +
+        'Stan warstw w chwili rozjazdu [' + live.finalUrl + ']: ' + live.diagnostics + '. ' +
+        'Ten opis JEST dowodem — skopiuj go do #88, zanim cokolwiek naprawisz. ' +
+        'Dopiero potem wyczyść cache dla tego adresu; ręczny zapis w edytorze zostaw na koniec, ' +
+        'bo kasuje jedyny ślad przyczyny, a pierwotny incydent pozostał niewyjaśniony właśnie dlatego.'
       );
     }
     liveNote = live.checked
-      ? ' Strona na żywo potwierdza ustawienie.'
+      ? ' Strona na żywo potwierdza ustawienie [' + live.diagnostics + '].'
       : ' UWAGA: nie sprawdzono strony na żywo (' + live.detail + ').';
   }
 
