@@ -23,7 +23,7 @@ const URLS_HEADER = ['URL', 'Rola', 'Uwagi'];
 const FINDINGS_HEADER = [
   'Pomiar', 'URL', 'Strategia', 'Próba', 'Rodzaj', 'Nazwa', 'Szczegół',
   'Czas (ms)', 'Transfer (KiB)', 'Potencjalna oszczędność (ms)', 'Potencjalna oszczędność (KiB)',
-  'Źródło', 'Pobrano'
+  'Źródło', 'Pobrano', 'Wyzwolenie'
 ];
 
 const URL = 'https://www.example.pl/';

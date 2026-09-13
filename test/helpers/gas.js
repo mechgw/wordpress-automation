@@ -377,6 +377,7 @@ function createStubs(opts) {
         const builder = {
           timeBased: () => builder,
           everyDays(n) { spec.everyDays = n; return builder; },
+          everyHours(n) { spec.everyHours = n; return builder; },
           onWeekDay(day) { spec.weekDay = day; return builder; },
           atHour(h) { spec.atHour = h; return builder; },
           create() {
