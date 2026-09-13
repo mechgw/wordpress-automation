@@ -368,6 +368,29 @@ describe('#154: nowe kontrole poza wyciszaniem z #130', () => {
     assert.match(wynik(gas), /^PENDING CHANGE/, 'bez tego test 14 nie dowodziłby niczego');
   });
 
+  test('15: regresja fragmentu w wierszu z PENDING CHANGE trafia do alertu', () => {
+    // Wiersz był wyciszony jako PENDING CHANGE, więc problemem nie był. Pojawia się
+    // zakazany fragment — i bez tej poprawki alert nigdy nie wychodzi: teraz „nie nowy”,
+    // a w kolejnym przebiegu poprzednim stanem jest już UWAGA.
+    const gas = project({
+      rows: [wiersz(URL, {
+        robots: 'noindex',
+        forbidden: MARKER,
+        result: 'PENDING CHANGE: 1 różnic(e)'
+      })],
+      properties: Object.assign({ ALERT_EMAIL: 'alerty@example.pl' }, PROPS),
+      commands: [polecenie()],
+      html: page(MARKER),
+      routes: { 'https://www.example.pl/wp-json/wp/v2/pages/7': { code: 200, text: JSON.stringify({ id: 7, link: URL }) } }
+    });
+
+    gas.sprawdzStronyLiveTrigger();
+
+    assert.match(wynik(gas), /^UWAGA/);
+    assert.equal(gas.$mails.length, 1, 'alert o nowej regresji wysłany');
+    assert.match(String(gas.$mails[0].body || gas.$mails[0][2] || ''), /zakazany fragment HTML obecny/);
+  });
+
   test('14: zakazany fragment obok pokrytej różnicy → alert NIE jest wyciszany', () => {
     const gas = project({
       rows: [wiersz(URL, { robots: 'noindex', forbidden: MARKER })],

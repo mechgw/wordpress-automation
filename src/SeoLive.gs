@@ -391,7 +391,15 @@ function runSeoLiveCheck_() {
       const lineText = url + ': ' + result +
         (details ? ' – ' + seoLiveCap_(details, SEO_LIVE_ALERT_DETAILS, SEO_LIVE_ALERT_NOTE) : '');
       summary.problems.push(lineText);
-      if (previous === '' || previous === 'OK') summary.newProblems.push(lineText);
+      // Nowy problem to przejście ze stanu, który problemem NIE był — a według
+      // tego samego kodu kilka linijek wyżej PENDING CHANGE nim nie jest. Bez tego
+      // regresja pojawiająca się w wierszu z oczekującym poleceniem nigdy nie trafia
+      // do alertu: teraz jest wyciszona jako PENDING CHANGE, a w kolejnym przebiegu
+      // poprzednim stanem jest już UWAGA, więc „nowa” nie będzie. Dotyczy to w
+      // szczególności kontroli fragmentów HTML, które z założenia nie są wyciszane.
+      if (previous === '' || previous === 'OK' || previous.indexOf('PENDING CHANGE') === 0) {
+        summary.newProblems.push(lineText);
+      }
     }
   });
 
