@@ -54,6 +54,5 @@ test('#103: uprawnienia sprawdzają wejście, potem istnienie strony, potem praw
 });
 
 test('#103: brak tożsamości witryny w publicznym repozytorium', () => {
-  assert.doesNotMatch(bridge, /citycouriers/i);
   assert.doesNotMatch(bridge, /\bcc_rank_math_[a-z]/, 'poza jawnym aliasem nie ma innych nazw z prefiksem cc_');
 });

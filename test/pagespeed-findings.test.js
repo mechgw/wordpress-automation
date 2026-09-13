@@ -79,7 +79,7 @@ describe('#140: element LCP', () => {
   // więc jest zapisywany z KAŻDEJ udanej próby, a jego brak dostaje własny wiersz.
   test('1 (#153): audyt z użytecznym węzłem daje wiersz na każdą udaną próbę', () => {
     const gas = project({
-      audits: { 'largest-contentful-paint-element': lcpAudit({ selector: 'section.cc-hero', snippet: '<section>' }) }
+      audits: { 'largest-contentful-paint-element': lcpAudit({ selector: 'section.hero', snippet: '<section>' }) }
     });
     gas.zmierzWydajnosc();
     const rows = ofKind(gas, 'ELEMENT LCP');
@@ -89,7 +89,7 @@ describe('#140: element LCP', () => {
       [1, 2, 3],
       'każda próba ma własny wiersz, żadna nie ginie'
     );
-    assert.equal(rows[0][COL.detail], 'section.cc-hero', 'selektor ma pierwszeństwo przed fragmentem');
+    assert.equal(rows[0][COL.detail], 'section.hero', 'selektor ma pierwszeństwo przed fragmentem');
     assert.equal(rows[0][COL.savingsMs], '', 'element LCP to nie oszczędność');
     assert.equal(rows[0][COL.timeMs], '', 'ani koszt');
   });
@@ -111,13 +111,13 @@ describe('#140: element LCP', () => {
   });
 
   test('węzeł bez selektora schodzi do etykiety, a potem do fragmentu HTML', () => {
-    const gas = project({ audits: { 'largest-contentful-paint-element': lcpAudit({ nodeLabel: 'Zamów kuriera' }) } });
+    const gas = project({ audits: { 'largest-contentful-paint-element': lcpAudit({ nodeLabel: 'Nagłówek sekcji' }) } });
     gas.zmierzWydajnosc();
-    assert.equal(ofKind(gas, 'ELEMENT LCP')[0][COL.detail], 'Zamów kuriera');
+    assert.equal(ofKind(gas, 'ELEMENT LCP')[0][COL.detail], 'Nagłówek sekcji');
 
-    const snippet = project({ audits: { 'largest-contentful-paint-element': lcpAudit({ snippet: '<p class="cc-lead">' }) } });
+    const snippet = project({ audits: { 'largest-contentful-paint-element': lcpAudit({ snippet: '<p class="lead">' }) } });
     snippet.zmierzWydajnosc();
-    assert.equal(ofKind(snippet, 'ELEMENT LCP')[0][COL.detail], '<p class="cc-lead">');
+    assert.equal(ofKind(snippet, 'ELEMENT LCP')[0][COL.detail], '<p class="lead">');
   });
 });
 

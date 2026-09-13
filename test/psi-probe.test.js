@@ -201,8 +201,8 @@ describe('#157: flaga węzła wobec realnego kształtu 13.4.1', () => {
       items: [
         { type: 'table', headings: [], items: [{ duration: 120, label: 'TTFB', subpart: 'ttfb' }] },
         {
-          snippet: '<section class="hero">', selector: 'section.hero', boundingRect: {},
-          type: 'node', nodeLabel: 'Zamów kuriera', lhId: 'page-0-SECTION', path: '1,HTML'
+          snippet: '<section class="hero">', selector: 'section.promo', boundingRect: {},
+          type: 'node', nodeLabel: 'Nagłówek sekcji', lhId: 'page-0-SECTION', path: '1,HTML'
         }
       ]
     }
