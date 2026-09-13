@@ -250,19 +250,36 @@ describe('#154: upgrade istniejącego arkusza', () => {
     assert.equal(gas.$sheet(SHEET)[0][COL.required] ?? '', '', 'kolumna z formułą nie została przejęta');
   });
 
-  test('12e: arkusz z danymi, ale BEZ nagłówka — notatki w M nie stają się konfiguracją', () => {
-    // `ensureSheetWithHeader_` wstawia w takim arkuszu wiersz nad danymi i wpisuje
-    // komplet etykiet. Zajętość badana PO tym nie zobaczyłaby już konfliktu.
-    const gas = project({
-      sheet: [[URL].concat(new Array(11).fill('')).concat(['prywatna notatka'])]
+  test('12e: arkusz z danymi, ale BEZ nagłówka — stara ścieżka naprawcza działa dalej', () => {
+    // Świadome rozstrzygnięcie po drugiej rundzie audytu: reguła „nie przejmuj kolumny
+    // z danymi” obowiązuje tam, gdzie da się powiedzieć, która kolumna jest NOWA — czyli
+    // w arkuszu z nagłówkiem, po pustej etykiecie. W arkuszu bez nagłówka nic nie odróżnia
+    // „naszej” kolumny od cudzej, a zablokowanie zapisu odebrałoby `ensureSheetWithHeader_`
+    // naprawę, z której korzystają też zakładki prowadzone przez skrypt.
+    const gas = project({ sheet: [[URL], [OTHER]] });
+    gas.runSeoLiveCheck_();
+
+    assert.deepEqual(naglowek(gas), HEADER, 'nagłówek założony nad danymi');
+    assert.equal(gas.$sheet(SHEET)[1][0], URL, 'dane zjechały o wiersz, nic nie nadpisane');
+    assert.equal(gas.$sheet(SHEET)[2][0], OTHER);
+    assert.equal(wynik(gas, 1), 'OK', 'oba adresy sprawdzone');
+  });
+
+  test('12g: formuła w komórce nagłówka M1 — nie nadpisujemy jej etykietą', () => {
+    // `getValue()` zwraca dla niej pusty tekst, więc bez sprawdzenia formuły kolumna
+    // wyglądałaby na wolną, a `setValue` skasowałoby cudzą formułę.
+    const gas = loadProject({
+      properties: {},
+      sheets: {
+        [SHEET]: {
+          rows: [HEADER_OLD.concat(['']), [URL].concat(new Array(11).fill('')).concat([''])],
+          formulas: [new Array(12).fill('').concat(['=IF(TRUE;"";"")'])]
+        }
+      },
+      fetch: () => ({ code: 200, text: page(), headers: { 'Content-Type': 'text/html' } })
     });
-    assert.throws(() => gas.runSeoLiveCheck_(), /nagłówek pusty, ale pod nim są dane/);
-    assert.deepEqual(
-      plain(gas.$sheet(SHEET)[0]).slice(0, 12),
-      [URL].concat(new Array(11).fill('')),
-      'nagłówek nie został wpisany nad cudzymi danymi'
-    );
-    assert.equal(gas.$sheet(SHEET)[0][COL.required], 'prywatna notatka', 'notatka nietknięta');
+    assert.throws(() => gas.runSeoLiveCheck_(), /komórka nagłówka nie jest pusta \(formuła\)/);
+    assert.equal(gas.$sheet(SHEET)[0][COL.required], '', 'etykieta nie zastąpiła formuły');
   });
 
   test('12f: pusty arkusz przycięty do dwunastu kolumn — siatka szersza przed zapisem nagłówka', () => {
@@ -273,6 +290,20 @@ describe('#154: upgrade istniejącego arkusza', () => {
     });
     gas.runSeoLiveCheck_();
     assert.deepEqual(naglowek(gas), HEADER, 'nagłówek zmieścił się zamiast wywrócić przebieg');
+  });
+
+  test('12h: dosypywanie adresów z sitemap na przyciętym arkuszu też nie pada na szerokości', () => {
+    // `syncMonitoringSheet_` woła `ensureSheetWithHeader_` wprost, z pominięciem
+    // `ensureHeaderColumns_` — miejsce na nowe kolumny musi więc robić sam nagłówek,
+    // inaczej szerszy schemat wywraca całe odświeżanie z sitemap, a nie live check.
+    const gas = loadProject({
+      properties: {},
+      sheets: { [SHEET]: { rows: [], maxColumns: 12 } },
+      fetch: () => ({ code: 404, text: '' })
+    });
+    const out = plain(gas.syncMonitoringSheet_(SHEET, HEADER, [{ url: URL }]));
+    assert.deepEqual(naglowek(gas), HEADER, 'nagłówek zmieścił się w rozszerzonej siatce');
+    assert.deepEqual(out.added, [URL], 'adres dopisany mimo przyciętej siatki');
   });
 
   test('13: arkusz zakładany od zera dostaje pełny, czternastokolumnowy nagłówek', () => {

@@ -218,6 +218,10 @@ function ensureSheetWithHeader_(name, header) {
       if (!sheet) throw e;
     }
   }
+  // Nagłówek szerszy niż siatka rzuca wyjątkiem o zakresie, a arkusz przycięty
+  // do kilkunastu kolumn to realny przypadek. Miejsce robimy tutaj, bo każda inna
+  // ścieżka zapisu nagłówka i tak przechodzi tędy — wywołujący nie musi pamiętać.
+  ensureSheetColumns_(sheet, header.length);
   if (sheet.getLastRow() < 1 || String(sheet.getRange(1, 1).getValue() || '') !== header[0]) {
     if (sheet.getLastRow() >= 1 && !sheet.getRange(1, 1, 1, header.length).isBlank()) {
       sheet.insertRowBefore(1);
@@ -263,59 +267,57 @@ function rangeIsEmpty_(range) {
 /**
  * Stan kolumn nagłówka SPRZED jakiejkolwiek zmiany.
  *
- * Kolejność ma tu znaczenie: `ensureSheetWithHeader_()` potrafi wstawić wiersz
- * nad danymi arkusza bez nagłówka i wpisać komplet etykiet. Gdyby zajętość badać
- * po nim, cudze notatki leżałyby już pod świeżo wpisaną etykietą, walidacja nie
- * zobaczyłaby konfliktu i zaczęłaby czytać je jako konfigurację.
+ * Kolejność ma znaczenie: `ensureSheetWithHeader_()` potrafi wstawić wiersz nad
+ * danymi i wpisać komplet etykiet. Gdyby zajętość badać po nim, cudza treść
+ * leżałaby już pod świeżo wpisaną etykietą i przeszłaby walidację.
  *
- * W arkuszu bez nagłówka wiersz 1 to jeszcze dane, więc liczy się do zajętości.
- * Kolumna poza siatką arkusza jest z definicji pusta — czytanie jej rzuciłoby
+ * `headed` mówi, czy arkusz ma w ogóle wiersz nagłówka. Bez niego nie ma czego
+ * uzupełniać — nagłówek zakłada wtedy `ensureSheetWithHeader_()` swoją starą
+ * ścieżką naprawczą, a ta funkcja nie rości sobie do niczego prawa.
+ *
+ * Kolumna poza siatką arkusza jest z definicji pusta; czytanie jej rzuciłoby
  * wyjątkiem o zakresie zamiast dać odpowiedź.
  */
 function headerColumnsState_(sheet, header) {
   const maxColumns = sheet.getMaxColumns();
   const lastRow = sheet.getLastRow();
   const headed = lastRow >= 1 && String(sheet.getRange(1, 1).getValue() || '') === header[0];
-  const firstDataRow = headed ? 2 : 1;
-  const dataRows = lastRow - firstDataRow + 1;
-  return header.map(function (label, i) {
-    const column = i + 1;
-    if (column > maxColumns) return { label: '', usedBelow: false };
-    return {
-      label: headed ? String(sheet.getRange(1, column).getValue() || '').trim() : '',
-      usedBelow: dataRows > 0 && !rangeIsEmpty_(sheet.getRange(firstDataRow, column, dataRows, 1))
-    };
-  });
+  const dataRows = lastRow - 1;
+  return {
+    headed: headed,
+    columns: header.map(function (label, i) {
+      const column = i + 1;
+      if (!headed || column > maxColumns) return { label: '', headerBlank: true, usedBelow: false };
+      return {
+        label: String(sheet.getRange(1, column).getValue() || '').trim(),
+        // Formuła zwracająca `""` daje pustą wartość, ale komórka pusta nie jest:
+        // wpisanie w nią etykiety skasowałoby cudzą formułę.
+        headerBlank: rangeIsEmpty_(sheet.getRange(1, column, 1, 1)),
+        usedBelow: dataRows > 0 && !rangeIsEmpty_(sheet.getRange(2, column, dataRows, 1))
+      };
+    })
+  };
 }
 
-/**
- * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156, #154).
- *
- * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
- * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
- * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
- * wartości do kolumny bez etykiety.
- *
- * Kolumnę uznajemy za wolną tylko wtedy, gdy pusta jest i komórka nagłówka,
- * i używana część kolumny pod nią. Sam nagłówek nie wystarcza: `M1` bywa puste,
- * a `M2:M20` trzyma notatki albo formuły operatora. Wpisanie tam etykiety nie
- * nadpisałoby tych wartości, ale zaczęłoby je **czytać jako konfigurację** — to
- * nadal przejęcie cudzej kolumny, tylko cichsze.
- *
- * Walidacja idzie PRZED jakimkolwiek zapisem, także przed założeniem nagłówka:
- * konflikt ma zatrzymać operację, a nie zostawić arkusz w połowie zmieniony.
- * Dotyczy to również pary kolumn — zajęta druga nie może zostawić pierwszej
- * już przejętej.
- */
 function ensureHeaderColumns_(sheetName, header) {
   const existing = SpreadsheetApp.getActive().getSheetByName(sheetName);
-  if (existing) {
-    const state = headerColumnsState_(existing, header);
+  const state = existing ? headerColumnsState_(existing, header) : null;
+
+  // Tylko arkusz, który MA nagłówek, ma luki do uzupełnienia — i tylko wtedy da się
+  // powiedzieć, która kolumna jest nowa: ta z pustą etykietą. W arkuszu bez nagłówka
+  // nic nie odróżnia „naszej” kolumny od cudzej, a zablokowanie zapisu odebrałoby
+  // `ensureSheetWithHeader_()` jego starą ścieżkę naprawczą, z której korzystają też
+  // zakładki prowadzone przez skrypt.
+  if (state && state.headed) {
     const conflicts = [];
-    state.forEach(function (column, i) {
+    state.columns.forEach(function (column, i) {
       if (column.label === header[i]) return;
       if (column.label !== '') {
         conflicts.push('kolumna ' + (i + 1) + ': jest „' + column.label + '”, oczekiwano „' + header[i] + '”');
+        return;
+      }
+      if (!column.headerBlank) {
+        conflicts.push('kolumna ' + (i + 1) + ': komórka nagłówka nie jest pusta (formuła) — nie nadpisujemy jej etykietą „' + header[i] + '”');
         return;
       }
       if (column.usedBelow) {
@@ -328,13 +330,9 @@ function ensureHeaderColumns_(sheetName, header) {
         '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
       );
     }
-    // Zapis nagłówka szerszego niż siatka rzuca wyjątkiem o zakresie, więc
-    // miejsce trzeba zrobić przed wejściem do `ensureSheetWithHeader_()`.
-    ensureSheetColumns_(existing, header.length);
   }
 
   const sheet = ensureSheetWithHeader_(sheetName, header);
-  ensureSheetColumns_(sheet, header.length);
   const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
   header.forEach(function (label, i) {
     if (String(current[i] === undefined || current[i] === null ? '' : current[i]).trim() !== label) {
