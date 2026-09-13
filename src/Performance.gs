@@ -849,41 +849,6 @@ function validatePsiInterval_(hours) {
   return value;
 }
 
-/**
- * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156).
- *
- * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
- * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
- * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
- * wartości do kolumny bez etykiety.
- *
- * Dopisujemy WYŁĄCZNIE puste komórki nagłówka. Komórka z inną niepustą treścią
- * to konflikt schematu: zatrzymujemy się i mówimy, co jest nie tak, zamiast
- * nadpisywać coś, czego nie zakładaliśmy.
- */
-function ensureHeaderColumns_(sheetName, header) {
-  const sheet = ensureSheetWithHeader_(sheetName, header);
-  const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
-  const conflicts = [];
-  const missing = [];
-
-  header.forEach(function (label, i) {
-    const value = String(current[i] === undefined || current[i] === null ? '' : current[i]).trim();
-    if (value === label) return;
-    if (value === '') { missing.push(i); return; }
-    conflicts.push('kolumna ' + (i + 1) + ': jest „' + value + '”, oczekiwano „' + label + '”');
-  });
-
-  if (conflicts.length) {
-    throw new Error(
-      'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
-      '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
-    );
-  }
-  missing.forEach(function (i) { sheet.getRange(1, i + 1).setValue(header[i]); });
-  return sheet;
-}
-
 /** Pomiar laboratoryjny: trzy próby na adres i strategię, zapisywane osobno. */
 function runPsiMeasurement_(trigger) {
   const source = trigger || PSI_TRIGGER_MANUAL;

@@ -239,6 +239,77 @@ function ensureSheetRows_(sheet, rowsNeeded) {
   return sheet;
 }
 
+/** To samo dla kolumn: rozszerzenie schematu bywa szersze niż siatka arkusza. */
+function ensureSheetColumns_(sheet, columnsNeeded) {
+  const max = sheet.getMaxColumns();
+  if (columnsNeeded > max) sheet.insertColumnsAfter(max, columnsNeeded - max);
+  return sheet;
+}
+
+/**
+ * Czy zakres jest naprawdę pusty.
+ *
+ * Sama wartość nie wystarcza: formuła zwracająca `""` wraca z `getValues()` jako
+ * pustka, więc kolumna z cudzą formułą wyglądałaby na wolną i zostałaby przejęta
+ * razem z nią (uwaga z audytu #154). Komórka z formułą nie jest pusta, nawet gdy
+ * formuła nic nie wypisuje.
+ */
+function rangeIsEmpty_(range) {
+  const blank = function (value) { return value === undefined || value === null || String(value) === ''; };
+  const all = function (rows) { return rows.every(function (row) { return row.every(blank); }); };
+  return all(range.getValues()) && all(range.getFormulas());
+}
+
+/**
+ * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156, #154).
+ *
+ * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
+ * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
+ * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
+ * wartości do kolumny bez etykiety.
+ *
+ * Kolumnę uznajemy za wolną tylko wtedy, gdy pusta jest i komórka nagłówka,
+ * i używana część kolumny pod nią. Sam nagłówek nie wystarcza: `M1` bywa puste,
+ * a `M2:M20` trzyma notatki albo formuły operatora. Wpisanie tam etykiety nie
+ * nadpisałoby tych wartości, ale zaczęłoby je **czytać jako konfigurację** — to
+ * nadal przejęcie cudzej kolumny, tylko cichsze.
+ *
+ * Konflikt zatrzymuje całą operację, zanim cokolwiek zostanie zapisane: przy
+ * rozszerzeniu o dwie kolumny naraz zajęta druga nie może zostawić pierwszej
+ * w połowie przejętej.
+ */
+function ensureHeaderColumns_(sheetName, header) {
+  const sheet = ensureSheetWithHeader_(sheetName, header);
+  ensureSheetColumns_(sheet, header.length);
+  const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  const lastRow = sheet.getLastRow();
+  const conflicts = [];
+  const missing = [];
+
+  header.forEach(function (label, i) {
+    const value = String(current[i] === undefined || current[i] === null ? '' : current[i]).trim();
+    if (value === label) return;
+    if (value !== '') {
+      conflicts.push('kolumna ' + (i + 1) + ': jest „' + value + '”, oczekiwano „' + label + '”');
+      return;
+    }
+    if (lastRow > 1 && !rangeIsEmpty_(sheet.getRange(2, i + 1, lastRow - 1, 1))) {
+      conflicts.push('kolumna ' + (i + 1) + ': nagłówek pusty, ale pod nim są dane — nie przejmujemy jej pod „' + label + '”');
+      return;
+    }
+    missing.push(i);
+  });
+
+  if (conflicts.length) {
+    throw new Error(
+      'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
+      '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
+    );
+  }
+  missing.forEach(function (i) { sheet.getRange(1, i + 1).setValue(header[i]); });
+  return sheet;
+}
+
 function importRunType_(run) {
   return run.trigger ? 'trigger' : 'ręczny';
 }

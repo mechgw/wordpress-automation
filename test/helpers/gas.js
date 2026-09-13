@@ -141,9 +141,13 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
       return out;
     },
     getValue: () => (grid[row - 1] || [])[col - 1] ?? '',
+    // Komórka z formułą nie jest pusta, nawet gdy formuła zwraca pusty tekst —
+    // tak jak w Apps Script. Bez tego stub uznawałby cudzą kolumnę za wolną (#154).
     isBlank() {
       for (let r = row; r < row + rows; r++) {
         for (let c = col; c < col + cols; c++) {
+          const f = (formulas[r - 1] || [])[c - 1];
+          if (f !== undefined && f !== null && f !== '') return false;
           const v = (grid[r - 1] || [])[c - 1];
           if (v !== undefined && v !== null && v !== '') return false;
         }

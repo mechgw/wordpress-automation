@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { loadProject, plain } = require('./helpers/gas');
 
 const SHEET = 'SEO LIVE';
-const HEADER = ['URL', 'Oczekiwany status HTTP', 'Oczekiwany URL docelowy', 'Oczekiwany title', 'Oczekiwany H1', 'Oczekiwany canonical', 'Oczekiwane robots', 'Oczekiwane schema (@type)', 'Wynik (live)', 'Różnice', 'Sprawdzono', 'Indeks Google (URL INSPEKCJA)'];
+const HEADER = ['URL', 'Oczekiwany status HTTP', 'Oczekiwany URL docelowy', 'Oczekiwany title', 'Oczekiwany H1', 'Oczekiwany canonical', 'Oczekiwane robots', 'Oczekiwane schema (@type)', 'Wynik (live)', 'Różnice', 'Sprawdzono', 'Indeks Google (URL INSPEKCJA)', 'Oczekiwane w HTML', 'Zakazane w HTML'];
 const A = 'https://www.example.pl/a/';
 const B = 'https://www.example.pl/b/';
 

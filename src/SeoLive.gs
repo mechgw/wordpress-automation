@@ -32,8 +32,17 @@ const SEO_LIVE_HEADER = [
   'Wynik (live)',
   'Różnice',
   'Sprawdzono',
-  'Indeks Google (URL INSPEKCJA)'
+  'Indeks Google (URL INSPEKCJA)',
+  // Kolumny dopisane po `Indeks Google`, a nie wstawione po oczekiwaniach (#154).
+  // Zapis wyników idzie na sztywno od kolumny 9, więc przesunięcie `I`–`L`
+  // sprawiłoby, że skrypt czytałby własny `Wynik` jako oczekiwanie operatora
+  // i nadpisywał je w tym samym przebiegu. Kosztem jest wyłącznie kolejność kolumn.
+  'Oczekiwane w HTML',
+  'Zakazane w HTML'
 ];
+/** Indeksy nowych kolumn; oczekiwania przestały być ciągłym zakresem `B`–`H`. */
+const SEO_LIVE_COL_REQUIRED_HTML = 12;
+const SEO_LIVE_COL_FORBIDDEN_HTML = 13;
 const SEO_LIVE_MAX_REDIRECTS = 5;
 const SEO_LIVE_TRIGGER_HANDLER = 'sprawdzStronyLiveTrigger';
 const SEO_LIVE_TRIGGER_HOUR = 9;
@@ -144,7 +153,57 @@ function seoLiveQuote_(value) {
   return value ? '„' + value + '”' : 'brak';
 }
 
-/** Oczekiwania wiersza (kolumny B..H) w jednym obiekcie. */
+/**
+ * Lista fragmentów HTML z jednej komórki: jeden fragment na linię.
+ *
+ * Separator znakowy odpada, bo dopasowanie jest dosłowne, a skrypt inline to
+ * jeden z głównych przypadków użycia — `|` występuje w nim normalnie (`||`,
+ * operatory bitowe, teksty konfiguracji). Znak nowej linii nie odbiera żadnego
+ * znaku treści, więc kontrakt jest jednoznaczny i nie wymaga escapowania.
+ */
+function seoLiveFragments_(value, columnLabel) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  if (raw.length > WP_CELL_CHAR_LIMIT) {
+    throw new Error(
+      'Kolumna „' + columnLabel + '” ma ' + raw.length + ' znaków, a limit komórki to ' +
+      WP_CELL_CHAR_LIMIT + '. Skróć listę — milczące obcięcie zamieniłoby część kontroli w fikcję.'
+    );
+  }
+  return raw.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+}
+
+/**
+ * HTML sprowadzony do postaci porównywalnej: ciągi białych znaków do jednej spacji.
+ * Wielkość liter zostaje bez zmian — w HTML bywa znacząca: wartości atrybutów
+ * i treść skryptu inline nie są nieczułe na wielkość liter.
+ */
+function seoLiveNormalizeHtml_(value) {
+  return String(value === undefined || value === null ? '' : value).replace(/\s+/g, ' ');
+}
+
+/**
+ * Różnice z kontroli fragmentów HTML. Celowo osobno od `seoLiveCompare_`:
+ * te kontrole zostają **poza wyciszaniem z #130**, bo dla dowolnego fragmentu
+ * HTML nie ma deterministycznego odwzorowania na oczekujące polecenie, a
+ * dopasowanie „po podobieństwie” udawałoby wiedzę, której nie mamy.
+ */
+function seoLiveFragmentDiffs_(html, expect) {
+  const haystack = seoLiveNormalizeHtml_(html);
+  const diffs = [];
+  (expect.requiredHtml || []).forEach(function (fragment) {
+    if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) < 0) {
+      diffs.push('brak oczekiwanego fragmentu HTML: ' + seoLiveQuote_(fragment));
+    }
+  });
+  (expect.forbiddenHtml || []).forEach(function (fragment) {
+    if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) >= 0) {
+      diffs.push('zakazany fragment HTML obecny: ' + seoLiveQuote_(fragment));
+    }
+  });
+  return diffs;
+}
+
+/** Oczekiwania wiersza (kolumny B..H oraz M, N) w jednym obiekcie. */
 function seoLiveExpectations_(line) {
   return {
     // Pusty = 200; liczba = ta liczba; cokolwiek innego zostaje tekstem i da różnicę,
@@ -155,7 +214,9 @@ function seoLiveExpectations_(line) {
     h1: String(line[4] || '').trim(),
     canonical: String(line[5] || '').trim(),
     robots: String(line[6] || '').trim().toLowerCase(),
-    schema: String(line[7] || '').split(',').map(s => s.trim()).filter(Boolean)
+    schema: String(line[7] || '').split(',').map(s => s.trim()).filter(Boolean),
+    requiredHtml: seoLiveFragments_(line[SEO_LIVE_COL_REQUIRED_HTML], SEO_LIVE_HEADER[SEO_LIVE_COL_REQUIRED_HTML]),
+    forbiddenHtml: seoLiveFragments_(line[SEO_LIVE_COL_FORBIDDEN_HTML], SEO_LIVE_HEADER[SEO_LIVE_COL_FORBIDDEN_HTML])
   };
 }
 
@@ -219,7 +280,9 @@ function seoLiveIndexLookup_() {
  * i werdykt z indeksu. Zwraca podsumowanie z listą nowych rozbieżności.
  */
 function runSeoLiveCheck_() {
-  const sheet = ensureSheetWithHeader_(SEO_LIVE_SHEET, SEO_LIVE_HEADER);
+  // Nie `ensureSheetWithHeader_`: istniejący arkusz ma `A1` = `URL`, więc tamta
+  // funkcja nie tknęłaby nagłówka i nowe kolumny zostałyby bez etykiet (#154).
+  const sheet = ensureHeaderColumns_(SEO_LIVE_SHEET, SEO_LIVE_HEADER);
   const summary = { checked: 0, ok: 0, warnings: 0, errors: 0, pending: 0, empty: false, problems: [], newProblems: [] };
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
@@ -251,7 +314,14 @@ function runSeoLiveCheck_() {
       const expect = seoLiveExpectations_(line);
       expect.schemaRules = schemaRulesFor_(schemaExpectations, url);
       const diffs = seoLiveCompare_(url, expect, fetched, seoLiveExtract_(fetched.html, fetched.headers));
-      const change = classifyPendingChange_(diffs, pending[seoLiveNormalizeUrl_(url)]);
+      // Kontrole fragmentów HTML idą obok wyciszania (#130): dla dowolnego fragmentu
+      // nie ma deterministycznego odwzorowania na oczekujące polecenie, więc znaleziona
+      // różnica jest zawsze regresją — także wtedy, gdy reszta różnic jest pokryta.
+      const strict = seoLiveFragmentDiffs_(fetched.html, expect);
+      const change = strict.length
+        ? { covered: false, overdue: false, ids: [] }
+        : classifyPendingChange_(diffs, pending[seoLiveNormalizeUrl_(url)]);
+      diffs.push.apply(diffs, strict);
       details = diffs.join('; ');
       summary.checked++;
 
