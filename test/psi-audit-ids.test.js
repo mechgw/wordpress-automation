@@ -41,7 +41,7 @@ const lcpBreakdown = (selector = 'section.hero') => ({
         selector: selector,
         boundingRect: { top: 0, left: 0 },
         type: 'node',
-        nodeLabel: 'Zamów kuriera',
+        nodeLabel: 'Nagłówek sekcji',
         lhId: 'page-0-SECTION',
         path: '1,HTML,1,BODY'
       }

@@ -24,8 +24,8 @@ const COL = {
 };
 
 const WEZEL = {
-  snippet: '<section class="cc-hero">', selector: 'section.cc-hero', boundingRect: {},
-  type: 'node', nodeLabel: 'Zamów kuriera', lhId: 'page-0-SECTION', path: '1,HTML'
+  snippet: '<section class="hero">', selector: 'section.hero', boundingRect: {},
+  type: 'node', nodeLabel: 'Nagłówek sekcji', lhId: 'page-0-SECTION', path: '1,HTML'
 };
 
 /** Kształt z produkcji: tabela faz, obok niej goły węzeł. */
@@ -156,7 +156,7 @@ describe('#165: granice', () => {
     const samWezel = { details: { type: 'list', items: [WEZEL] } };
     const gas = run({ 'lcp-breakdown-insight': samWezel });
     assert.deepEqual(ofKind(gas, 'FAZA LCP'), []);
-    assert.equal(mobile(ofKind(gas, 'ELEMENT LCP'))[0][COL.detail], 'section.cc-hero');
+    assert.equal(mobile(ofKind(gas, 'ELEMENT LCP'))[0][COL.detail], 'section.hero');
   });
 
   test('10: suma faz bywa inna niż headline LCP i NIE jest to błąd', () => {

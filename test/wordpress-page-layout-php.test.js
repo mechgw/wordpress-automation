@@ -27,7 +27,6 @@ test('page-layout bridge reuses the existing REST namespace instead of hardcodin
   assert.match(bridge, /\/v1\/seo-meta/);
   assert.match(bridge, /register_rest_route\(/);
   assert.match(bridge, /'\/page-layout'/);
-  assert.doesNotMatch(bridge, /citycouriers/i);
 });
 
 test('namespace discovery avoids the PHP 7.3-only array_key_first helper', () => {
@@ -93,7 +92,6 @@ test('#88: robots value is readable as a REST field so one request returns it wi
   assert.match(bridge, /register_rest_field\( 'page', 'wpa_rank_math_robots', \$robots_field \);/);
   assert.match(bridge, /function wpa_robots_read/);
   assert.match(bridge, /get_post_meta\( \$post_id, 'rank_math_robots', true \)/);
-  assert.doesNotMatch(bridge, /citycouriers/i);
 });
 
 test('#103: pole jest wystawione pod nazwą docelową i historyczną, żeby aktualizacja snippetu nie zrywała odczytu', () => {

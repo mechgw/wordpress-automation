@@ -138,7 +138,10 @@ test('bridge jest read-only, uwierzytelniony i nie eksportuje wartości pól for
   assert.match(code, /Forminator_API::get_entries\( 321, \$per_page, \$page \)/);
   assert.match(code, /'entry_id'/);
   assert.match(code, /'time_created'/);
-  assert.doesNotMatch(code, /meta_data|email|phone|company|citycouriers/i);
+  // Kanarek na nazwę witryny był tu martwy: fixture ustawia namespace `example`, więc
+  // realna nazwa nie miała jak się pojawić — a sama stała wnosiła tę nazwę do publicznego
+  // repozytorium. Tożsamości pilnuje `test/repo-identity.test.js`; tu zostaje PII.
+  assert.doesNotMatch(code, /meta_data|email|phone|company/i);
 });
 
 test('konfiguracja odrzuca brak form ID i nieprawidłowy namespace', () => {
