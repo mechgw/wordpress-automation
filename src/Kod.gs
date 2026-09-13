@@ -28,6 +28,7 @@ function onOpen() {
     .addItem('Importuj Business Profile', 'importujBusinessProfile')
     .addItem('Przygotuj pomiar wydajności', 'przygotujPomiarWydajnosci')
     .addItem('Zmierz wydajność (CrUX + PSI)', 'zmierzWydajnosc')
+    .addItem('Zbadaj kształt odpowiedzi PSI', 'zbadajKsztaltOdpowiedziPsi')
     .addToUi();
 
     addGa4Menu_();
