@@ -45,7 +45,21 @@ const ROOTS = [
  * furtką: nazwa musi naprawdę wystąpić w źródłach.
  */
 const OUTSIDE_CATALOG = ['START'];
-const DECLARATION = /function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/g;
+/**
+ * Deklaracje funkcji w trzech postaciach, które występują w tych źródłach:
+ * `function name(…)`, `const name = function (…)` i `const name = (…) =>`.
+ * Sama pierwsza postać nie wystarcza: opakowanie zapisane strzałką zostałoby
+ * przypisane poprzedniej nazwanej funkcji, a skaner poszedłby za złą — wytknięte
+ * w audycie #170.
+ */
+const DECLARATION = new RegExp([
+  'function\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)|',
+  '(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?(?:',
+  'function\\s*\\(([^)]*)\\)|',
+  '\\(([^)]*)\\)\\s*=>|',
+  '([A-Za-z_$][\\w$]*)\\s*=>',
+  ')'
+].join(''), 'g');
 
 /**
  * Kod bez komentarzy, z zachowanymi pozycjami znaków — numery linii mają dalej
@@ -86,7 +100,9 @@ function enclosingFunction(code, index) {
   let found = null;
   let m;
   while ((m = re.exec(code)) !== null && m.index < index) {
-    found = { name: m[1], params: m[2].split(',').map(s => s.trim()).filter(Boolean) };
+    const name = m[1] || m[3];
+    const raw = m[2] !== undefined ? m[2] : (m[4] !== undefined ? m[4] : (m[5] !== undefined ? m[5] : m[6]));
+    found = { name: name, params: String(raw || '').split(',').map(s => s.trim()).filter(Boolean) };
   }
   return found;
 }
@@ -216,6 +232,33 @@ describe('#162: kompletność katalogu arkuszy', () => {
   test('zakładki zakładane wprost przez insertSheet też są sprawdzane', () => {
     const direct = resolved.filter(item => /GA4|Status|SheetCatalog/.test(item.site.file));
     assert.ok(direct.length >= 3, 'znaleziono: ' + direct.map(item => item.name).join(', '));
+  });
+
+  // Druga, niezależna reguła. Śledzenie wywołań zawsze będzie miało dziury — audyt
+  // pokazał kolejno: opakowania, `insertSheet` i funkcje strzałkowe. Ta reguła nie
+  // pyta, JAK zakładka powstaje: w tym projekcie każda ma stałą `*_SHEET`, więc
+  // porównanie stałych z katalogiem łapie nowe zakładki niezależnie od kształtu kodu.
+  const SHEET_CONSTANT = /^const ([A-Za-z0-9_]*SHEET[A-Za-z0-9_]*) = '([^']+)';/gm;
+
+  test('każda stała `*SHEET*` wskazuje zakładkę z katalogu — niezależnie od sposobu zakładania', () => {
+    const constants = [];
+    sources.forEach(source => {
+      const re = new RegExp(SHEET_CONSTANT.source, 'gm');
+      let m;
+      while ((m = re.exec(source.code)) !== null) {
+        constants.push({ file: source.file, constant: m[1], name: m[2] });
+      }
+    });
+
+    assert.ok(constants.length >= 20, 'znaleziono tylko ' + constants.length + ' stałych; konwencja nazw się zmieniła');
+    const missing = constants
+      .filter(item => !catalog.has(item.name) && OUTSIDE_CATALOG.indexOf(item.name) < 0)
+      .map(item => item.file + ': ' + item.constant + ' → „' + item.name + '”');
+    assert.deepEqual(
+      missing, [],
+      'te zakładki mają stałą w źródłach, ale nie mają wpisu w sheetCatalog_(). ' +
+      'Ta reguła nie zależy od tego, jak zakładka jest zakładana — wystarczy, że kod ją zna.'
+    );
   });
 
   test('opakowania naprawdę są śledzone, nie tylko wywołania bezpośrednie', () => {
