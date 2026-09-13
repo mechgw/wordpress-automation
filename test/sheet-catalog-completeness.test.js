@@ -27,7 +27,24 @@ const { loadProject } = require('./helpers/gas');
 
 const SOURCE_DIR = path.resolve(__dirname, '..', 'src');
 /** Od którego wywołania zaczynamy: to ono zakłada zakładkę z nagłówkiem. */
-const ROOT_FUNCTION = 'ensureSheetWithHeader_';
+/**
+ * Wejścia skanowania. `ensureSheetWithHeader_` zakłada zakładkę z nagłówkiem, ale
+ * nie jest jedyną drogą: część zakładek powstaje wprost przez `insertSheet`
+ * (`GA4.gs`, `Status.gs`, `SheetCatalog.gs`). Skan wyłącznie po pierwszej z nich
+ * przepuszczałby te miejsca — i przepuszczał.
+ */
+const ROOTS = [
+  { name: 'ensureSheetWithHeader_', position: 0, method: false },
+  { name: 'insertSheet', position: 0, method: true }
+];
+
+/**
+ * Jedyna zakładka poza katalogiem, i to z definicji: „START” jest **spisem**
+ * pozostałych zakładek, więc nie wymienia sam siebie — `sheetPlan_()` obsługuje
+ * ją osobną kategorią. Osobny test pilnuje, żeby ten wyjątek nie stał się wygodną
+ * furtką: nazwa musi naprawdę wystąpić w źródłach.
+ */
+const OUTSIDE_CATALOG = ['START'];
 const DECLARATION = /function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/g;
 
 /**
@@ -102,17 +119,19 @@ function callArguments(code, open) {
 }
 
 /** Wywołania funkcji `name` we wszystkich źródłach, z argumentem z pozycji `position`. */
-function callSites(name, position) {
+function callSites(name, position, method) {
   const out = [];
   sources.forEach(source => {
-    const re = new RegExp('(^|[^\\w$.])(function\\s+)?' + name + '\\s*\\(', 'g');
+    const prefix = method ? '[.]' : '(?:^|[^\\w$.])';
+    const re = new RegExp(prefix + name + '\\s*\\(', 'g');
     let m;
     while ((m = re.exec(source.code)) !== null) {
-      if (m[2]) continue; // deklaracja, nie wywołanie
+      // Deklaracja to nie wywołanie: `function ensureSheetWithHeader_(name, …)`.
+      if (/function\\s+$/.test(source.code.slice(0, m.index + m[0].length - name.length - 1))) continue;
       const open = source.code.indexOf('(', m.index + m[0].length - 1);
       out.push({
         file: source.file,
-        line: source.code.slice(0, m.index).split('\n').length,
+        line: source.code.slice(0, m.index).split(String.fromCharCode(10)).length,
         argument: (callArguments(source.code, open)[position] || '').trim(),
         enclosing: enclosingFunction(source.code, m.index)
       });
@@ -140,14 +159,14 @@ describe('#162: kompletność katalogu arkuszy', () => {
 
   // Punkt stały: startujemy od `ensureSheetWithHeader_`, a każda funkcja, która
   // przekazuje dalej własny parametr, dołącza do listy wejść jako opakowanie.
-  const entryPoints = [{ name: ROOT_FUNCTION, position: 0 }];
-  const seen = new Set([ROOT_FUNCTION + '#0']);
+  const entryPoints = ROOTS.slice();
+  const seen = new Set(ROOTS.map(root => root.name + '#' + root.position));
   const resolved = [];
   const unresolved = [];
 
   for (let i = 0; i < entryPoints.length; i++) {
     const entry = entryPoints[i];
-    callSites(entry.name, entry.position).forEach(site => {
+    callSites(entry.name, entry.position, entry.method).forEach(site => {
       const name = resolve(site.argument);
       if (name !== null) { resolved.push({ site: site, name: name }); return; }
       const params = (site.enclosing && site.enclosing.params) || [];
@@ -156,7 +175,7 @@ describe('#162: kompletność katalogu arkuszy', () => {
       const key = site.enclosing.name + '#' + position;
       if (seen.has(key)) return;
       seen.add(key);
-      entryPoints.push({ name: site.enclosing.name, position: position });
+      entryPoints.push({ name: site.enclosing.name, position: position, method: false });
     });
   }
 
@@ -166,7 +185,7 @@ describe('#162: kompletność katalogu arkuszy', () => {
 
   test('każda zakładka zakładana przez skrypt — także przez opakowanie — ma wpis w katalogu', () => {
     const missing = resolved
-      .filter(item => !catalog.has(item.name))
+      .filter(item => !catalog.has(item.name) && OUTSIDE_CATALOG.indexOf(item.name) < 0)
       .map(item => item.site.file + ':' + item.site.line + ' → „' + item.name + '”');
     assert.deepEqual(
       missing, [],
@@ -183,6 +202,20 @@ describe('#162: kompletność katalogu arkuszy', () => {
       'tych nazw nie da się rozwiązać ani jako stałej, ani jako parametru przekazywanego dalej — ' +
       'katalog nie jest dla nich sprawdzany, a powinien.'
     );
+  });
+
+  test('wyjątek poza katalogiem nie jest furtką — każda nazwa naprawdę występuje w źródłach', () => {
+    OUTSIDE_CATALOG.forEach(name => {
+      assert.ok(
+        resolved.some(item => item.name === name),
+        'wyjątek „' + name + '” nie odpowiada żadnej zakładce zakładanej przez skrypt — usuń go'
+      );
+    });
+  });
+
+  test('zakładki zakładane wprost przez insertSheet też są sprawdzane', () => {
+    const direct = resolved.filter(item => /GA4|Status|SheetCatalog/.test(item.site.file));
+    assert.ok(direct.length >= 3, 'znaleziono: ' + direct.map(item => item.name).join(', '));
   });
 
   test('opakowania naprawdę są śledzone, nie tylko wywołania bezpośrednie', () => {
