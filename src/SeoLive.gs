@@ -48,6 +48,11 @@ const SEO_LIVE_HEADER = [
  */
 const SEO_LIVE_FRAGMENT_PREVIEW = 120;
 
+/** Ile znaków opisu trafia do alertu; pełna treść zostaje w arkuszu. */
+const SEO_LIVE_ALERT_DETAILS = 300;
+const SEO_LIVE_CELL_NOTE = ' … [opis skrócony do limitu komórki]';
+const SEO_LIVE_ALERT_NOTE = '… [pełna treść w arkuszu]';
+
 /** Indeksy nowych kolumn; oczekiwania przestały być ciągłym zakresem `B`–`H`. */
 const SEO_LIVE_COL_REQUIRED_HTML = 12;
 const SEO_LIVE_COL_FORBIDDEN_HTML = 13;
@@ -218,18 +223,16 @@ function seoLiveFragmentPreview_(value) {
 }
 
 /**
- * Treść kolumny `Różnice` przycięta do limitu komórki.
+ * Tekst przycięty do limitu, z jawnym śladem, że jest niepełny.
  *
  * Skrócenie pojedynczego fragmentu nie wystarcza: różnic bywa wiele, a suma
- * podglądów też potrafi urosnąć. Zapis wyników leży poza `try` obsługującym
- * pojedynczy adres, więc wyjątek z `setValues` przerwałby cały przebieg i kolejne
- * adresy zostałyby niesprawdzone. Lepiej powiedzieć wprost, że opis został przycięty.
+ * podglądów też rośnie. Dotyczy to dwóch miejsc o różnych limitach — zapisu
+ * do komórki i treści alertu — bo w obu przekroczenie kończy się cicho utraconą
+ * informacją, tylko inaczej.
  */
-function seoLiveFitCell_(text) {
+function seoLiveCap_(text, limit, note) {
   const value = String(text === null || text === undefined ? '' : text);
-  if (value.length <= WP_CELL_CHAR_LIMIT) return value;
-  const suffix = ' … [opis skrócony do limitu komórki]';
-  return value.slice(0, WP_CELL_CHAR_LIMIT - suffix.length) + suffix;
+  return value.length > limit ? value.slice(0, limit - note.length) + note : value;
 }
 
 /** Oczekiwania wiersza (kolumny B..H oraz M, N) w jednym obiekcie. */
@@ -378,11 +381,15 @@ function runSeoLiveCheck_() {
       summary.errors++;
     }
     const indexVerdict = index[seoLiveNormalizeUrl_(url)] || 'brak w ' + URL_INSPECTION_SHEET;
-    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, seoLiveFitCell_(details), now, indexVerdict]]);
+    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, seoLiveCap_(details, WP_CELL_CHAR_LIMIT, SEO_LIVE_CELL_NOTE), now, indexVerdict]]);
     // PENDING CHANGE nie jest problemem: zmiana jest znana i zatwierdzona,
     // a alert o niej byłby powtórzeniem tego, co i tak wiadomo z kolejki.
     if (result !== 'OK' && result.indexOf('PENDING CHANGE') !== 0) {
-      const lineText = url + ': ' + result + (details ? ' – ' + details : '');
+      // Do alertu idzie skrót, nie cały opis: legalna komórka potrafi rozwinąć się
+      // w setki kilobajtów diagnostyki, a przekroczony limit maila kończy się tym,
+      // że alert nie dociera i nigdy nie zostanie ponowiony — wiersz nie jest już nowy.
+      const lineText = url + ': ' + result +
+        (details ? ' – ' + seoLiveCap_(details, SEO_LIVE_ALERT_DETAILS, SEO_LIVE_ALERT_NOTE) : '');
       summary.problems.push(lineText);
       if (previous === '' || previous === 'OK') summary.newProblems.push(lineText);
     }

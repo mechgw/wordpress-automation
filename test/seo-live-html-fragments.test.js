@@ -172,6 +172,27 @@ describe('#154: dopasowanie fragmentów', () => {
     assert.equal(wynik(gas, 2), 'OK', 'drugi adres sprawdzony mimo obcięcia opisu pierwszego');
   });
 
+  test('9c: alert dostaje skrót opisu, nie całą diagnostykę', () => {
+    // Przycięcie do komórki nie chroni maila: 50 000 znaków opisu przekracza limit
+    // treści wiadomości, wysłanie kończy się błędem łapanym przez sendImportAlert_,
+    // a następny przebieg nie ponowi — wiersz nie jest już „nowy”.
+    const lista = [];
+    for (let i = 0; i < 380; i++) lista.push('<div data-n="' + String(i) + '-' + 'c'.repeat(108) + '">');
+    const gas = project({
+      rows: [wiersz(URL, { required: lista.join('\n') })],
+      properties: { ALERT_EMAIL: 'alerty@example.pl' },
+      html: page()
+    });
+
+    gas.sprawdzStronyLiveTrigger();
+
+    assert.equal(gas.$mails.length, 1, 'alert wysłany');
+    const body = String(gas.$mails[0].body || gas.$mails[0][2] || '');
+    assert.ok(body.length < 2000, 'treść alertu: ' + body.length + ' znaków');
+    assert.match(body, /\[pełna treść w arkuszu\]/);
+    assert.ok(roznice(gas, 1).length > 2000, 'w arkuszu zostaje pełniejszy opis');
+  });
+
   test('10: zgodny title nie maskuje zakazanego znacznika', () => {
     const gas = project({
       rows: [wiersz(URL, { title: 'Strona A', forbidden: MARKER })],
