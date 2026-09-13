@@ -349,6 +349,29 @@ describe('#154: upgrade istniejącego arkusza', () => {
     assert.deepEqual(podNaglowkiem, [], 'żadna kolumna nie była skanowana w dół');
   });
 
+  test('12j: kolejka recrawl czyta przycięty arkusz bez wyjątku o zakresie', () => {
+    // `recrawlLiveIndex_` czyta `SEO_LIVE_HEADER.length` kolumn i nie przechodzi przez
+    // żadną ścieżkę nagłówka. Po rozszerzeniu schematu do czternastu kolumn odczyt
+    // z węższego arkusza wywracałby całe odświeżenie kolejki — a to tylko odczyt.
+    const gas = loadProject({
+      properties: {},
+      sheets: {
+        [SHEET]: {
+          rows: [HEADER_OLD, [URL, '', '', '', '', '', 'noindex', '', 'UWAGA: 1 różnic(e)', 'robots: index', '', '']],
+          maxColumns: 12
+        }
+      },
+      fetch: () => ({ code: 404, text: '' })
+    });
+
+    const index = plain(gas.recrawlLiveIndex_());
+    const wpis = index[Object.keys(index)[0]];
+    assert.equal(Object.keys(index).length, 1);
+    assert.equal(wpis.expectedRobots, 'noindex', 'kolumny sprzed rozszerzenia czytane normalnie');
+    assert.match(wpis.result, /^UWAGA/);
+    assert.equal(wpis.differences, 'robots: index');
+  });
+
   test('13: arkusz zakładany od zera dostaje pełny, czternastokolumnowy nagłówek', () => {
     const gas = project({ sheet: [] });
     gas.sprawdzStronyLive();

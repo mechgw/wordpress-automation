@@ -90,7 +90,19 @@ function recrawlDayDiff_(fromMs, toMs) {
 function recrawlSheetRows_(name, width) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(name);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
+
+  // Arkusz bywa węższy niż nagłówek: przycięty ręcznie albo sprzed rozszerzenia
+  // schematu (#154). Czytanie „na wyrost” rzuca wyjątkiem o zakresie i wywraca cały
+  // przebieg kolejki, a to tylko odczyt — nie ma powodu, żeby cokolwiek tu zmieniać.
+  // Wiersz uzupełniamy pustymi komórkami, żeby wywołujący dostał zawsze `width` pól.
+  const columns = Math.min(width, sheet.getMaxColumns());
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, columns).getValues();
+  if (columns === width) return values;
+  return values.map(function (row) {
+    const padded = row.slice();
+    while (padded.length < width) padded.push('');
+    return padded;
+  });
 }
 
 /** Mapa znormalizowany URL → { lastmod } z arkusza SITEMAP URLS. */
