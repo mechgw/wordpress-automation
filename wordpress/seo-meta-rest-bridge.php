@@ -166,11 +166,9 @@ add_action(
  * Odczyt wystawiony jako pole REST strony, żeby WordPress.gs pobrał SEO title
  * i description razem z resztą danych jednym żądaniem.
  *
- * Pole jest rejestrowane pod dwiema nazwami. `wpa_rank_math` to nazwa docelowa,
- * spójna z prefiksem funkcji. `cc_rank_math` to nazwa historyczna, pochodząca
- * od skrótu nazwy firmy, zachowana wyłącznie na czas aktualizacji: skrypt czyta
- * nową, a starą tylko wtedy, gdy nowej nie ma. Po wgraniu tej wersji do
- * WordPressa starą nazwę można usunąć.
+ * Nazwa pola jest spójna z prefiksem funkcji w tym pliku. Historyczna nazwa
+ * z prefiksem od skrótu firmy została usunięta po tym, jak instalacja
+ * potwierdziła wystawianie nazwy docelowej.
  */
 add_action(
 	'rest_api_init',
@@ -186,7 +184,6 @@ add_action(
 			),
 		);
 		register_rest_field( 'page', 'wpa_rank_math', $seo_field );
-		register_rest_field( 'page', 'cc_rank_math', $seo_field );
 	},
 	100
 );

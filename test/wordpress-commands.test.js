@@ -354,8 +354,8 @@ describe('UPDATE_RANK_MATH_FIELD i UPDATE_MEDIA_FIELD', () => {
     const gas = project({ commands: [cmd('UPDATE_RANK_MATH_FIELD', '7', 'rank_math_robots', 'follow,noindex')], wp: Object.assign({}, swapped, {
       fetch: (url, params) => {
         const res = original(url, params);
-        if (res.json && Object.prototype.hasOwnProperty.call(res.json, 'cc_rank_math_robots') && res.json.cc_rank_math_robots) {
-          res.json.cc_rank_math_robots = res.json.cc_rank_math_robots.split(',').reverse().join(',');
+        if (res.json && Object.prototype.hasOwnProperty.call(res.json, 'wpa_rank_math_robots') && res.json.wpa_rank_math_robots) {
+          res.json.wpa_rank_math_robots = res.json.wpa_rank_math_robots.split(',').reverse().join(',');
         }
         return res;
       }

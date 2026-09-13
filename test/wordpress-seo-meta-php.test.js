@@ -39,7 +39,9 @@ test('#103: zapis jest potwierdzany odczytem kontrolnym po stronie WordPressa', 
 
 test('#103: pole REST jest wystawione pod nazwą docelową i historyczną z jednej definicji', () => {
   assert.match(bridge, /register_rest_field\( 'page', 'wpa_rank_math', \$seo_field \);/);
-  assert.match(bridge, /register_rest_field\( 'page', 'cc_rank_math', \$seo_field \);/);
+  // Po #103 pole jest rejestrowane pod JEDNĄ nazwą. Liczymy rejestracje zamiast
+  // wymieniać nazwę historyczną — ta nie należy już do publicznego repozytorium.
+  assert.equal((bridge.match(/register_rest_field\(/g) || []).length, 1, 'dokładnie jedna rejestracja pola');
   assert.equal(bridge.split('$seo_field = array(').length - 1, 1, 'jedna definicja, żeby nazwy się nie rozjechały');
 });
 
@@ -54,5 +56,4 @@ test('#103: uprawnienia sprawdzają wejście, potem istnienie strony, potem praw
 });
 
 test('#103: brak tożsamości witryny w publicznym repozytorium', () => {
-  assert.doesNotMatch(bridge, /\bcc_rank_math_[a-z]/, 'poza jawnym aliasem nie ma innych nazw z prefiksem cc_');
 });

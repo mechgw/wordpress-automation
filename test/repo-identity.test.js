@@ -40,15 +40,15 @@ const SELF = 'test/repo-identity.test.js';
 /**
  * Pola REST, które most WordPressa wystawia jeszcze pod starą nazwą.
  *
- * To **nie jest** wygodna furtka, tylko lista do skasowania w ostatnim kroku #103:
- * most wystawia dziś stare i nowe pole naraz, a skrypt czyta nowe z odwrotem na
- * stare (`WP_ROBOTS_FIELDS`). Usunięcie starego wymaga wgrania aktualnego snippetu
- * do WordPressa, więc jest osobnym krokiem — issue planuje to wprost.
+ * **Pusta i taka ma zostać.** Ostatni krok #103 usunął historyczne nazwy pól po tym,
+ * jak instalacja potwierdziła wystawianie nazw docelowych. Lista zostaje w kodzie,
+ * bo następna zmiana nazwy pola będzie potrzebowała tego samego okresu przejściowego —
+ * a wtedy ma tu trafić razem z planem usunięcia, nie zamiast niego.
  *
- * Test niżej wymaga, żeby ta lista zgadzała się **co do znaku** ze stanem kodu:
- * nowa nazwa wywraca go, a domknięcie #103 ma listę opróżnić.
+ * Test niżej wymaga, żeby lista zgadzała się **co do znaku** ze stanem kodu: wpis bez
+ * pokrycia w źródłach wywraca go tak samo jak brakujący.
  */
-const LEGACY_REST_FIELDS = ['cc_rank_math', 'cc_rank_math_robots'];
+const LEGACY_REST_FIELDS = [];
 
 function scanFiles() {
   const out = [];

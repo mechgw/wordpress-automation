@@ -119,8 +119,8 @@ describe('WordPress.gs response helpers', () => {
 
   test('getRankMathData_ reports availability and defaults', () => {
     const noRobots = { robotsAvailable: false, robots: '' };
-    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' } })), Object.assign({ available: true, title: 'T', description: 'D' }, noRobots));
-    assert.deepEqual(plain(gas.getRankMathData_({ cc_rank_math: null })), Object.assign({ available: true, title: '', description: '' }, noRobots));
+    assert.deepEqual(plain(gas.getRankMathData_({ wpa_rank_math: { title: 'T', description: 'D' } })), Object.assign({ available: true, title: 'T', description: 'D' }, noRobots));
+    assert.deepEqual(plain(gas.getRankMathData_({ wpa_rank_math: null })), Object.assign({ available: true, title: '', description: '' }, noRobots));
     assert.deepEqual(plain(gas.getRankMathData_({})), Object.assign({ available: false, title: '', description: '' }, noRobots));
     assert.deepEqual(plain(gas.getRankMathData_(null)), Object.assign({ available: false, title: '', description: '' }, noRobots));
   });
@@ -141,40 +141,32 @@ describe('WordPress.gs response helpers', () => {
     assert.match(out.detail, /nie udało się pobrać strony: Za dużo przekierowań/);
   });
 
-  test('#103: tytuł i opis też mają nazwę docelową i awaryjną', () => {
+  test('#103: liczy się wyłącznie nazwa docelowa; historyczna została usunięta', () => {
+    // Odwrót na nazwę z prefiksem od skrótu firmy został usunięty po tym, jak
+    // instalacja potwierdziła wystawianie nazwy docelowej. Snippet starszy niż #103
+    // ma teraz wyglądać jak brak pola, a nie jak półdziałanie: półdziałanie było
+    // stanem przejściowym, który się skończył.
     const meta = { title: 'T', description: 'D' };
-    const both = plain(gas.getRankMathData_({ wpa_rank_math: meta, cc_rank_math: { title: 'stare', description: 'stare' } }));
-    assert.equal(both.title, 'T', 'przy obu nazwach wygrywa docelowa');
+    assert.equal(plain(gas.getRankMathData_({ wpa_rank_math: meta })).title, 'T');
+    assert.equal(plain(gas.getRankMathData_({ inna_nazwa_pola: meta })).available, false, 'czytana jest wyłącznie nazwa docelowa');
+    assert.equal(plain(gas.getRankMathData_({})).available, false);
 
-    const legacy = plain(gas.getRankMathData_({ cc_rank_math: meta }));
-    assert.equal(legacy.available, true, 'stary snippet nadal jest obsługiwany');
-    assert.equal(legacy.description, 'D');
-
-    const none = plain(gas.getRankMathData_({}));
-    assert.equal(none.available, false);
+    assert.equal(plain(gas.getRankMathData_({ wpa_rank_math: {}, wpa_rank_math_robots: 'noindex' })).robots, 'noindex');
+    const stare = plain(gas.getRankMathData_({ wpa_rank_math: {}, inna_nazwa_robots: 'noindex,follow' }));
+    assert.equal(stare.robotsAvailable, false, 'pole robots też tylko pod nazwą docelową');
+    assert.equal(stare.robots, '');
   });
 
-  test('#103: nowa nazwa pola jest preferowana, stara działa jako awaryjna', () => {
-    const both = plain(gas.getRankMathData_({ cc_rank_math: {}, wpa_rank_math_robots: 'noindex', cc_rank_math_robots: 'follow' }));
-    assert.equal(both.robots, 'noindex', 'przy obu nazwach wygrywa docelowa');
-
-    const legacy = plain(gas.getRankMathData_({ cc_rank_math: {}, cc_rank_math_robots: 'noindex,follow' }));
-    assert.equal(legacy.robotsAvailable, true, 'stary snippet nadal jest obsługiwany');
-    assert.equal(legacy.robots, 'noindex,follow');
-
-    const none = plain(gas.getRankMathData_({ cc_rank_math: {} }));
-    assert.equal(none.robotsAvailable, false);
-    assert.equal(none.robots, '');
-  });
-
-  test('#103: test mostu mówi, której nazwy pola używa instalacja', () => {
+  test('#103: test mostu mówi, czy instalacja wystawia pole', () => {
     assert.match(gas.robotsBridgeStatusText_({ wpa_rank_math_robots: '' }), /^OK \(pole wpa_rank_math_robots\)$/);
-    assert.match(gas.robotsBridgeStatusText_({ cc_rank_math_robots: '' }), /^OK, ale przez starą nazwę pola \(cc_rank_math_robots\)\. Wgraj nowszy snippet/);
+    // Snippet sprzed #103 wystawia wyłącznie nazwę spoza listy, więc z punktu widzenia
+    // skryptu pola po prostu nie ma — i komunikat ma o tym mówić wprost.
+    assert.match(gas.robotsBridgeStatusText_({ inna_nazwa_robots: '' }), /^BRAK – zaktualizuj snippet/);
     assert.match(gas.robotsBridgeStatusText_({}), /^BRAK – zaktualizuj snippet/);
   });
 
   test('#88: getRankMathData_ czyta robots z osobnego pola REST i normalizuje je do listy po przecinku', () => {
-    const withRobots = value => plain(gas.getRankMathData_({ cc_rank_math: { title: 'T', description: 'D' }, cc_rank_math_robots: value }));
+    const withRobots = value => plain(gas.getRankMathData_({ wpa_rank_math: { title: 'T', description: 'D' }, wpa_rank_math_robots: value }));
     assert.deepEqual(withRobots('noindex,follow'), { available: true, title: 'T', description: 'D', robotsAvailable: true, robots: 'noindex,follow' });
     assert.equal(withRobots(' NoIndex , follow , noindex ').robots, 'noindex,follow', 'wielkość liter, spacje i duplikaty nie mają znaczenia');
     assert.equal(withRobots(['noindex', 'nofollow']).robots, 'noindex,nofollow', 'tablica, tak jak trzyma to Rank Math');

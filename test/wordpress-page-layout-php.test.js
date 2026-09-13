@@ -95,8 +95,12 @@ test('#88: robots value is readable as a REST field so one request returns it wi
 });
 
 test('#103: pole jest wystawione pod nazwą docelową i historyczną, żeby aktualizacja snippetu nie zrywała odczytu', () => {
-  assert.match(bridge, /register_rest_field\( 'page', 'cc_rank_math_robots', \$robots_field \);/);
-  // Obie nazwy dzielą jedną definicję, więc nie mogą się rozjechać.
+  // Po #103 pole jest rejestrowane pod JEDNĄ nazwą: historyczna została usunięta,
+  // gdy instalacja potwierdziła wystawianie docelowej.
+  // Po #103 pole jest rejestrowane pod JEDNĄ nazwą. Liczymy rejestracje zamiast
+  // wymieniać nazwę historyczną — ta nie należy już do publicznego repozytorium.
+  assert.equal((bridge.match(/register_rest_field\(/g) || []).length, 1, 'dokładnie jedna rejestracja pola');
+  // Jedna definicja pola, jedna rejestracja — nie ma czego rozjechać.
   assert.equal(bridge.split('$robots_field = array(').length - 1, 1);
-  assert.match(bridge, /nazwa historyczna, zachowana wyłącznie na czas aktualizacji/);
+  assert.match(bridge, /została usunięta po tym, jak instalacja/, 'most dokumentuje, że okres przejściowy się skończył');
 });

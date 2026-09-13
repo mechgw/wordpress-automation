@@ -75,7 +75,7 @@ Nic nie zmienia wartości flagi automatycznie. Flaga gasnąca sama w losowym mom
 
 Repozytorium jest publiczne, więc slug strony ze źródłem stopki, identyfikator bloku stylów i klasa stopki nie są zaszyte w kodzie. Migracja stopki czyta je ze Script Properties `WP_GLOBAL_FOOTER_SOURCE_SLUG`, `WP_GLOBAL_FOOTER_STYLE_ID` i `WP_GLOBAL_FOOTER_CLASS`. Brak którejkolwiek kończy się jasnym błędem, a nie cichym podstawieniem. Dozwolone są wyłącznie małe litery, cyfry i myślnik, dzięki czemu wartość jest bezpieczna zarówno w wyrażeniu regularnym, jak i we wstrzykiwanym kodzie PHP.
 
-Pole REST z robots ma dwie nazwy. `wpa_rank_math_robots` jest docelowa, `cc_rank_math_robots` historyczna i utrzymywana tylko na czas aktualizacji snippetu. Skrypt czyta docelową, a historyczną wtedy, gdy docelowej nie ma; *WordPress → Test Rank Math bridge* mówi, której używa Twoja instalacja.
+Pole REST z robots nazywa się `wpa_rank_math_robots` — spójnie z prefiksem funkcji w moście. Nazwa historyczna, pochodząca od skrótu nazwy firmy, została usunięta po tym, jak instalacja potwierdziła wystawianie docelowej (#103). *WordPress → Test Rank Math bridge* mówi, czy Twoja instalacja wystawia to pole; snippet starszy niż #103 wygląda z punktu widzenia skryptu jak brak pola i wymaga podmiany.
 
 ### Zajętość arkusza i retencja
 

@@ -522,11 +522,9 @@ add_action(
  * Odczyt robots wystawiony jako pole REST strony, żeby WordPress.gs mógł je
  * pobrać razem z resztą danych jednym żądaniem (_fields=wpa_rank_math_robots).
  *
- * Pole jest rejestrowane pod dwiema nazwami. `wpa_rank_math_robots` to nazwa
- * docelowa, spójna z prefiksem funkcji w tym pliku. `cc_rank_math_robots` to
- * nazwa historyczna, zachowana wyłącznie na czas aktualizacji: skrypt czyta
- * nową, a starą tylko wtedy, gdy nowej nie ma. Po wgraniu tej wersji snippetu
- * do WordPressa starą nazwę można usunąć.
+ * Nazwa pola jest spójna z prefiksem funkcji w tym pliku. Historyczna nazwa
+ * z prefiksem od skrótu firmy została usunięta po tym, jak instalacja
+ * potwierdziła wystawianie nazwy docelowej.
  */
 add_action(
 	'rest_api_init',
@@ -542,7 +540,6 @@ add_action(
 			),
 		);
 		register_rest_field( 'page', 'wpa_rank_math_robots', $robots_field );
-		register_rest_field( 'page', 'cc_rank_math_robots', $robots_field );
 	},
 	100
 );
