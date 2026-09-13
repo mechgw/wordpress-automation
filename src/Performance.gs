@@ -23,6 +23,26 @@ const PERF_FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', '
 const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano', 'Wyzwolenie'];
 
 /**
+ * Klucz zapisu „CWV FIELD” (#155). Liczba znaczy „porównuj surowe wartości”,
+ * obiekt — „sprowadź do tej postaci przed porównaniem”.
+ *
+ * `Okres do` wymaga postaci kanonicznej, bo arkusz parsuje zapisany tam łańcuch
+ * `RRRR-MM-DD` na wartość daty i przy odczycie oddaje obiekt `Date`. Kanoniczną
+ * postać deklaruje wywołujący PER KOLUMNĘ, nie zgaduje jej typ wartości: ta sama
+ * funkcja obsługuje zakładki o różnych kontraktach, a sprowadzenie każdej daty
+ * do pełnego znacznika zepsułoby „CWV FIELD” w drugą stronę.
+ */
+const PERF_FIELD_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2, 3];
+
+/**
+ * Wiersz, który nie opisuje pomiaru, tylko dostępność danych dla pary
+ * (adres, form factor). Rozpoznaje się go po metryce „wszystkie”, bo stan
+ * INSUFFICIENT_DATA nosi też zwykły wiersz metryki, której CrUX nie podał.
+ */
+const PERF_FIELD_ALL_METRICS = 'wszystkie';
+const PERF_FIELD_INSUFFICIENT = 'INSUFFICIENT_DATA';
+
+/**
  * Agregat median — jeden wiersz na (pomiar, URL, strategia, metryka) (#152).
  *
  * Klucz zawiera `Pomiar` celowo: agregat jest HISTORIĄ median, nie widokiem
@@ -267,7 +287,7 @@ function parseCruxRecord_(record, url, formFactor, now, source) {
       formFactor,
       name,
       has ? Number(p75) : '',
-      has ? 'OK' : 'INSUFFICIENT_DATA',
+      has ? 'OK' : PERF_FIELD_INSUFFICIENT,
       source || 'CRUX',
       now
     ];
@@ -609,25 +629,109 @@ function psiMedians_(rows) {
 }
 
 /**
- * Zapis idempotentny po kluczu z pierwszych `keyColumns` kolumn. Ponowny pomiar
- * tego samego okresu CrUX podmienia wiersze zamiast je dublować, a historia
- * wcześniejszych okresów zostaje.
+ * Jedno pole klucza w postaci kanonicznej.
+ *
+ * Klucz powstawał przez `String()` na surowej wartości komórki, a arkusz oddaje
+ * zapisaną datę jako obiekt `Date`: `String('2026-09-08')` i `String(new Date(...))`
+ * to dwa różne łańcuchy dla tej samej daty, więc wiersz nie rozpoznawał sam siebie
+ * i zapis się dublował (#155). Format bierzemy od wywołującego, bo zależy od
+ * kontraktu zakładki, a nie od typu wartości.
+ *
+ * Strefa też nie jest dowolna: komórka z samą datą wraca jako północ w strefie
+ * ARKUSZA, więc tylko formatowanie w tej samej strefie odwraca to, co arkusz zrobił
+ * przy zapisie. Strefa skryptu jest osobnym ustawieniem (`src/appsscript.json`)
+ * i przy rozjeździe przesunęłaby datę o dobę — czyli wprowadziła dokładnie ten
+ * duplikat, któremu ta normalizacja ma zapobiegać.
  */
-function upsertPerformanceRows_(sheetName, header, keyColumns, rows) {
+function performanceKeyPart_(value, dateFormat, timeZone) {
+  if (dateFormat && value instanceof Date) {
+    return Utilities.formatDate(value, timeZone, dateFormat);
+  }
+  return String(value);
+}
+
+/**
+ * Chwila zapisu wiersza w milisekundach. Wartość nieczytelna jest traktowana
+ * jako najstarsza, żeby nigdy nie wygrała z odczytaną datą.
+ */
+function performanceRowTime_(value) {
+  if (value instanceof Date) return value.getTime();
+  const parsed = Date.parse(String(value));
+  return isNaN(parsed) ? -Infinity : parsed;
+}
+
+/**
+ * Zapis idempotentny po kluczu z kolumn `keyColumns` — liczba znaczy „porównuj
+ * surową wartość”, obiekt `{ column, dateFormat }` „sprowadź do tej postaci”.
+ * Ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować,
+ * a historia wcześniejszych okresów zostaje.
+ *
+ * Opcjonalne `obsolete(row)` usuwa wiersz, który stał się nieaktualny, choć żaden
+ * przychodzący wiersz go nie zastępuje. Bez tego markera dostępności danych nie da
+ * się zdjąć: ma inną metrykę niż wiersze, które go unieważniają, więc klucz nigdy
+ * nie koliduje.
+ */
+function upsertPerformanceRows_(sheetName, header, keyColumns, rows, obsolete) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
-  const keyOf = function (row) { return keyColumns.map(function (i) { return String(row[i]); }).join(' '); };
+  const timeZone = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+  const parts = keyColumns.map(function (entry) {
+    return typeof entry === 'object' ? entry : { column: entry, dateFormat: '' };
+  });
+  const keyOf = function (row) {
+    return parts.map(function (part) {
+      return performanceKeyPart_(row[part.column], part.dateFormat, timeZone);
+    }).join(' ');
+  };
   const incoming = {};
   rows.forEach(function (row) { incoming[keyOf(row)] = true; });
 
   const lastRow = sheet.getLastRow();
   const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, header.length).getValues() : [];
-  const kept = existing.filter(function (row) {
-    return String(row[1] || '') !== '' && !incoming[keyOf(row)];
+
+  // Duplikaty sprzed kanonicznego klucza zwijamy przy pierwszym zapisie po
+  // poprawce — inaczej zostałyby w arkuszu na zawsze, bo ich okres nigdy już
+  // nie wróci w danych przychodzących i nic by ich nie podmieniło.
+  //
+  // Zostaje kopia z najnowszym `Pobrano`, a nie ta najniżej w arkuszu: pozycja
+  // wiersza nie jest chronologią, bo zakładkę wolno posortować, a kopie potrafią
+  // różnić się wartością — na przykład gdy jedna poszła z danych domeny, a druga
+  // z odczytu adresu. Przy równym albo nieczytelnym `Pobrano` rozstrzyga pozycja.
+  const fetchedAt = header.indexOf('Pobrano');
+  const best = {};
+  existing.forEach(function (row, index) {
+    if (String(row[1] || '') === '') return;
+    const key = keyOf(row);
+    if (incoming[key]) return;
+    if (obsolete && obsolete(row)) return;
+    const previous = best[key];
+    if (previous === undefined ||
+        performanceRowTime_(row[fetchedAt]) >= performanceRowTime_(existing[previous][fetchedAt])) {
+      best[key] = index;
+    }
   });
+  const chosen = {};
+  Object.keys(best).forEach(function (key) { chosen[best[key]] = true; });
+  const kept = existing.filter(function (row, index) { return chosen[index] === true; });
 
   const combined = kept.concat(rows);
   writeRowsThenTrim_(sheet, header.length, combined, lastRow);
   return { written: rows.length, kept: kept.length };
+}
+
+/** Para (adres, form factor) jako klucz — jedna postać dla obu stron porównania. */
+function cruxPairKey_(url, formFactor) {
+  return String(url) + ' ' + String(formFactor);
+}
+
+/**
+ * Czy wiersz jest bieżącym markerem dostępności danych.
+ *
+ * Marker mówi „CrUX nie ma danych dla tej pary” i nie należy do historii: ma pusty
+ * okres i najwyżej jeden na parę. Nie mylić z wierszem metryki, której zabrakło
+ * w skądinąd udanym odczycie — ten nosi ten sam stan, ale nazwę metryki.
+ */
+function cruxIsAvailabilityMarker_(row) {
+  return String(row[3]) === PERF_FIELD_ALL_METRICS && String(row[5]) === PERF_FIELD_INSUFFICIENT;
 }
 
 /** Pomiar danych terenowych dla wszystkich adresów i obu form factorów. */
@@ -648,10 +752,15 @@ function runCruxMeasurement_() {
   // raz na domenę i form factor, zamiast raz na adres.
   const originCache = {};
 
+  // Pary, dla których CrUX coś zwrócił w tym przebiegu. Marker dostępności tych par
+  // trzeba zdjąć jawnie — nieudany odczyt nie usuwa niczego (#155).
+  const resolved = {};
+
   urls.forEach(function (entry) {
     ['PHONE', 'DESKTOP'].forEach(function (formFactor) {
       const record = cruxRequest_(entry.url, formFactor, key);
       if (record) {
+        resolved[cruxPairKey_(entry.url, formFactor)] = true;
         parseCruxRecord_(record, entry.url, formFactor, now, 'CRUX').forEach(function (row) { rows.push(row); });
         return;
       }
@@ -668,16 +777,19 @@ function runCruxMeasurement_() {
 
       if (originRecord) {
         fromOrigin++;
+        resolved[cruxPairKey_(entry.url, formFactor)] = true;
         parseCruxRecord_(originRecord, entry.url, formFactor, now, 'CRUX (domena)').forEach(function (row) { rows.push(row); });
         return;
       }
 
       missing++;
-      rows.push(['', entry.url, formFactor, 'wszystkie', '', 'INSUFFICIENT_DATA', 'CRUX', now]);
+      rows.push(['', entry.url, formFactor, PERF_FIELD_ALL_METRICS, '', PERF_FIELD_INSUFFICIENT, 'CRUX', now]);
     });
   });
 
-  upsertPerformanceRows_(PERF_FIELD_SHEET, PERF_FIELD_HEADER, [0, 1, 2, 3], rows);
+  upsertPerformanceRows_(PERF_FIELD_SHEET, PERF_FIELD_HEADER, PERF_FIELD_KEY, rows, function (row) {
+    return cruxIsAvailabilityMarker_(row) && resolved[cruxPairKey_(row[1], row[2])] === true;
+  });
   return {
     rows: rows.length,
     urls: urls.length,

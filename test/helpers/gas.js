@@ -16,6 +16,9 @@
  *   ctx.$alerts            every SpreadsheetApp.getUi().alert(...) (args array)
  *   ctx.$sheet(name)       the live cell grid of a stubbed sheet (row 1 first)
  *   ctx.$cell(name, 'B9')  a single cell value
+ *
+ * opts.timeZone sets the SPREADSHEET timezone (default: the script one), so a test
+ * can pull the two apart the way File > Settings can in a real sheet.
  */
 
 const fs = require('fs');
@@ -23,6 +26,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..', 'src');
+/** Strefa skryptu z `src/appsscript.json`; strefa arkusza bywa inna (opts.timeZone). */
+const SCRIPT_TIME_ZONE = 'Europe/Warsaw';
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
 const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs'];
@@ -238,7 +243,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
 }
 
 /** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
-function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
+function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT_TIME_ZONE) {
   const instances = new Map();
   // Fixture może podać { rows, maxRows, maxColumns } zamiast samej tablicy wierszy,
   // żeby odwzorować arkusz o ograniczonej siatce.
@@ -292,6 +297,9 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = []) {
   // One stable spreadsheet object, like Apps Script: tests may patch its methods.
   const active = {
     getSheetByName: sheetFor,
+    // Strefa ARKUSZA to osobne ustawienie niż strefa skryptu z appsscript.json;
+    // data wczytana z komórki to północ w tej stefie, nie w tamtej.
+    getSpreadsheetTimeZone: () => timeZone,
     insertSheet,
     getUrl: () => 'https://docs.google.com/spreadsheets/d/test-sheet/edit',
     getSheets: () => order.map(sheetFor),
@@ -323,7 +331,7 @@ function createStubs(opts) {
   const lockLog = [];
   const mails = [];
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
-  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus);
+  const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus, opts.timeZone || SCRIPT_TIME_ZONE);
 
   return {
     SpreadsheetApp: spreadsheet,
@@ -389,7 +397,7 @@ function createStubs(opts) {
         return builder;
       }
     },
-    Session: { getScriptTimeZone: () => 'Europe/Warsaw' },
+    Session: { getScriptTimeZone: () => SCRIPT_TIME_ZONE },
     // Script lock: opts.lockHeld simulates another run holding it; $lock records calls.
     LockService: {
       getScriptLock: () => ({
