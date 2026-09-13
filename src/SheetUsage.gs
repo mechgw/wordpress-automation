@@ -114,10 +114,11 @@ function summaryCoverage_() {
       // z pustą medianą — po ręcznej edycji albo przerwanym zapisie — nie jest nośnikiem
       // wyniku, a uznanie go za pokrycie pozwoliłoby skasować surowe próby bezpowrotnie.
       if (String(row[0] || '') === '' || String(row[1] || '') === '' || String(row[2] || '') === '') return;
+      // Komórka musi BYĆ liczbą, nie dać się na nią skonwertować: `Number(false)`,
+      // `Number(true)` i `Number(data)` też są skończone, więc checkbox albo data
+      // wstawiona ręcznie uchodziłyby za medianę. Zero zostaje poprawne (CLS bywa zerem).
       const median = row[4];
-      // Zero jest poprawną medianą (CLS), pustka nie jest.
-      if (String(median === null || median === undefined ? '' : median).trim() === '') return;
-      if (!isFinite(Number(median))) return;
+      if (typeof median !== 'number' || !isFinite(median)) return;
       covered[perfMeasurementKey_(row[0]) + ' | ' + String(row[1]) + ' | ' + String(row[2])] = true;
     });
   return covered;
@@ -532,24 +533,26 @@ function wyczyscStareSnapshotyIWyniki() {
   }
 
   const ss = SpreadsheetApp.getActive();
-  const removedSnapshots = snapshots.remove.length
-    ? deleteSheetRows_(ss.getSheetByName(WP_SNAPSHOTS_SHEET), snapshots.remove)
-    : 0;
-  const removedResults = results.remove.length
-    ? deleteSheetRows_(ss.getSheetByName(WP_RESULTS_SHEET), results.remove)
-    : 0;
-  // Pomiar PSI trzyma blokadę przez cały przebieg i przepisuje całą zakładkę, więc
-  // usuwanie po numerach wierszy policzonych wcześniej mogłoby trafić w cudze dane albo
-  // skasować to, co przebieg właśnie dopisał. Plan liczymy na nowo POD blokadą,
-  // ograniczając go do przebiegów, które operator zobaczył w dialogu.
-  const removedLab = lab.remove.length
-    ? withScriptLock_('czyszczenie surowych prób PSI', function () {
-      const fresh = planLabCleanup_(lab.keys);
-      return fresh.remove.length ? deleteSheetRows_(ss.getSheetByName(PERF_LAB_SHEET), fresh.remove) : 0;
-    })
-    : 0;
+  // Blokada obejmuje KAŻDE usunięcie, nie tylko surowe prób. Inaczej przy zajętej
+  // blokadzie snapshoty i wyniki zostałyby już skasowane, a przebieg wywróciłby się
+  // dopiero na próbach — czyszczenie wykonane połowicznie i bez raportu.
+  //
+  // Plany liczymy pod blokadą od nowa, bo numery wierszy sprzed potwierdzenia mogły
+  // się zdezaktualizować. Żaden plan nie może jednak objąć więcej, niż operator zobaczył:
+  // surowe próby ogranicza lista znaczników, snapshoty i wyniki — potwierdzona liczba.
+  const removed = withScriptLock_('czyszczenie arkusza', function () {
+    const freshNow = new Date();
+    const freshSnapshots = planSnapshotCleanup_(freshNow).remove.slice(0, snapshots.remove.length);
+    const freshResults = planResultsCleanup_(freshNow).remove.slice(0, results.remove.length);
+    const freshLab = planLabCleanup_(lab.keys).remove;
+    return {
+      snapshots: freshSnapshots.length ? deleteSheetRows_(ss.getSheetByName(WP_SNAPSHOTS_SHEET), freshSnapshots) : 0,
+      results: freshResults.length ? deleteSheetRows_(ss.getSheetByName(WP_RESULTS_SHEET), freshResults) : 0,
+      lab: freshLab.length ? deleteSheetRows_(ss.getSheetByName(PERF_LAB_SHEET), freshLab) : 0
+    };
+  });
 
-  ui.alert('Usunięto ' + removedSnapshots + ' snapshot(ów), ' + removedResults + ' wynik(ów) i ' +
-    removedLab + ' surowych prób PSI.' + NEWLINE + sheetUsageLine_());
-  return { snapshots: removedSnapshots, results: removedResults, lab: removedLab };
+  ui.alert('Usunięto ' + removed.snapshots + ' snapshot(ów), ' + removed.results + ' wynik(ów) i ' +
+    removed.lab + ' surowych prób PSI.' + NEWLINE + sheetUsageLine_());
+  return removed;
 }

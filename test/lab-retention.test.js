@@ -159,6 +159,21 @@ describe('#152: pokrycie znaczy użyteczna mediana, nie sam wiersz', () => {
     assert.deepEqual(plain(gas.planLabCleanup_()).remove, []);
   });
 
+  test('checkbox albo data w kolumnie Mediana nie są medianą', () => {
+    // `Number(false)`, `Number(true)` i `Number(data)` są skończone, więc koercja
+    // przepuszczałaby komórkę, która medianą nie jest — i pozwalała skasować próby.
+    [false, true].forEach(wartosc => {
+      const h = historia(KEEP + 1);
+      h.summary[0][4] = wartosc;
+      assert.deepEqual(plain(project(h).planLabCleanup_()).remove, [], 'wartość: ' + wartosc);
+    });
+
+    const zDatą = historia(KEEP + 1);
+    const gas = project(zDatą);
+    gas.$sheet(SUMMARY)[1][4] = new gas.$Date(2026, 8, 1);
+    assert.deepEqual(plain(gas.planLabCleanup_()).remove, [], 'data też nie jest medianą');
+  });
+
   test('wiersz agregatu bez znacznika albo bez strategii nie liczy się jako pokrycie', () => {
     const h = historia(KEEP + 1);
     h.summary[0][2] = '';
@@ -242,15 +257,23 @@ describe('#152: usuwanie idzie pod tą samą blokadą co pomiar', () => {
   const SNAP = 'WP SNAPSHOTS';
   const RES = 'WP RESULTS';
 
+  // Kolumna daty to INDEKS 9 w obu zakładkach (`rowOlderThan_`), nie pierwszy z brzegu —
+  // fixture z datą gdzie indziej planuje zero usunięć i test blokady niczego nie dowodzi.
+  const dawno = () => new Date(Date.now() - 400 * 86400000);
+  const snap = (id, page) => [id, 'CMD', page, 'slug', 'T', 'E', 'C', 'publish', '', dawno(), '', '', 'TRUE', 'PAGE', '', '', 'FALSE'];
+  const res = id => [id, 'CMD', 7, 'slug', 'publish', '', 'T', '', '', dawno(), '', '', 'PAGE'];
+  /** Snapshoty i wyniki też mają co usunąć — bez tego test blokady niczego nie dowodzi. */
   const zProbami = (opts = {}) => {
     const h = historia(KEEP + 1);
+    const snapshoty = [['id', 'action', 'page', 'slug', 'title', 'excerpt', 'content', 'status', '', 'created_at', '', '', 'confirm', 'type', '', '', 'flag']];
+    for (let i = 0; i < 8; i++) snapshoty.push(snap('S' + i, 'https://www.example.pl/x/'));
     return loadProject(Object.assign({
       properties: {},
       sheets: {
         [LAB]: [LAB_HEADER].concat(h.lab),
         [SUMMARY]: [SUMMARY_HEADER].concat(h.summary),
-        [SNAP]: [['id', 'created_at', 'page']],
-        [RES]: [['id', 'done_at']]
+        [SNAP]: snapshoty,
+        [RES]: [['id', 'action', 'target', 'slug', 'field', 'value', 'result', '', '', 'done_at', '', '', 'type'], res('R1')]
       },
       fetch: () => ({ code: 404, text: '{}' })
     }, opts));
@@ -261,6 +284,7 @@ describe('#152: usuwanie idzie pod tą samą blokadą co pomiar', () => {
     gas.$ui.$answer = 'YES';
     const out = plain(gas.wyczyscStareSnapshotyIWyniki());
 
+    assert.ok(out.snapshots > 0, 'fixture naprawdę ma co usunąć: ' + JSON.stringify(out));
     assert.equal(out.lab, 3, 'trzy wiersze najstarszego przebiegu');
     const operacje = gas.$lock.map(entry => entry[0]);
     assert.ok(operacje.indexOf('tryLock') >= 0, 'blokada założona: ' + JSON.stringify(gas.$lock));
@@ -271,7 +295,13 @@ describe('#152: usuwanie idzie pod tą samą blokadą co pomiar', () => {
     const gas = zProbami({ lockHeld: true });
     gas.$ui.$answer = 'YES';
 
+    const snapshotyPrzed = gas.$sheet(SNAP).length;
+    const wynikiPrzed = gas.$sheet(RES).length;
+
     assert.throws(() => gas.wyczyscStareSnapshotyIWyniki(), /Inne uruchomienie jeszcze trwa/);
-    assert.equal(gas.$sheet(LAB).length, 1 + (KEEP + 1) * 3, 'wszystkie wiersze na miejscu');
+
+    assert.equal(gas.$sheet(LAB).length, 1 + (KEEP + 1) * 3, 'surowe próby na miejscu');
+    assert.equal(gas.$sheet(SNAP).length, snapshotyPrzed, 'snapshoty też — blokada jest PRZED każdym usunięciem');
+    assert.equal(gas.$sheet(RES).length, wynikiPrzed, 'i wyniki');
   });
 });
