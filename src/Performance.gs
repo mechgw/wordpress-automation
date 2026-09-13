@@ -681,6 +681,41 @@ function validatePsiInterval_(hours) {
   return value;
 }
 
+/**
+ * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156).
+ *
+ * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
+ * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
+ * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
+ * wartości do kolumny bez etykiety.
+ *
+ * Dopisujemy WYŁĄCZNIE puste komórki nagłówka. Komórka z inną niepustą treścią
+ * to konflikt schematu: zatrzymujemy się i mówimy, co jest nie tak, zamiast
+ * nadpisywać coś, czego nie zakładaliśmy.
+ */
+function ensureHeaderColumns_(sheetName, header) {
+  const sheet = ensureSheetWithHeader_(sheetName, header);
+  const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  const conflicts = [];
+  const missing = [];
+
+  header.forEach(function (label, i) {
+    const value = String(current[i] === undefined || current[i] === null ? '' : current[i]).trim();
+    if (value === label) return;
+    if (value === '') { missing.push(i); return; }
+    conflicts.push('kolumna ' + (i + 1) + ': jest „' + value + '”, oczekiwano „' + label + '”');
+  });
+
+  if (conflicts.length) {
+    throw new Error(
+      'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
+      '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
+    );
+  }
+  missing.forEach(function (i) { sheet.getRange(1, i + 1).setValue(header[i]); });
+  return sheet;
+}
+
 /** Pomiar laboratoryjny: trzy próby na adres i strategię, zapisywane osobno. */
 function runPsiMeasurement_(trigger) {
   const source = trigger || PSI_TRIGGER_MANUAL;
@@ -711,9 +746,9 @@ function runPsiMeasurement_(trigger) {
   // Zakładki muszą istnieć także po przebiegu, w którym nic się nie udało.
   // Wcześniej gwarantował to zapis na końcu, wołany bezwarunkowo; po przejściu
   // na zapis warunkowy per adres trzeba to powiedzieć wprost.
-  ensureSheetWithHeader_(PERF_LAB_SHEET, PERF_LAB_HEADER);
-  ensureSheetWithHeader_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER);
-  ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
+  ensureHeaderColumns_(PERF_LAB_SHEET, PERF_LAB_HEADER);
+  ensureHeaderColumns_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER);
+  ensureHeaderColumns_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
 
   let pairs = 0;
   // Budżet jest NASZ, nie Google'a: liczymy żądania rzeczywiście wykonane,
@@ -722,7 +757,22 @@ function runPsiMeasurement_(trigger) {
   const budgetState = psiBudgetState_(psiBudgetDay_(now));
   let budgetStopped = false;
 
+  // Koszt jednego adresu: trzy próby razy dwie strategie.
+  const costPerUrl = PSI_ATTEMPTS * 2;
+
+  // Licznik zapisujemy w `finally`: błąd niepodlegający ponowieniu (403, 429)
+  // rzuca wyjątek w środku pętli, a wykonane już żądania i tak zużyły limit
+  // u dostawcy. Bez tego kolejne przebiegi przekraczałyby nasz budżet.
+  try {
   while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS && !budgetStopped) {
+    // Budżet rezerwujemy na CAŁY adres, przed wejściem w pętle strategii.
+    // Sprawdzanie per próba przerywałoby adres w połowie: część prób zapisana,
+    // mediana policzona z niepełnego kompletu, a kursor i tak przesunięty —
+    // czyli adres uznany za zrobiony wbrew zasadzie z #151.
+    if (budgetState.used + costPerUrl > budget) {
+      budgetStopped = true;
+      break;
+    }
     const entry = urls[index % urls.length];
     // Dorobek JEDNEGO adresu, zapisywany zanim przejdziemy do następnego (#151).
     // Wcześniej wszystko leżało w pamięci do końca pętli, więc przerwanie przez
@@ -744,10 +794,6 @@ function runPsiMeasurement_(trigger) {
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
-        if (budgetState.used >= budget) {
-          budgetStopped = true;
-          break;
-        }
         budgetState.used++;
         try {
           const response = performanceApiRequest_(url);
@@ -811,8 +857,9 @@ function runPsiMeasurement_(trigger) {
 
     if (addressOk === PSI_ATTEMPTS * 2) complete.push(entry.url);
   }
-
-  savePsiBudgetState_(budgetState);
+  } finally {
+    savePsiBudgetState_(budgetState);
+  }
 
   const skipped = urls.length - measured;
   // Adres, od którego ruszy kolejny przebieg — tylko gdy jest co wznawiać.

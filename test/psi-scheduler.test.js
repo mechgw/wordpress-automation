@@ -143,19 +143,39 @@ describe('#156: unikalność przebiegu', () => {
 });
 
 describe('#156: lokalny budżet wywołań', () => {
-  test('10: wyczerpany budżet wstrzymuje przebieg i mówi to wprost', () => {
-    const gas = project({ properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '2' }) });
+  const DWA = [['https://www.example.pl/1/', 'a', ''], ['https://www.example.pl/2/', 'b', '']];
+
+  test('10: budżet rezerwowany na CAŁY adres, nie na pojedynczą próbę', () => {
+    // Sześć wywołań to koszt jednego adresu (3 próby × 2 strategie). Przy budżecie
+    // 6 pierwszy adres przechodzi w całości, a drugi nie jest w ogóle zaczynany —
+    // zamiast zostać przerwanym w połowie z niepełną medianą.
+    const gas = project({
+      urls: DWA,
+      properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '6' })
+    });
     const out = plain(gas.runPsiMeasurement_('cykliczny'));
     assert.equal(out.budgetStopped, true);
-    assert.equal(out.budgetUsed, 2);
-    assert.equal(out.budgetLimit, 2);
+    assert.equal(out.budgetUsed, 6, 'dokładnie jeden komplet, bez urwanej reszty');
+    assert.equal(out.measured, 1);
+    assert.equal(out.skipped, 1);
     assert.match(out.detail, /wyczerpany nasz dzienny budżet/);
     assert.doesNotMatch(out.detail, /limit Google/, 'nie udajemy, że znamy limit dostawcy');
+
+    const adresy = [...new Set(labRows(gas).map(r => r[1]))];
+    assert.deepEqual(adresy, ['https://www.example.pl/1/'], 'drugi adres bez ani jednego wiersza');
+  });
+
+  test('10a: budżet mniejszy niż koszt jednego adresu nie zapisuje niczego', () => {
+    const gas = project({ properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '5' }) });
+    const out = plain(gas.runPsiMeasurement_('cykliczny'));
+    assert.equal(out.budgetStopped, true);
+    assert.equal(out.budgetUsed, 0, 'ani jednego wywołania, skoro adresu i tak nie dokończymy');
+    assert.deepEqual(labRows(gas), []);
   });
 
   test('11: nieudane żądanie też konsumuje budżet', () => {
     const gas = project({
-      properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '3' }),
+      properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '6' }),
       // 5xx to awaria pojedynczej próby Lighthouse, ale żądanie zostało wykonane
       // i po stronie dostawcy się liczy.
       fetch: url => (String(url).indexOf('pagespeedonline') >= 0
@@ -163,8 +183,22 @@ describe('#156: lokalny budżet wywołań', () => {
         : { code: 404, text: '{}' })
     });
     const out = plain(gas.runPsiMeasurement_('cykliczny'));
-    assert.equal(out.budgetUsed, 3, 'trzy nieudane żądania zjadły cały budżet');
-    assert.equal(out.budgetStopped, true);
+    assert.equal(out.budgetUsed, 6, 'sześć nieudanych prób zjadło komplet');
+  });
+
+  test('11a: błąd przerywający przebieg nie gubi zużytych wywołań', () => {
+    // 429 nie podlega ponowieniu i rzuca wyjątek w środku pętli. Gdyby licznik
+    // zapisywał się dopiero po pętli, wykonane żądania zostałyby zapomniane
+    // i kolejne przebiegi przekroczyłyby nasz budżet.
+    const gas = project({
+      properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '100' }),
+      fetch: url => (String(url).indexOf('pagespeedonline') >= 0
+        ? { code: 429, text: '{}' }
+        : { code: 404, text: '{}' })
+    });
+    assert.throws(() => gas.runPsiMeasurement_('cykliczny'), /limit zapytań/);
+    const zapisane = Number(String(gas.$properties.PAGESPEED_BUDGET_STATE).split(' ')[1]);
+    assert.equal(zapisane, 1, 'wykonane żądanie policzone mimo przerwania');
   });
 
   test('licznik zeruje się przy zmianie doby, a stan przetrwa między przebiegami', () => {
@@ -186,5 +220,53 @@ describe('#156: lokalny budżet wywołań', () => {
     assert.equal(gas.psiDailyBudget_(), 500);
     const zero = project({ properties: Object.assign({}, KEY, { PAGESPEED_DAILY_BUDGET: '0' }) });
     assert.equal(zero.psiDailyBudget_(), 500, 'zero wyłączyłoby pomiar po cichu');
+  });
+});
+
+/**
+ * #156/Codex: istniejąca zakładka nie dostaje nowego nagłówka sama z siebie.
+ *
+ * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
+ * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` zostaje `Pomiar`, więc bez
+ * osobnego kroku wartości lądowałyby w kolumnie bez etykiety.
+ */
+describe('#156: uzupełnienie nagłówka istniejącej zakładki', () => {
+  const STARY_LAB = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano'];
+
+  const zStarym = (naglowek, wiersze = []) => loadProject({
+    properties: KEY,
+    sheets: {
+      [URLS]: [URLS_HEADER, [URL, 'homepage', '']],
+      [LAB]: [naglowek].concat(wiersze)
+    },
+    fetch: url => (String(url).indexOf('pagespeedonline') >= 0
+      ? { code: 200, text: psiBody() }
+      : { code: 404, text: '{}' })
+  });
+
+  test('brakująca kolumna dostaje etykietę, a dane zostają', () => {
+    const stary = ['2026-09-13 10:00', URL, 'mobile', 1, 'LCP', 1111, 'PSI_LAB', '2026-09-13'];
+    const gas = zStarym(STARY_LAB, [stary]);
+    gas.pomiarWydajnosciCykliczny();
+
+    assert.equal(gas.$sheet(LAB)[0][8], 'Wyzwolenie', 'etykieta dopisana');
+    const historyczny = labRows(gas).find(r => String(r[0]) === '2026-09-13 10:00');
+    assert.ok(historyczny, 'wiersz sprzed zmiany schematu przetrwał');
+    assert.equal(historyczny[5], 1111, 'z nietkniętą wartością');
+  });
+
+  test('poprawny nagłówek to no-op, także przy drugim uruchomieniu', () => {
+    const gas = zStarym(STARY_LAB);
+    gas.pomiarWydajnosciCykliczny();
+    const poPierwszym = gas.$sheet(LAB)[0].slice();
+    gas.pomiarWydajnosciCykliczny();
+    assert.deepEqual(gas.$sheet(LAB)[0], poPierwszym, 'nagłówek nie jest przepisywany w kółko');
+  });
+
+  test('cudza wartość w kolumnie nowego nagłówka to konflikt, nie nadpisanie', () => {
+    const zajety = STARY_LAB.concat(['Moje notatki']);
+    const gas = zStarym(zajety);
+    assert.throws(() => gas.pomiarWydajnosciCykliczny(), /Niezgodny nagłówek/);
+    assert.equal(gas.$sheet(LAB)[0][8], 'Moje notatki', 'komórka nietknięta');
   });
 });
