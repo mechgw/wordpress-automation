@@ -234,23 +234,39 @@ describe('#162: kompletność katalogu arkuszy', () => {
     assert.ok(direct.length >= 3, 'znaleziono: ' + direct.map(item => item.name).join(', '));
   });
 
-  // Druga, niezależna reguła. Śledzenie wywołań zawsze będzie miało dziury — audyt
-  // pokazał kolejno: opakowania, `insertSheet` i funkcje strzałkowe. Ta reguła nie
-  // pyta, JAK zakładka powstaje: w tym projekcie każda ma stałą `*_SHEET`, więc
-  // porównanie stałych z katalogiem łapie nowe zakładki niezależnie od kształtu kodu.
-  const SHEET_CONSTANT = /^const ([A-Za-z0-9_]*SHEET[A-Za-z0-9_]*) = '([^']+)';/gm;
+  // Druga, niezależna reguła. Śledzenie wywołań zawsze będzie miało margines — audyt
+  // pokazał kolejno: opakowania, `insertSheet` i funkcje strzałkowe. Ta reguła nie pyta,
+  // JAK zakładka powstaje: w tym projekcie każda ma stałą `*_SHEET`, więc porównanie
+  // stałych z katalogiem łapie nową zakładkę niezależnie od kształtu kodu.
+  //
+  // Wzorzec łapie wyłącznie NAZWĘ stałej; wartość bierzemy z kontekstu VM, więc
+  // cudzysłów, odstępy i łamanie wiersza nie mają znaczenia — wcześniejsza wersja
+  // wymagała apostrofów i przepuszczała `const X_SHEET = "X";` (audyt #170).
+  const SHEET_CONSTANT = /(?:^|[^\w$.])const\s+([A-Za-z0-9_$]+_SHEET)\s*=/g;
 
-  test('każda stała `*SHEET*` wskazuje zakładkę z katalogu — niezależnie od sposobu zakładania', () => {
+  test('każda stała `*_SHEET` wskazuje zakładkę z katalogu — niezależnie od sposobu zakładania', () => {
     const constants = [];
     sources.forEach(source => {
-      const re = new RegExp(SHEET_CONSTANT.source, 'gm');
+      const re = new RegExp(SHEET_CONSTANT.source, 'g');
       let m;
       while ((m = re.exec(source.code)) !== null) {
-        constants.push({ file: source.file, constant: m[1], name: m[2] });
+        let value = null;
+        try {
+          const resolvedValue = gas.$get(m[1]);
+          if (typeof resolvedValue === 'string') value = resolvedValue;
+        } catch {
+          value = null;
+        }
+        constants.push({ file: source.file, constant: m[1], name: value });
       }
     });
 
     assert.ok(constants.length >= 20, 'znaleziono tylko ' + constants.length + ' stałych; konwencja nazw się zmieniła');
+    assert.deepEqual(
+      constants.filter(item => item.name === null).map(item => item.file + ': ' + item.constant),
+      [],
+      'tych stałych nie da się rozwiązać do nazwy zakładki, więc reguła ich nie sprawdza'
+    );
     const missing = constants
       .filter(item => !catalog.has(item.name) && OUTSIDE_CATALOG.indexOf(item.name) < 0)
       .map(item => item.file + ': ' + item.constant + ' → „' + item.name + '”');
