@@ -31,11 +31,11 @@ const KEEP = 8;
 const znacznik = n => '2026-09-' + String(n).padStart(2, '0') + ' 06:00:00';
 
 /** Trzy próby jednej metryki dla pary (adres, strategia) w danym przebiegu. */
-const proby = (pomiar, url, strategia) => [1, 2, 3].map(n =>
-  [pomiar, url, strategia, n, 'LCP', 2000 + n, 'PSI_LAB', '2026-09-13', 'cykliczny']);
+const proby = (pomiar, url, strategia, metryka = 'LCP', wartosc = 2000) => [1, 2, 3].map(n =>
+  [pomiar, url, strategia, n, metryka, wartosc + n, 'PSI_LAB', '2026-09-13', 'cykliczny']);
 
-const mediana = (pomiar, url, strategia) =>
-  [pomiar, url, strategia, 'LCP', 2001, 3, 'PSI_LAB', '2026-09-13'];
+const mediana = (pomiar, url, strategia, metryka = 'LCP', wartosc = 2001) =>
+  [pomiar, url, strategia, metryka, wartosc, 3, 'PSI_LAB', '2026-09-13'];
 
 function project({ lab, summary = [] } = {}) {
   return loadProject({
@@ -200,6 +200,30 @@ describe('#152: plan po potwierdzeniu nie obejmuje więcej, niż pokazał dialog
   test('nieznany znacznik nie usuwa niczego', () => {
     const gas = project(historia(KEEP + 2));
     assert.deepEqual(plain(gas.planLabCleanup_(['2020-01-01 00:00:00'])).remove, []);
+  });
+});
+
+describe('#152: pokrycie liczy się per metryka, nie per para', () => {
+  test('brak mediany JEDNEJ metryki blokuje cały przebieg', () => {
+    // Para (adres, strategia) bywa pokryta częściowo: mediana LCP zostaje, mediana CLS
+    // ginie przy ręcznej edycji. Uznanie pary za pokrytą skasowałoby jedyny ślad po CLS.
+    const h = historia(KEEP + 1);
+    proby(znacznik(1), A, 'mobile', 'CLS', 0).forEach(row => h.lab.push(row));
+    const gas = project(h);
+
+    assert.deepEqual(plain(gas.planLabCleanup_()).remove, [], 'LCP ma medianę, CLS nie ma');
+
+    h.summary.push(mediana(znacznik(1), A, 'mobile', 'CLS', 0));
+    assert.equal(plain(project(h).planLabCleanup_()).trimmed, 1, 'komplet metryk odblokowuje');
+  });
+
+  test('metryka bez ani jednej liczby nie blokuje na zawsze', () => {
+    // Agregat takiej metryki nie policzy, więc wymaganie od niej pokrycia zamroziłoby
+    // przycinanie — a ta metryka i tak nie niesie wyniku.
+    const h = historia(KEEP + 1);
+    h.lab.push([znacznik(1), A, 'mobile', 1, 'TBT', '', 'PSI_LAB', '2026-09-13', 'cykliczny']);
+    const gas = project(h);
+    assert.equal(plain(gas.planLabCleanup_()).trimmed, 1);
   });
 });
 

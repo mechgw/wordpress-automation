@@ -100,8 +100,14 @@ function planSnapshotCleanup_(now) {
 }
 
 /**
- * Pary (adres, strategia) z „PERFORMANCE SUMMARY”, dla których istnieje mediana,
- * zgrupowane po kanonicznym znaczniku przebiegu.
+ * Klucze (przebieg, adres, strategia, metryka), dla których w „PERFORMANCE SUMMARY”
+ * istnieje użyteczna mediana.
+ *
+ * Granulacja jest **per metryka**, nie per para. Specyfikacja #152 wymaga pokrycia
+ * dla każdej pary z udaną próbą, ale para bywa pokryta tylko częściowo: gdy mediana
+ * LCP zostanie, a mediana CLS zginie przy ręcznej edycji, para wygląda na pokrytą,
+ * a skasowanie surowych prób usunęłoby **jedyny** ślad po CLS. Ostrzejsza reguła
+ * spełnia specyfikację i zamyka tę lukę.
  */
 function summaryCoverage_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(PERF_SUMMARY_SHEET);
@@ -119,7 +125,7 @@ function summaryCoverage_() {
       // wstawiona ręcznie uchodziłyby za medianę. Zero zostaje poprawne (CLS bywa zerem).
       const median = row[4];
       if (typeof median !== 'number' || !isFinite(median)) return;
-      covered[perfMeasurementKey_(row[0]) + ' | ' + String(row[1]) + ' | ' + String(row[2])] = true;
+      covered[perfMeasurementKey_(row[0]) + ' | ' + String(row[1]) + ' | ' + String(row[2]) + ' | ' + String(row[3])] = true;
     });
   return covered;
 }
@@ -154,7 +160,12 @@ function planLabCleanup_(onlyMeasurements) {
       order.push(key);
     }
     byMeasurement[key].rows.push(i + 2);
-    byMeasurement[key].pairs[String(row[1]) + ' | ' + String(row[2])] = true;
+    // Pokrycia wymagamy wyłącznie od metryk, które miały udaną próbę — dokładnie tak,
+    // jak agregat liczy mediany. Inaczej metryka bez ani jednej liczby blokowałaby
+    // przycinanie na zawsze, choć nie niesie żadnego wyniku.
+    if (typeof row[5] === 'number' && isFinite(row[5])) {
+      byMeasurement[key].pairs[String(row[1]) + ' | ' + String(row[2]) + ' | ' + String(row[4])] = true;
+    }
   });
 
   // Najnowsze pierwsze. Sortujemy po kanonicznym znaczniku, bo kolejność wierszy
@@ -176,8 +187,8 @@ function planLabCleanup_(onlyMeasurements) {
       keep += measurement.rows.length;
       return;
     }
-    const missing = Object.keys(measurement.pairs).some(function (pair) {
-      return covered[key + ' | ' + pair] !== true;
+    const missing = Object.keys(measurement.pairs).some(function (triple) {
+      return covered[key + ' | ' + triple] !== true;
     });
     if (missing) {
       blocked++;
