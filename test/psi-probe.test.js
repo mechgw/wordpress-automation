@@ -185,3 +185,41 @@ describe('#157: pozycje zagnieżdżone', () => {
     assert.ok(out.length < 400, 'raport nie puchnie od zagnieżdżeń');
   });
 });
+
+/**
+ * #157: flaga `węzeł=` przegapiła węzeł przy pierwszym uruchomieniu na produkcji.
+ *
+ * Lighthouse 13.4.1 kładzie go jako gołą pozycję opisaną `selector`/`nodeLabel`/
+ * `snippet`, a heurystyka szukała pola o nazwie `node`. Flaga myliła się więc
+ * dokładnie w przypadku, dla którego istnieje.
+ */
+describe('#157: flaga węzła wobec realnego kształtu 13.4.1', () => {
+  const realnyLcp = {
+    scoreDisplayMode: 'numeric',
+    details: {
+      type: 'list',
+      items: [
+        { type: 'table', headings: [], items: [{ duration: 120, label: 'TTFB', subpart: 'ttfb' }] },
+        {
+          snippet: '<section class="hero">', selector: 'section.hero', boundingRect: {},
+          type: 'node', nodeLabel: 'Zamów kuriera', lhId: 'page-0-SECTION', path: '1,HTML'
+        }
+      ]
+    }
+  };
+
+  test('goły węzeł jest wykryty, mimo braku pola o nazwie node', () => {
+    const gas = project();
+    const out = gas.psiProbeAuditShape_({ 'lcp-breakdown-insight': realnyLcp }, 'lcp-breakdown-insight');
+    assert.match(out, /węzeł=TAK/, 'to jest przypadek, który flaga przegapiła na produkcji');
+    assert.match(out, /snippet\/selector/, 'a nazwy pól nadal są wypisane obok flagi');
+  });
+
+  test('tabela faz bez węzła nadal daje „nie”', () => {
+    const gas = project();
+    const samefazy = {
+      details: { type: 'list', items: [{ type: 'table', items: [{ duration: 1, label: 'a', subpart: 'b' }] }] }
+    };
+    assert.match(gas.psiProbeAuditShape_({ x: samefazy }, 'x'), /węzeł=nie/);
+  });
+});
