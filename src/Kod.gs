@@ -28,6 +28,8 @@ function onOpen() {
     .addItem('Importuj Business Profile', 'importujBusinessProfile')
     .addItem('Przygotuj pomiar wydajności', 'przygotujPomiarWydajnosci')
     .addItem('Zmierz wydajność (CrUX + PSI)', 'zmierzWydajnosc')
+    .addItem('Włącz cykliczny pomiar wydajności', 'ustawCyklicznyPomiarWydajnosci')
+    .addItem('Wyłącz cykliczny pomiar wydajności', 'usunCyklicznyPomiarWydajnosci')
     .addItem('Zbadaj kształt odpowiedzi PSI', 'zbadajKsztaltOdpowiedziPsi')
     .addToUi();
 

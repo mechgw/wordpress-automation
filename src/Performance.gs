@@ -20,7 +20,7 @@ const PERF_URLS_SHEET = 'PERFORMANCE URLS';
 
 const PERF_URLS_HEADER = ['URL', 'Rola', 'Uwagi'];
 const PERF_FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', 'Stan', 'Źródło', 'Pobrano'];
-const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano'];
+const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano', 'Wyzwolenie'];
 
 /**
  * Agregat median — jeden wiersz na (pomiar, URL, strategia, metryka) (#152).
@@ -44,7 +44,10 @@ const PERF_FINDINGS_HEADER = [
   // KiB, nie KB: przeliczamy przez 1024, tak samo jak raport PageSpeed, więc
   // liczby są wprost porównywalne z tym, co widać w interfejsie.
   'Czas (ms)', 'Transfer (KiB)', 'Potencjalna oszczędność (ms)', 'Potencjalna oszczędność (KiB)',
-  'Źródło', 'Pobrano'
+  'Źródło', 'Pobrano',
+  // Ostatnia kolumna, nie w środku: cztery pierwsze muszą zostać zgodne
+  // z PAGESPEED LAB, a klucz upsertu opiera się na ich pozycjach (#156 D3).
+  'Wyzwolenie'
 ];
 
 /**
@@ -91,6 +94,36 @@ const PSI_ATTEMPTS = 3;
  */
 const PSI_TIME_BUDGET_MS = 4 * 60 * 1000;
 const PSI_CURSOR_PROP = 'PAGESPEED_CURSOR';
+
+/** Źródło wyzwolenia przebiegu; atrybut, NIE element klucza upsertu (#156 D4). */
+const PSI_TRIGGER_MANUAL = 'ręczny';
+const PSI_TRIGGER_SCHEDULED = 'cykliczny';
+
+/** Funkcja rejestrowana w wyzwalaczu czasowym; bez UI (#156 D6). */
+const PSI_TRIGGER_HANDLER = 'pomiarWydajnosciCykliczny';
+
+/**
+ * Dozwolone interwały wyzwalacza czasowego (#156 D5).
+ *
+ * To ograniczenie API Apps Script, nie nasze: `everyHours()` przyjmuje tylko
+ * te wartości. Dowolna liczba godzin zostałaby odrzucona dopiero przy tworzeniu
+ * wyzwalacza, czyli po zapisaniu konfiguracji — walidujemy wcześniej.
+ */
+const PSI_ALLOWED_INTERVALS = [1, 2, 4, 6, 8, 12];
+const PSI_DEFAULT_INTERVAL_HOURS = 6;
+const PSI_INTERVAL_PROP = 'PAGESPEED_INTERVAL_HOURS';
+
+/**
+ * Lokalny budżet wywołań PSI na dobę (#156 D7).
+ *
+ * To NASZ licznik, nie stan limitu po stronie Google — tego nie odczytujemy
+ * z żadnego API i specyfikacja nie może sugerować, że go znamy. Liczymy
+ * żądania RZECZYWIŚCIE wykonane, także nieudane: one również konsumują limit
+ * u dostawcy.
+ */
+const PSI_DAILY_BUDGET_PROP = 'PAGESPEED_DAILY_BUDGET';
+const PSI_BUDGET_STATE_PROP = 'PAGESPEED_BUDGET_STATE';
+const PSI_DEFAULT_DAILY_BUDGET = 500;
 
 /** Adres, od którego zacząć ten przebieg; rotacja po kolejnych uruchomieniach. */
 function psiStartIndex_(total) {
@@ -240,14 +273,14 @@ function parseCruxRecord_(record, url, formFactor, now, source) {
 }
 
 /** Wiersze pomiaru laboratoryjnego z jednej próby. */
-function parsePsiRun_(response, url, strategy, attempt, measuredAt, now) {
+function parsePsiRun_(response, url, strategy, attempt, measuredAt, now, trigger) {
   const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
   const categories = (response && response.lighthouseResult && response.lighthouseResult.categories) || {};
   const rows = [];
 
   const score = categories.performance && categories.performance.score;
   if (score !== undefined && score !== null) {
-    rows.push([measuredAt, url, strategy, attempt, 'Performance score', Math.round(Number(score) * 100), 'PSI_LAB', now]);
+    rows.push([measuredAt, url, strategy, attempt, 'Performance score', Math.round(Number(score) * 100), 'PSI_LAB', now, trigger]);
   }
 
   const wanted = psiAudits_();
@@ -255,7 +288,7 @@ function parsePsiRun_(response, url, strategy, attempt, measuredAt, now) {
     const audit = audits[id];
     const value = audit && audit.numericValue;
     if (value === undefined || value === null) return;
-    rows.push([measuredAt, url, strategy, attempt, wanted[id], Number(value), 'PSI_LAB', now]);
+    rows.push([measuredAt, url, strategy, attempt, wanted[id], Number(value), 'PSI_LAB', now, trigger]);
   });
 
   return rows;
@@ -377,7 +410,7 @@ function psiOpportunities_(audits) {
  * trzy rzeczy naraz: „PSI nie wskazał”, „kolektor tu nie dotarł” i „zapis
  * działa, tylko ten rodzaj nigdy nie powstaje”.
  */
-function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now) {
+function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now, trigger) {
   const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
   const found = psiAuditByIds_(audits, PSI_LCP_AUDIT_IDS);
   const label = psiNodeLabel_(psiLcpNode_(found.audit));
@@ -385,17 +418,17 @@ function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now) {
   // arkusz twierdziłby, że dane pochodzą z audytu, którego Lighthouse nie ma.
   return [
     measuredAt, url, strategy, attempt, PSI_FINDING_LCP, found.id,
-    cellSafeText_(label || PSI_LCP_UNKNOWN).text, '', '', '', '', 'PSI_LAB', now
+    cellSafeText_(label || PSI_LCP_UNKNOWN).text, '', '', '', '', 'PSI_LAB', now, trigger
   ];
 }
 
-function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now) {
+function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now, trigger) {
   const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
   const rows = [];
   const add = function (kind, name, detail, timeMs, transferKb, savingsMs, savingsKb) {
     rows.push([
       measuredAt, url, strategy, attempt, kind, name, cellSafeText_(detail).text,
-      timeMs, transferKb, savingsMs, savingsKb, 'PSI_LAB', now
+      timeMs, transferKb, savingsMs, savingsKb, 'PSI_LAB', now, trigger
     ]);
   };
 
@@ -600,14 +633,68 @@ function runCruxMeasurement_() {
   };
 }
 
+/** Budżet dzienny z konfiguracji; domyślny, gdy nieustawiony albo niepoprawny. */
+function psiDailyBudget_() {
+  const raw = Number(PropertiesService.getScriptProperties().getProperty(PSI_DAILY_BUDGET_PROP));
+  return isFinite(raw) && raw > 0 ? Math.floor(raw) : PSI_DEFAULT_DAILY_BUDGET;
+}
+
+/** Dzień budżetu w strefie arkusza; licznik zeruje się przy zmianie doby. */
+function psiBudgetDay_(now) {
+  return Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+/** Stan licznika: `{ day, used }`. Inny dzień znaczy licznik od zera. */
+function psiBudgetState_(day) {
+  const raw = String(PropertiesService.getScriptProperties().getProperty(PSI_BUDGET_STATE_PROP) || '');
+  const parts = raw.split(' ');
+  const used = Number(parts[1]);
+  return parts[0] === day && isFinite(used) && used > 0
+    ? { day: day, used: Math.floor(used) }
+    : { day: day, used: 0 };
+}
+
+function savePsiBudgetState_(state) {
+  PropertiesService.getScriptProperties().setProperty(PSI_BUDGET_STATE_PROP, state.day + ' ' + state.used);
+}
+
+/** Interwał z konfiguracji; poza dozwolonym zbiorem schodzimy do domyślnego. */
+function psiIntervalHours_() {
+  const raw = Number(PropertiesService.getScriptProperties().getProperty(PSI_INTERVAL_PROP));
+  return PSI_ALLOWED_INTERVALS.indexOf(raw) >= 0 ? raw : PSI_DEFAULT_INTERVAL_HOURS;
+}
+
+/**
+ * Walidacja interwału PRZED założeniem wyzwalacza.
+ *
+ * Bez niej `everyHours()` odrzuciłoby wartość dopiero przy tworzeniu, czyli po
+ * skasowaniu poprzedniego wyzwalacza — zostawiając projekt bez żadnego.
+ */
+function validatePsiInterval_(hours) {
+  const value = Number(hours);
+  if (PSI_ALLOWED_INTERVALS.indexOf(value) < 0) {
+    throw new Error(
+      'Niedozwolony interwał: ' + hours + ' godz. Wyzwalacz czasowy Apps Script przyjmuje wyłącznie: ' +
+      PSI_ALLOWED_INTERVALS.join(', ') + '.'
+    );
+  }
+  return value;
+}
+
 /** Pomiar laboratoryjny: trzy próby na adres i strategię, zapisywane osobno. */
-function runPsiMeasurement_() {
+function runPsiMeasurement_(trigger) {
+  const source = trigger || PSI_TRIGGER_MANUAL;
   const key = performanceApiKey_();
   const urls = performanceUrls_();
   if (!urls.length) return { rows: 0, urls: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
 
   const now = new Date();
-  const measuredAt = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  // Sekundy, nie minuty (#156 D2): przy rozdzielczości minutowej przebieg ręczny
+  // i cykliczny z tej samej minuty trafiały w te same klucze upsertu i jeden
+  // kasował wiersze drugiego. Blokada z D1 nie dopuszcza dwóch równoległych
+  // przebiegów, a jeden trwa minuty, więc sekunda wystarcza i `run_id` byłby
+  // drugim mechanizmem unikalności obok istniejącego klucza.
+  const measuredAt = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
   const startedAt = Date.now();
   const rows = [];
   const start = psiStartIndex_(urls.length);
@@ -629,8 +716,13 @@ function runPsiMeasurement_() {
   ensureSheetWithHeader_(PERF_FINDINGS_SHEET, PERF_FINDINGS_HEADER);
 
   let pairs = 0;
+  // Budżet jest NASZ, nie Google'a: liczymy żądania rzeczywiście wykonane,
+  // także nieudane, bo one też konsumują limit u dostawcy (#156 D7).
+  const budget = psiDailyBudget_();
+  const budgetState = psiBudgetState_(psiBudgetDay_(now));
+  let budgetStopped = false;
 
-  while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS) {
+  while (measured < urls.length && Date.now() - startedAt < PSI_TIME_BUDGET_MS && !budgetStopped) {
     const entry = urls[index % urls.length];
     // Dorobek JEDNEGO adresu, zapisywany zanim przejdziemy do następnego (#151).
     // Wcześniej wszystko leżało w pamięci do końca pętli, więc przerwanie przez
@@ -652,13 +744,18 @@ function runPsiMeasurement_() {
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
+        if (budgetState.used >= budget) {
+          budgetStopped = true;
+          break;
+        }
+        budgetState.used++;
         try {
           const response = performanceApiRequest_(url);
-          parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now)
+          parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now, source)
             .forEach(function (row) { addressRows.push(row); });
           ok++;
           lastGood = { response: response, attempt: attempt };
-          lcpRows.push(psiLcpFindingRow_(response, entry.url, strategy, attempt, measuredAt, now));
+          lcpRows.push(psiLcpFindingRow_(response, entry.url, strategy, attempt, measuredAt, now, source));
         } catch (e) {
           // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
           // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
@@ -669,7 +766,7 @@ function runPsiMeasurement_() {
       if (lastGood) {
         addressScopes.push(entry.url + ' ' + strategy);
         lcpRows.forEach(function (row) { addressFindings.push(row); });
-        parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now)
+        parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now, source)
           .forEach(function (row) { addressFindings.push(row); });
       }
       if (ok < PSI_ATTEMPTS) {
@@ -715,6 +812,8 @@ function runPsiMeasurement_() {
     if (addressOk === PSI_ATTEMPTS * 2) complete.push(entry.url);
   }
 
+  savePsiBudgetState_(budgetState);
+
   const skipped = urls.length - measured;
   // Adres, od którego ruszy kolejny przebieg — tylko gdy jest co wznawiać.
   const resumeAt = skipped ? urls[index % urls.length].url : '';
@@ -731,6 +830,10 @@ function runPsiMeasurement_() {
     // prób pojedynczej metryki — te dwa znaczenia „kompletnego” mylą się łatwo.
     pairs: pairs,
     pairsExpected: urls.length * 2,
+    trigger: source,
+    budgetUsed: budgetState.used,
+    budgetLimit: budget,
+    budgetStopped: budgetStopped,
     medians: psiMedians_(rows),
     // „Kompletny” i „budżet wyczerpany” muszą wyglądać inaczej: wcześniej oba
     // kończyły się tym samym zdaniem i operator nie wiedział, czy ma baseline.
@@ -741,6 +844,10 @@ function runPsiMeasurement_() {
         : '; przebieg kompletny') +
       '; mediany dla ' + pairs + ' z ' + (urls.length * 2) + ' par (URL × strategia)' +
       (complete.length ? '; komplet ' + (PSI_ATTEMPTS * 2) + ' prób: ' + complete.join(', ') : '') +
+      (budgetStopped
+        ? '; PRZERWANO: wyczerpany nasz dzienny budżet wywołań (' + budgetState.used + ' z ' + budget +
+          '), reszta w kolejnym przebiegu'
+        : '; budżet wywołań: ' + budgetState.used + ' z ' + budget) +
       (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
   };
 }
@@ -771,10 +878,73 @@ function przygotujPomiarWydajnosci() {
   return configured;
 }
 
+/**
+ * Rdzeń pomiaru: BEZ interfejsu, więc nadaje się dla wyzwalacza czasowego (#156 D6).
+ *
+ * Całość pod blokadą projektu (#156 D1): `upsertPerformanceRows_` czyta i przepisuje
+ * całą zakładkę, a PSI korzysta ze wspólnego kursora, więc dwa równoległe przebiegi
+ * mogłyby nadpisać sobie dane albo kursor. Zgodnie z zasadą z `Lock.gs` drugie
+ * uruchomienie NIE jest kolejkowane — kończy się czytelnym błędem.
+ */
+function runPerformanceMeasurement_(trigger) {
+  return withScriptLock_('pomiar wydajności', function () {
+    const field = runCruxMeasurement_();
+    const lab = runPsiMeasurement_(trigger);
+    return { field: field, lab: lab };
+  });
+}
+
+/**
+ * Handler wyzwalacza czasowego. Nie wolno tu wołać `SpreadsheetApp.getUi()` —
+ * wykonanie z wyzwalacza nie ma interfejsu i wywróciłoby się na pierwszym alercie.
+ */
+function pomiarWydajnosciCykliczny() {
+  // `recordJobRun_` zapisuje czas i wynik przebiegu, dzięki czemu „Status danych”
+  // i strażnik alertów widzą to zadanie tak samo jak pozostałe cykliczne.
+  // Blokadę zakłada `runPerformanceMeasurement_`, tak jak w live checku SEO.
+  return recordJobRun_('PERFORMANCE', true, function () {
+    return runPerformanceMeasurement_(PSI_TRIGGER_SCHEDULED);
+  });
+}
+
+/** Menu: zakłada cykliczny pomiar; ponowne założenie nie duplikuje wyzwalacza. */
+function ustawCyklicznyPomiarWydajnosci() {
+  const hours = validatePsiInterval_(psiIntervalHours_());
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === PSI_TRIGGER_HANDLER; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+
+  ScriptApp.newTrigger(PSI_TRIGGER_HANDLER).timeBased().everyHours(hours).create();
+
+  SpreadsheetApp.getUi().alert([
+    'Cykliczny pomiar wydajności włączony: co ' + hours + ' godz.',
+    '',
+    'Przebiegi cykliczne zapisują się tak samo jak ręczne, z oznaczeniem w kolumnie „Wyzwolenie”.',
+    'Dozwolone interwały (ograniczenie Apps Script): ' + PSI_ALLOWED_INTERVALS.join(', ') + ' godz.',
+    'Zmiana: Script Property ' + PSI_INTERVAL_PROP + ', potem ponownie ta pozycja menu.',
+    '',
+    'Dzienny budżet wywołań PSI: ' + psiDailyBudget_() + ' (nasz licznik, nie limit Google).'
+  ].join('\n'));
+  return hours;
+}
+
+/** Menu: usuwa cykliczny pomiar; brak wyzwalacza nie jest błędem. */
+function usunCyklicznyPomiarWydajnosci() {
+  const found = ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === PSI_TRIGGER_HANDLER; });
+  found.forEach(function (t) { ScriptApp.deleteTrigger(t); });
+
+  SpreadsheetApp.getUi().alert(found.length
+    ? 'Cykliczny pomiar wydajności wyłączony (usunięto wyzwalaczy: ' + found.length + ').'
+    : 'Cykliczny pomiar wydajności nie był włączony. Nic nie zmieniono.');
+  return found.length;
+}
+
 /** Menu: pomiar terenowy i laboratoryjny, z podsumowaniem. */
 function zmierzWydajnosc() {
-  const field = runCruxMeasurement_();
-  const lab = runPsiMeasurement_();
+  const out = runPerformanceMeasurement_(PSI_TRIGGER_MANUAL);
+  const field = out.field;
+  const lab = out.lab;
   SpreadsheetApp.getUi().alert([
     'Pomiar wydajności zakończony.',
     '',

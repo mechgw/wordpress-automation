@@ -18,7 +18,7 @@ const FIELD = 'CWV FIELD';
 const LAB = 'PAGESPEED LAB';
 const URLS_HEADER = ['URL', 'Rola', 'Uwagi'];
 const FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', 'Stan', 'Źródło', 'Pobrano'];
-const LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano'];
+const LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano', 'Wyzwolenie'];
 
 const URL = 'https://www.example.pl/';
 const KEY = { PAGESPEED_API_KEY: 'klucz-testowy' };
@@ -393,8 +393,9 @@ describe('#124: menu', () => {
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
     assert.deepEqual(
-      seo.items.map(i => i.fn).slice(-3),
-      ['przygotujPomiarWydajnosci', 'zmierzWydajnosc', 'zbadajKsztaltOdpowiedziPsi']
+      seo.items.map(i => i.fn).slice(-5),
+      ['przygotujPomiarWydajnosci', 'zmierzWydajnosc', 'ustawCyklicznyPomiarWydajnosci',
+        'usunCyklicznyPomiarWydajnosci', 'zbadajKsztaltOdpowiedziPsi']
     );
   });
 });
