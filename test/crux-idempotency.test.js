@@ -55,13 +55,13 @@ const brakDanych = () => ({ code: 404, text: '{}' });
 /** Awaria API — odczyt się nie udał, a to co innego niż brak danych. */
 const awaria = () => ({ code: 500, text: 'boom' });
 
-function scenariusz() {
+function scenariusz(opcje = {}) {
   let odpowiedz = brakDanych;
-  const gas = loadProject({
+  const gas = loadProject(Object.assign({
     properties: KEY,
     sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']] },
     fetch: (url, params) => odpowiedz(JSON.parse(params.payload))
-  });
+  }, opcje));
   return {
     gas,
     przebieg(responder) {
@@ -314,5 +314,56 @@ describe('#155: odczyt per URL zastępuje fallback domenowy', () => {
       s.wiersze().filter(r => r[COL.metric] === LCP).map(r => r[COL.p75]),
       [2100, 2100]
     );
+  });
+});
+
+describe('#155: klucz liczony w strefie arkusza, nie skryptu', () => {
+  // Strefa skryptu jest przypięta w `src/appsscript.json`, strefa arkusza to osobne
+  // ustawienie (Plik → Ustawienia). Stub `Utilities.formatDate` ignoruje strefę, więc
+  // na czas tego testu podstawiamy formater, który ją respektuje — inaczej test nie
+  // mógłby w ogóle zobaczyć przesunięcia, któremu ma zapobiegać.
+  const SKRYPT = 'Europe/Warsaw';
+  const ARKUSZ = 'Pacific/Kiritimati';
+  const PRZESUNIECIA = { [SKRYPT]: 2, [ARKUSZ]: 14 };
+
+  const formatujWStrefie = (date, tz, pattern) => {
+    if (!(tz in PRZESUNIECIA)) throw new Error('nieznana strefa: ' + tz);
+    const przesunieta = new Date(date.getTime() + PRZESUNIECIA[tz] * 3600000);
+    const pad = n => String(n).padStart(2, '0');
+    const parts = {
+      yyyy: String(przesunieta.getUTCFullYear()),
+      MM: pad(przesunieta.getUTCMonth() + 1),
+      dd: pad(przesunieta.getUTCDate()),
+      HH: pad(przesunieta.getUTCHours()),
+      mm: pad(przesunieta.getUTCMinutes()),
+      ss: pad(przesunieta.getUTCSeconds())
+    };
+    return pattern.replace(/yyyy|MM|dd|HH|mm|ss/g, m => parts[m]);
+  };
+
+  test('13: data z komórki to północ w strefie arkusza — dzień się nie przesuwa', () => {
+    const s = scenariusz({ timeZone: ARKUSZ });
+    const uzyteStrefy = [];
+    s.gas.Utilities.formatDate = (date, tz, pattern) => {
+      uzyteStrefy.push(tz);
+      return formatujWStrefie(date, tz, pattern);
+    };
+
+    s.przebieg(zAdresu(8));
+    assert.deepEqual([...new Set(s.wiersze().map(r => r[COL.period]))], ['2026-09-08']);
+
+    // Tak wygląda ta komórka, gdy arkusz sparsuje zapisany łańcuch: północ
+    // 2026-09-08 w strefie ARKUSZA, czyli 2026-09-07 10:00 UTC.
+    const polnocWArkuszu = new s.gas.$Date(Date.UTC(2026, 8, 7, 10, 0, 0));
+    s.gas.$sheet(FIELD).slice(1).forEach(row => { row[COL.period] = polnocWArkuszu; });
+    assert.equal(
+      formatujWStrefie(polnocWArkuszu, SKRYPT, 'yyyy-MM-dd'), '2026-09-07',
+      'w strefie skryptu to już inny dzień — strefy naprawdę się rozjeżdżają'
+    );
+
+    s.przebieg(zAdresu(8));
+
+    assert.equal(s.wiersze().length, 6, 'ten sam okres CrUX to jeden komplet wierszy');
+    assert.deepEqual([...new Set(uzyteStrefy)], [ARKUSZ], 'klucz liczony wyłącznie w strefie arkusza');
   });
 });

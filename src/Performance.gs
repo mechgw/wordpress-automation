@@ -636,10 +636,16 @@ function psiMedians_(rows) {
  * to dwa różne łańcuchy dla tej samej daty, więc wiersz nie rozpoznawał sam siebie
  * i zapis się dublował (#155). Format bierzemy od wywołującego, bo zależy od
  * kontraktu zakładki, a nie od typu wartości.
+ *
+ * Strefa też nie jest dowolna: komórka z samą datą wraca jako północ w strefie
+ * ARKUSZA, więc tylko formatowanie w tej samej strefie odwraca to, co arkusz zrobił
+ * przy zapisie. Strefa skryptu jest osobnym ustawieniem (`src/appsscript.json`)
+ * i przy rozjeździe przesunęłaby datę o dobę — czyli wprowadziła dokładnie ten
+ * duplikat, któremu ta normalizacja ma zapobiegać.
  */
-function performanceKeyPart_(value, dateFormat) {
+function performanceKeyPart_(value, dateFormat, timeZone) {
   if (dateFormat && value instanceof Date) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), dateFormat);
+    return Utilities.formatDate(value, timeZone, dateFormat);
   }
   return String(value);
 }
@@ -667,12 +673,13 @@ function performanceRowTime_(value) {
  */
 function upsertPerformanceRows_(sheetName, header, keyColumns, rows, obsolete) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
+  const timeZone = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
   const parts = keyColumns.map(function (entry) {
     return typeof entry === 'object' ? entry : { column: entry, dateFormat: '' };
   });
   const keyOf = function (row) {
     return parts.map(function (part) {
-      return performanceKeyPart_(row[part.column], part.dateFormat);
+      return performanceKeyPart_(row[part.column], part.dateFormat, timeZone);
     }).join(' ');
   };
   const incoming = {};
