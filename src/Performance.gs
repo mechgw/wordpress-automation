@@ -64,6 +64,8 @@ const PSI_THIRD_PARTY_AUDIT_IDS = ['third-parties-insight', 'third-party-summary
 const PSI_FINDING_LCP = 'ELEMENT LCP';
 /** Adnotacja, gdy PSI nie wskazał węzła LCP — brak też jest ustaleniem (#153). */
 const PSI_LCP_UNKNOWN = 'PSI nie wskazał elementu LCP w tej próbie';
+/** Fazy rozkładu LCP z tego samego audytu co węzeł (#165). */
+const PSI_FINDING_LCP_PHASE = 'FAZA LCP';
 const PSI_FINDING_OPPORTUNITY = 'SZANSA';
 const PSI_FINDING_THIRD_PARTY = 'THIRD-PARTY';
 
@@ -420,6 +422,60 @@ function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now, tr
     measuredAt, url, strategy, attempt, PSI_FINDING_LCP, found.id,
     cellSafeText_(label || PSI_LCP_UNKNOWN).text, '', '', '', '', 'PSI_LAB', now, trigger
   ];
+}
+
+/**
+ * Czy pozycja opisuje fazę LCP — komplet `subpart` + `label` + `duration` (#165).
+ *
+ * Nie sprawdzamy nazw faz. Ogólny model LCP ma cztery podczęści (TTFB, opóźnienie
+ * żądania zasobu, czas pobrania zasobu, opóźnienie renderu), a przy elemencie,
+ * który nie wymaga osobnego zasobu, fazy zasobowe się nie pojawiają. Whitelista
+ * nazw albo stała „3” zakodowałaby jedną obserwację jako kontrakt API.
+ */
+function psiLooksLikePhase_(item) {
+  if (!item || typeof item !== 'object') return false;
+  const opisane = ['subpart', 'label'].every(function (field) {
+    return String(item[field] === undefined || item[field] === null ? '' : item[field]).trim() !== '';
+  });
+  return opisane && typeof item.duration === 'number' && !isNaN(item.duration);
+}
+
+/**
+ * Wiersze faz LCP z jednej próby; pusta lista, gdy audyt ich nie niesie.
+ *
+ * Czas trwania fazy to koszt RZECZYWISTY, więc idzie do kolumny `Czas (ms)`,
+ * a kolumny oszczędności zostają puste — ta sama zasada, dla której #140
+ * rozdzielił koszt od oszczędności przy `THIRD-PARTY`.
+ *
+ * Szukamy na dwóch poziomach, bo tabela faz bywa opakowana, a kolejność pozycji
+ * względem węzła nie jest niczym zagwarantowana.
+ */
+function psiLcpPhaseRows_(audit, url, strategy, attempt, measuredAt, now, trigger) {
+  const groups = (audit && audit.details && audit.details.items) || [];
+  const rows = [];
+  const add = function (item) {
+    rows.push([
+      measuredAt, url, strategy, attempt, PSI_FINDING_LCP_PHASE,
+      cellSafeText_(item.subpart).text, cellSafeText_(item.label).text,
+      Math.round(item.duration), '', '', '', 'PSI_LAB', now, trigger
+    ]);
+  };
+
+  groups.forEach(function (group) {
+    if (psiLooksLikePhase_(group)) add(group);
+    ((group && group.items) || []).forEach(function (inner) {
+      if (psiLooksLikePhase_(inner)) add(inner);
+    });
+  });
+  return rows;
+}
+
+/** Element LCP i jego fazy z jednej udanej próby (#153, #165). */
+function psiLcpAttemptRows_(response, url, strategy, attempt, measuredAt, now, trigger) {
+  const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
+  const found = psiAuditByIds_(audits, PSI_LCP_AUDIT_IDS);
+  return [psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now, trigger)]
+    .concat(psiLcpPhaseRows_(found.audit, url, strategy, attempt, measuredAt, now, trigger));
 }
 
 function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now, trigger) {
@@ -801,7 +857,8 @@ function runPsiMeasurement_(trigger) {
             .forEach(function (row) { addressRows.push(row); });
           ok++;
           lastGood = { response: response, attempt: attempt };
-          lcpRows.push(psiLcpFindingRow_(response, entry.url, strategy, attempt, measuredAt, now, source));
+          psiLcpAttemptRows_(response, entry.url, strategy, attempt, measuredAt, now, source)
+            .forEach(function (row) { lcpRows.push(row); });
         } catch (e) {
           // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
           // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
