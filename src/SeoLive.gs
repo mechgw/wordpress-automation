@@ -40,6 +40,14 @@ const SEO_LIVE_HEADER = [
   'Oczekiwane w HTML',
   'Zakazane w HTML'
 ];
+/**
+ * Ile znaków fragmentu pokazujemy w różnicy. Fragment wolno mieć długi — limitem
+ * jest komórka — ale wpisanie go w całości do `Różnic` potrafiłoby przekroczyć ten
+ * sam limit po stronie zapisu, a `setValues` leży poza `try` obsługującym wiersz:
+ * wywróciłoby to cały przebieg, nie jeden adres.
+ */
+const SEO_LIVE_FRAGMENT_PREVIEW = 120;
+
 /** Indeksy nowych kolumn; oczekiwania przestały być ciągłym zakresem `B`–`H`. */
 const SEO_LIVE_COL_REQUIRED_HTML = 12;
 const SEO_LIVE_COL_FORBIDDEN_HTML = 13;
@@ -192,15 +200,36 @@ function seoLiveFragmentDiffs_(html, expect) {
   const diffs = [];
   (expect.requiredHtml || []).forEach(function (fragment) {
     if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) < 0) {
-      diffs.push('brak oczekiwanego fragmentu HTML: ' + seoLiveQuote_(fragment));
+      diffs.push('brak oczekiwanego fragmentu HTML: ' + seoLiveQuote_(seoLiveFragmentPreview_(fragment)));
     }
   });
   (expect.forbiddenHtml || []).forEach(function (fragment) {
     if (haystack.indexOf(seoLiveNormalizeHtml_(fragment)) >= 0) {
-      diffs.push('zakazany fragment HTML obecny: ' + seoLiveQuote_(fragment));
+      diffs.push('zakazany fragment HTML obecny: ' + seoLiveQuote_(seoLiveFragmentPreview_(fragment)));
     }
   });
   return diffs;
+}
+
+/** Fragment w różnicy skrócony do podglądu, tak jak wartość w kontrolach schema. */
+function seoLiveFragmentPreview_(value) {
+  const text = String(value === null || value === undefined ? '' : value);
+  return text.length > SEO_LIVE_FRAGMENT_PREVIEW ? text.slice(0, SEO_LIVE_FRAGMENT_PREVIEW) + '…' : text;
+}
+
+/**
+ * Treść kolumny `Różnice` przycięta do limitu komórki.
+ *
+ * Skrócenie pojedynczego fragmentu nie wystarcza: różnic bywa wiele, a suma
+ * podglądów też potrafi urosnąć. Zapis wyników leży poza `try` obsługującym
+ * pojedynczy adres, więc wyjątek z `setValues` przerwałby cały przebieg i kolejne
+ * adresy zostałyby niesprawdzone. Lepiej powiedzieć wprost, że opis został przycięty.
+ */
+function seoLiveFitCell_(text) {
+  const value = String(text === null || text === undefined ? '' : text);
+  if (value.length <= WP_CELL_CHAR_LIMIT) return value;
+  const suffix = ' … [opis skrócony do limitu komórki]';
+  return value.slice(0, WP_CELL_CHAR_LIMIT - suffix.length) + suffix;
 }
 
 /** Oczekiwania wiersza (kolumny B..H oraz M, N) w jednym obiekcie. */
@@ -349,7 +378,7 @@ function runSeoLiveCheck_() {
       summary.errors++;
     }
     const indexVerdict = index[seoLiveNormalizeUrl_(url)] || 'brak w ' + URL_INSPECTION_SHEET;
-    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, details, now, indexVerdict]]);
+    sheet.getRange(i + 2, 9, 1, 4).setValues([[result, seoLiveFitCell_(details), now, indexVerdict]]);
     // PENDING CHANGE nie jest problemem: zmiana jest znana i zatwierdzona,
     // a alert o niej byłby powtórzeniem tego, co i tak wiadomo z kolejki.
     if (result !== 'OK' && result.indexOf('PENDING CHANGE') !== 0) {

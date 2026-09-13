@@ -139,6 +139,39 @@ describe('#154: dopasowanie fragmentów', () => {
     assert.equal(wynik(gas, 2), 'OK', 'drugi adres sprawdzony normalnie');
   });
 
+  test('9a: długi fragment nie wywraca przebiegu — opis mieści się w komórce', () => {
+    // Fragment tuż pod limitem komórki jest legalny. Wpisanie go w całości do
+    // „Różnic” przekroczyłoby ten sam limit przy zapisie, a `setValues` leży poza
+    // `try` obsługującym wiersz — padłby cały przebieg, nie jeden adres.
+    const dlugi = '<div data-x="' + 'a'.repeat(49900) + '">';
+    const gas = project({
+      rows: [wiersz(URL, { required: dlugi }), wiersz(OTHER, { forbidden: MARKER })],
+      html: page()
+    });
+    const out = plain(gas.sprawdzStronyLive());
+    assert.equal(out.warnings, 1, 'pierwszy adres zgłasza regresję');
+    assert.equal(wynik(gas, 2), 'OK', 'drugi adres w ogóle został sprawdzony');
+    assert.ok(roznice(gas, 1).length <= 50000, 'opis mieści się w komórce');
+    assert.match(roznice(gas, 1), /brak oczekiwanego fragmentu HTML/);
+    assert.match(roznice(gas, 1), /…/, 'fragment pokazany jako podgląd, nie w całości');
+  });
+
+  test('9b: wiele brakujących fragmentów — suma podglądów też nie przekracza komórki', () => {
+    // Sam podgląd nie wystarcza: lista mieści się w komórce, a suma opisów już nie.
+    const lista = [];
+    for (let i = 0; i < 380; i++) lista.push('<div data-n="' + String(i) + '-' + 'b'.repeat(108) + '">');
+    const gas = project({
+      rows: [wiersz(URL, { required: lista.join('\n') }), wiersz(OTHER, { forbidden: MARKER })],
+      html: page()
+    });
+    const out = plain(gas.sprawdzStronyLive());
+
+    assert.equal(out.errors, 0, 'lista sama w sobie mieści się w limicie');
+    assert.equal(roznice(gas, 1).length, 50000, 'opis dociety dokładnie do limitu');
+    assert.match(roznice(gas, 1), /\[opis skrócony do limitu komórki\]$/);
+    assert.equal(wynik(gas, 2), 'OK', 'drugi adres sprawdzony mimo obcięcia opisu pierwszego');
+  });
+
   test('10: zgodny title nie maskuje zakazanego znacznika', () => {
     const gas = project({
       rows: [wiersz(URL, { title: 'Strona A', forbidden: MARKER })],
@@ -215,6 +248,31 @@ describe('#154: upgrade istniejącego arkusza', () => {
     });
     assert.throws(() => gas.runSeoLiveCheck_(), /nagłówek pusty, ale pod nim są dane/);
     assert.equal(gas.$sheet(SHEET)[0][COL.required] ?? '', '', 'kolumna z formułą nie została przejęta');
+  });
+
+  test('12e: arkusz z danymi, ale BEZ nagłówka — notatki w M nie stają się konfiguracją', () => {
+    // `ensureSheetWithHeader_` wstawia w takim arkuszu wiersz nad danymi i wpisuje
+    // komplet etykiet. Zajętość badana PO tym nie zobaczyłaby już konfliktu.
+    const gas = project({
+      sheet: [[URL].concat(new Array(11).fill('')).concat(['prywatna notatka'])]
+    });
+    assert.throws(() => gas.runSeoLiveCheck_(), /nagłówek pusty, ale pod nim są dane/);
+    assert.deepEqual(
+      plain(gas.$sheet(SHEET)[0]).slice(0, 12),
+      [URL].concat(new Array(11).fill('')),
+      'nagłówek nie został wpisany nad cudzymi danymi'
+    );
+    assert.equal(gas.$sheet(SHEET)[0][COL.required], 'prywatna notatka', 'notatka nietknięta');
+  });
+
+  test('12f: pusty arkusz przycięty do dwunastu kolumn — siatka szersza przed zapisem nagłówka', () => {
+    const gas = loadProject({
+      properties: {},
+      sheets: { [SHEET]: { rows: [], maxColumns: 12 } },
+      fetch: () => ({ code: 200, text: page(), headers: { 'Content-Type': 'text/html' } })
+    });
+    gas.runSeoLiveCheck_();
+    assert.deepEqual(naglowek(gas), HEADER, 'nagłówek zmieścił się zamiast wywrócić przebieg');
   });
 
   test('13: arkusz zakładany od zera dostaje pełny, czternastokolumnowy nagłówek', () => {

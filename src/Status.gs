@@ -261,6 +261,34 @@ function rangeIsEmpty_(range) {
 }
 
 /**
+ * Stan kolumn nagłówka SPRZED jakiejkolwiek zmiany.
+ *
+ * Kolejność ma tu znaczenie: `ensureSheetWithHeader_()` potrafi wstawić wiersz
+ * nad danymi arkusza bez nagłówka i wpisać komplet etykiet. Gdyby zajętość badać
+ * po nim, cudze notatki leżałyby już pod świeżo wpisaną etykietą, walidacja nie
+ * zobaczyłaby konfliktu i zaczęłaby czytać je jako konfigurację.
+ *
+ * W arkuszu bez nagłówka wiersz 1 to jeszcze dane, więc liczy się do zajętości.
+ * Kolumna poza siatką arkusza jest z definicji pusta — czytanie jej rzuciłoby
+ * wyjątkiem o zakresie zamiast dać odpowiedź.
+ */
+function headerColumnsState_(sheet, header) {
+  const maxColumns = sheet.getMaxColumns();
+  const lastRow = sheet.getLastRow();
+  const headed = lastRow >= 1 && String(sheet.getRange(1, 1).getValue() || '') === header[0];
+  const firstDataRow = headed ? 2 : 1;
+  const dataRows = lastRow - firstDataRow + 1;
+  return header.map(function (label, i) {
+    const column = i + 1;
+    if (column > maxColumns) return { label: '', usedBelow: false };
+    return {
+      label: headed ? String(sheet.getRange(1, column).getValue() || '').trim() : '',
+      usedBelow: dataRows > 0 && !rangeIsEmpty_(sheet.getRange(firstDataRow, column, dataRows, 1))
+    };
+  });
+}
+
+/**
  * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156, #154).
  *
  * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
@@ -274,39 +302,45 @@ function rangeIsEmpty_(range) {
  * nadpisałoby tych wartości, ale zaczęłoby je **czytać jako konfigurację** — to
  * nadal przejęcie cudzej kolumny, tylko cichsze.
  *
- * Konflikt zatrzymuje całą operację, zanim cokolwiek zostanie zapisane: przy
- * rozszerzeniu o dwie kolumny naraz zajęta druga nie może zostawić pierwszej
- * w połowie przejętej.
+ * Walidacja idzie PRZED jakimkolwiek zapisem, także przed założeniem nagłówka:
+ * konflikt ma zatrzymać operację, a nie zostawić arkusz w połowie zmieniony.
+ * Dotyczy to również pary kolumn — zajęta druga nie może zostawić pierwszej
+ * już przejętej.
  */
 function ensureHeaderColumns_(sheetName, header) {
+  const existing = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  if (existing) {
+    const state = headerColumnsState_(existing, header);
+    const conflicts = [];
+    state.forEach(function (column, i) {
+      if (column.label === header[i]) return;
+      if (column.label !== '') {
+        conflicts.push('kolumna ' + (i + 1) + ': jest „' + column.label + '”, oczekiwano „' + header[i] + '”');
+        return;
+      }
+      if (column.usedBelow) {
+        conflicts.push('kolumna ' + (i + 1) + ': nagłówek pusty, ale pod nim są dane — nie przejmujemy jej pod „' + header[i] + '”');
+      }
+    });
+    if (conflicts.length) {
+      throw new Error(
+        'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
+        '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
+      );
+    }
+    // Zapis nagłówka szerszego niż siatka rzuca wyjątkiem o zakresie, więc
+    // miejsce trzeba zrobić przed wejściem do `ensureSheetWithHeader_()`.
+    ensureSheetColumns_(existing, header.length);
+  }
+
   const sheet = ensureSheetWithHeader_(sheetName, header);
   ensureSheetColumns_(sheet, header.length);
   const current = sheet.getRange(1, 1, 1, header.length).getValues()[0];
-  const lastRow = sheet.getLastRow();
-  const conflicts = [];
-  const missing = [];
-
   header.forEach(function (label, i) {
-    const value = String(current[i] === undefined || current[i] === null ? '' : current[i]).trim();
-    if (value === label) return;
-    if (value !== '') {
-      conflicts.push('kolumna ' + (i + 1) + ': jest „' + value + '”, oczekiwano „' + label + '”');
-      return;
+    if (String(current[i] === undefined || current[i] === null ? '' : current[i]).trim() !== label) {
+      sheet.getRange(1, i + 1).setValue(label);
     }
-    if (lastRow > 1 && !rangeIsEmpty_(sheet.getRange(2, i + 1, lastRow - 1, 1))) {
-      conflicts.push('kolumna ' + (i + 1) + ': nagłówek pusty, ale pod nim są dane — nie przejmujemy jej pod „' + label + '”');
-      return;
-    }
-    missing.push(i);
   });
-
-  if (conflicts.length) {
-    throw new Error(
-      'Niezgodny nagłówek zakładki „' + sheetName + '”: ' + conflicts.join('; ') +
-      '. Nic nie zostało zmienione — popraw nagłówek albo zmień nazwę zakładki.'
-    );
-  }
-  missing.forEach(function (i) { sheet.getRange(1, i + 1).setValue(header[i]); });
   return sheet;
 }
 
