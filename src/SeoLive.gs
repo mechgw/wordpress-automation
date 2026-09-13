@@ -48,6 +48,18 @@ const SEO_LIVE_HEADER = [
  */
 const SEO_LIVE_FRAGMENT_PREVIEW = 120;
 
+/**
+ * Ile różnic maksymalnie w jednym mailu. Skrócenie pojedynczego opisu nie wystarcza:
+ * przy setkach monitorowanych adresów suma i tak przekracza limit rozmiaru wiadomości,
+ * a `sendImportAlert_()` łapie błąd wysyłki — więc alert przepada w całości.
+ *
+ * Różnica wobec kolejki recrawl, która tnie tak samo: tam reszta wraca w kolejnych
+ * przebiegach, bo rekomendacja zostaje rekomendacją. Tu **nie wraca** — wiersz jest już
+ * zapisany jako UWAGA, więc w następnym przebiegu nie będzie nowy. Ogon maila musi więc
+ * mówić co innego niż tam: reszta jest w arkuszu i nie przyjdzie później.
+ */
+const SEO_LIVE_MAX_EMAIL_ITEMS = 50;
+
 /** Ile znaków opisu trafia do alertu; pełna treść zostaje w arkuszu. */
 const SEO_LIVE_ALERT_DETAILS = 300;
 const SEO_LIVE_CELL_NOTE = ' … [opis skrócony do limitu komórki]';
@@ -436,13 +448,19 @@ function sprawdzStronyLiveTrigger() {
   const summary = recordJobRun_('SEO_LIVE', true, () => withScriptLock_('live check SEO', runSeoLiveCheck_));
   Logger.log(seoLiveSummaryText_(summary));
   if (summary.newProblems.length) {
+    const batch = summary.newProblems.slice(0, SEO_LIVE_MAX_EMAIL_ITEMS);
+    const rest = summary.newProblems.length - batch.length;
+    const tail = [
+      '',
+      'Pozostałe wiersze z UWAGA/BŁĄD z poprzednich dni nie są powtarzane; pełna lista w arkuszu „' + SEO_LIVE_SHEET + '”.'
+    ];
+    if (rest > 0) {
+      tail.unshift('… i ' + rest + ' kolejnych nowych rozbieżności — są w arkuszu i NIE wrócą w następnym mailu.');
+    }
     sendImportAlert_('Live SEO: ' + summary.newProblems.length + ' nowa(e) rozbieżność(ci)', [
       'Codzienny live check znalazł rozbieżności, których poprzednio nie było:',
       ''
-    ].concat(summary.newProblems.map(p => '- ' + p)).concat([
-      '',
-      'Pozostałe wiersze z UWAGA/BŁĄD z poprzednich dni nie są powtarzane; pełna lista w arkuszu „' + SEO_LIVE_SHEET + '”.'
-    ]));
+    ].concat(batch.map(p => '- ' + p)).concat(tail));
   }
   return summary;
 }

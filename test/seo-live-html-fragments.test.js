@@ -193,6 +193,28 @@ describe('#154: dopasowanie fragmentów', () => {
     assert.ok(roznice(gas, 1).length > 2000, 'w arkuszu zostaje pełniejszy opis');
   });
 
+  test('9d: setki nowych różnic — mail przycięty, z jawnym ogonem o reszcie', () => {
+    // Skrócenie pojedynczego opisu nie wystarcza: suma też przekracza limit wiadomości,
+    // a błąd wysyłki jest łapany — alert przepada w całości, choć każdy wiersz z osobna
+    // byłby krótki. Ogon mówi co innego niż w kolejce recrawl: reszta NIE wróci.
+    const adresy = [];
+    for (let i = 0; i < 120; i++) adresy.push(wiersz('https://www.example.pl/p' + i + '/', { forbidden: MARKER }));
+    const gas = project({
+      rows: adresy,
+      properties: { ALERT_EMAIL: 'alerty@example.pl' },
+      html: page(MARKER)
+    });
+
+    const summary = plain(gas.sprawdzStronyLiveTrigger());
+
+    assert.equal(summary.warnings, 120, 'wszystkie wiersze zgłaszają regresję');
+    assert.equal(gas.$mails.length, 1);
+    const body = String(gas.$mails[0].body || gas.$mails[0][2] || '');
+    assert.equal((body.match(/^- https:/gm) || []).length, 50, 'w mailu pięćdziesiąt pozycji');
+    assert.match(body, /… i 70 kolejnych nowych rozbieżności — są w arkuszu i NIE wrócą/);
+    assert.match(String(gas.$mails[0].subject || ''), /Live SEO: 120 nowa\(e\)/, 'temat podaje pełną liczbę, nie przyciętą');
+  });
+
   test('10: zgodny title nie maskuje zakazanego znacznika', () => {
     const gas = project({
       rows: [wiersz(URL, { title: 'Strona A', forbidden: MARKER })],
