@@ -728,7 +728,7 @@ function addStatusMenu_() {
     .addItem('Diagnostyka systemu (tylko odczyt)', 'diagnostykaSystemu')
     .addSeparator()
     .addItem('Zajętość arkusza', 'pokazZajetoscArkusza')
-    .addItem('Wyczyść stare snapshoty i wyniki', 'wyczyscStareSnapshotyIWyniki')
+    .addItem('Wyczyść stare snapshoty, wyniki i próby PSI', 'wyczyscStareSnapshotyIWyniki')
     .addItem('Przytnij puste wiersze', 'przytnijPusteWiersze')
     .addSeparator()
     .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')

@@ -99,6 +99,91 @@ function planSnapshotCleanup_(now) {
   return { remove: remove, keep: keep, pages: Object.keys(byPage).length };
 }
 
+/**
+ * Pary (adres, strategia) z „PERFORMANCE SUMMARY”, dla których istnieje mediana,
+ * zgrupowane po kanonicznym znaczniku przebiegu.
+ */
+function summaryCoverage_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(PERF_SUMMARY_SHEET);
+  const covered = {};
+  if (!sheet || sheet.getLastRow() < 2) return covered;
+
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, PERF_SUMMARY_HEADER.length).getValues()
+    .forEach(function (row) {
+      if (String(row[1] || '') === '') return;
+      covered[perfMeasurementKey_(row[0]) + ' | ' + String(row[1]) + ' | ' + String(row[2])] = true;
+    });
+  return covered;
+}
+
+/**
+ * Plan przycinania surowych prób „PAGESPEED LAB” (#152).
+ *
+ * Zostaje PERF_LAB_KEEP_MEASUREMENTS najnowszych pomiarów. Starszy pomiar wolno
+ * usunąć dopiero wtedy, gdy **dla tego samego znacznika** istnieją mediany w
+ * „PERFORMANCE SUMMARY” dla każdej pary (adres, strategia), która miała w nim udaną
+ * próbę. Bez tego przycinanie kasowałoby jedyny nośnik wyniku — czyli dokładnie to,
+ * czemu agregat miał zapobiec.
+ *
+ * Pomiar bez pokrycia zostaje w całości; nie usuwamy „przy okazji” tych par, które
+ * akurat medianę mają, bo niepełny przebieg w surowych próbach jest gorszy niż pełny.
+ */
+function planLabCleanup_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(PERF_LAB_SHEET);
+  const empty = { remove: [], keep: 0, measurements: 0, trimmed: 0, blocked: 0, blockedRows: 0 };
+  if (!sheet || sheet.getLastRow() < 2) return empty;
+
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, PERF_LAB_HEADER.length).getValues();
+  const covered = summaryCoverage_();
+  const order = [];
+  const byMeasurement = {};
+
+  values.forEach(function (row, i) {
+    if (String(row[1] || '') === '') return;
+    const key = perfMeasurementKey_(row[0]);
+    if (!byMeasurement[key]) {
+      byMeasurement[key] = { rows: [], pairs: {} };
+      order.push(key);
+    }
+    byMeasurement[key].rows.push(i + 2);
+    byMeasurement[key].pairs[String(row[1]) + ' | ' + String(row[2])] = true;
+  });
+
+  // Najnowsze pierwsze. Sortujemy po kanonicznym znaczniku, bo kolejność wierszy
+  // w zakładce nie jest chronologią — zapis idzie raz na adres (#151).
+  const newestFirst = order.slice().sort().reverse();
+  const remove = [];
+  let keep = 0;
+  let trimmed = 0;
+  let blocked = 0;
+  let blockedRows = 0;
+
+  newestFirst.forEach(function (key, index) {
+    const measurement = byMeasurement[key];
+    if (index < PERF_LAB_KEEP_MEASUREMENTS) {
+      keep += measurement.rows.length;
+      return;
+    }
+    const missing = Object.keys(measurement.pairs).some(function (pair) {
+      return covered[key + ' | ' + pair] !== true;
+    });
+    if (missing) {
+      blocked++;
+      blockedRows += measurement.rows.length;
+      keep += measurement.rows.length;
+      return;
+    }
+    trimmed++;
+    measurement.rows.forEach(function (row) { remove.push(row); });
+  });
+
+  remove.sort(function (a, b) { return a - b; });
+  return {
+    remove: remove, keep: keep, measurements: order.length,
+    trimmed: trimmed, blocked: blocked, blockedRows: blockedRows
+  };
+}
+
 /** Plan czyszczenia wyników: wszystko starsze niż RESULTS_KEEP_DAYS. */
 function planResultsCleanup_(now) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(WP_RESULTS_SHEET);
@@ -372,14 +457,31 @@ function pokazZajetoscArkusza() {
   const now = new Date();
   const snapshots = planSnapshotCleanup_(now);
   const results = planResultsCleanup_(now);
+  const lab = planLabCleanup_();
   lines.push('');
-  lines.push('Do wyczyszczenia: ' + snapshots.remove.length + ' snapshot(ów) i ' + results.remove.length + ' wynik(ów).');
+  lines.push('Do wyczyszczenia: ' + snapshots.remove.length + ' snapshot(ów), ' + results.remove.length +
+    ' wynik(ów) i ' + lab.remove.length + ' surowych prób PSI.');
   lines.push('Snapshot młodszy niż ' + SNAPSHOT_KEEP_MIN_DAYS + ' dni zostaje zawsze, podobnie ' +
     SNAPSHOT_KEEP_PER_PAGE + ' najnowszych na stronę.');
   lines.push('Wyniki starsze niż ' + RESULTS_KEEP_DAYS + ' dni są usuwane.');
-  lines.push('Czyszczenie uruchamia „Wyczyść stare snapshoty i wyniki”.');
+  lines.push(labPolicyLine_(lab));
+  lines.push('Czyszczenie uruchamia „Wyczyść stare snapshoty, wyniki i próby PSI”.');
   SpreadsheetApp.getUi().alert(lines.join('\n'));
   return usage;
+}
+
+/**
+ * Jedno zdanie o tym, co retencja surowych prób zrobi i czego NIE zrobi.
+ *
+ * Liczba zablokowanych pomiarów jest tu najważniejsza: bez niej operator widzi
+ * „usunięto zero” i nie wie, czy polityka nie działa, czy właśnie chroni dane.
+ */
+function labPolicyLine_(lab) {
+  const base = 'Surowe próby PSI: zostaje ' + PERF_LAB_KEEP_MEASUREMENTS + ' najnowszych pomiarów z ' +
+    lab.measurements + '; mediany w „' + PERF_SUMMARY_SHEET + '” nie są usuwane nigdy.';
+  if (!lab.blocked) return base;
+  return base + String.fromCharCode(10) + lab.blocked + ' starszych pomiarów (' + lab.blockedRows +
+    ' wierszy) zostaje mimo wieku: nie mają median w agregacie, więc surowe próby są jedynym nośnikiem wyniku.';
 }
 
 /**
@@ -391,24 +493,26 @@ function wyczyscStareSnapshotyIWyniki() {
   const now = new Date();
   const snapshots = planSnapshotCleanup_(now);
   const results = planResultsCleanup_(now);
+  const lab = planLabCleanup_();
+  const NEWLINE = String.fromCharCode(10);
 
-  if (!snapshots.remove.length && !results.remove.length) {
-    ui.alert('Nie ma czego czyścić. ' + sheetUsageLine_());
-    return { snapshots: 0, results: 0 };
+  if (!snapshots.remove.length && !results.remove.length && !lab.remove.length) {
+    ui.alert('Nie ma czego czyścić. ' + sheetUsageLine_() + NEWLINE + NEWLINE + labPolicyLine_(lab));
+    return { snapshots: 0, results: 0, lab: 0 };
   }
 
   const answer = ui.alert(
-    'Usunąć nieodwracalnie ' + snapshots.remove.length + ' snapshot(ów) i ' +
-    results.remove.length + ' wynik(ów)?\n\n' +
-    'Zostanie ' + snapshots.keep + ' snapshot(ów) dla ' + snapshots.pages + ' stron(y) i ' +
-    results.keep + ' wynik(ów).\n' +
+    'Usunąć nieodwracalnie ' + snapshots.remove.length + ' snapshot(ów), ' +
+    results.remove.length + ' wynik(ów) i ' + lab.remove.length + ' surowych prób PSI?' + NEWLINE + NEWLINE +
+    'Zostanie ' + snapshots.keep + ' snapshot(ów) dla ' + snapshots.pages + ' stron(y), ' +
+    results.keep + ' wynik(ów) i ' + lab.keep + ' surowych prób.' + NEWLINE +
     'Snapshot młodszy niż ' + SNAPSHOT_KEEP_MIN_DAYS + ' dni oraz ' + SNAPSHOT_KEEP_PER_PAGE +
-    ' najnowszych na stronę nie są usuwane.',
+    ' najnowszych na stronę nie są usuwane.' + NEWLINE + labPolicyLine_(lab),
     ui.ButtonSet.YES_NO
   );
   if (answer !== ui.Button.YES) {
     ui.alert('Anulowano. Nic nie zostało usunięte.');
-    return { snapshots: 0, results: 0 };
+    return { snapshots: 0, results: 0, lab: 0 };
   }
 
   const ss = SpreadsheetApp.getActive();
@@ -418,7 +522,11 @@ function wyczyscStareSnapshotyIWyniki() {
   const removedResults = results.remove.length
     ? deleteSheetRows_(ss.getSheetByName(WP_RESULTS_SHEET), results.remove)
     : 0;
+  const removedLab = lab.remove.length
+    ? deleteSheetRows_(ss.getSheetByName(PERF_LAB_SHEET), lab.remove)
+    : 0;
 
-  ui.alert('Usunięto ' + removedSnapshots + ' snapshot(ów) i ' + removedResults + ' wynik(ów).\n' + sheetUsageLine_());
-  return { snapshots: removedSnapshots, results: removedResults };
+  ui.alert('Usunięto ' + removedSnapshots + ' snapshot(ów), ' + removedResults + ' wynik(ów) i ' +
+    removedLab + ' surowych prób PSI.' + NEWLINE + sheetUsageLine_());
+  return { snapshots: removedSnapshots, results: removedResults, lab: removedLab };
 }
