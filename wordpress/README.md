@@ -21,7 +21,7 @@ The write endpoint copies presence as well as value. If the source page does not
 
 `seo-meta-rest-bridge.php` implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-meta` and the read-only REST field carrying the Rank Math SEO title and description. Until #103 this bridge existed only as a snippet inside the installation, outside version control, which is why its field name still carried a company-derived prefix.
 
-The field is registered under two names from a single definition: `wpa_rank_math` (target) and `cc_rank_math` (historical, kept only while installations catch up). The script reads the target name and falls back to the historical one, so the snippet and the script can be updated in either order.
+The field is registered as `wpa_rank_math`, matching the function prefix in this file. A historical name carrying a company-derived prefix was removed once the installation confirmed it exposes the target name (#103); *WordPress → Test Rank Math bridge* reports which name an installation serves.
 
 Design notes:
 
@@ -34,7 +34,7 @@ Design notes:
 
 ## Rank Math robots bridge
 
-The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and a read-only REST field with the robots value on pages. The field is registered under two names: `wpa_rank_math_robots` (target name, matching the function prefix in this file) and `cc_rank_math_robots` (historical name, kept only while installations catch up). The script reads the target name and falls back to the historical one; *WordPress → Test Rank Math bridge* says which one the installation exposes. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
+The same snippet also implements `POST /wp-json/<WP_REST_NAMESPACE>/v1/seo-robots` and a read-only REST field with the robots value on pages, registered as `wpa_rank_math_robots` — the name matching the function prefix in this file. *WordPress → Test Rank Math bridge* reports which name an installation serves; a snippet older than #103 exposes only the removed historical name and the script will say the field is missing. Together they let `UPDATE_RANK_MATH_FIELD` set the field `rank_math_robots`, which the older `seo-meta` bridge cannot do (it handles only the SEO title and description).
 
 Design notes:
 

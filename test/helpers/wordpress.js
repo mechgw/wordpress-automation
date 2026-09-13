@@ -45,10 +45,6 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       // Robots wystawia osobne pole REST z page-layout-rest-bridge.php; hasRobots:false
       // odwzorowuje instalację ze starym snippetem, bez obsługi robots.
       robots: p.robots === undefined ? '' : String(p.robots), hasRobots: p.hasRobots !== false,
-      // legacyRobotsField: instalacja ze starym snippetem, wystawiająca pole pod
-      // historyczną nazwą cc_rank_math_robots (#103).
-      legacyRobotsField: Boolean(p.legacyRobotsField),
-      legacyMetaField: Boolean(p.legacyMetaField),
       // Co NAPRAWDĘ serwuje publiczna strona. Zwykle to samo co post meta, ale
       // stalePageCache odwzorowuje produkcyjny przypadek z #88: meta zapisane,
       // a strona nadal oddaje stary znacznik, bo zapis przez REST nie unieważnił
@@ -66,13 +62,13 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
   /** Nazwa pola z tytułem i opisem: docelowa albo historyczna (#103). */
   const rankMathField_ = p => {
     const value = { title: p.rankMath.title, description: p.rankMath.description };
-    return p.legacyMetaField ? { cc_rank_math: value } : { wpa_rank_math: value };
+    return { wpa_rank_math: value };
   };
   const pageJson = p => ({
     id: p.id, slug: p.slug, status: p.status, link: p.link,
     title: { raw: p.title, rendered: p.title }, excerpt: { raw: p.excerpt, rendered: p.excerpt }, content: { raw: p.content, rendered: p.content },
     modified: p.modified, ...(p.hasRankMath ? rankMathField_(p) : {}),
-    ...(p.hasRobots ? (p.legacyRobotsField ? { cc_rank_math_robots: p.robots } : { wpa_rank_math_robots: p.robots }) : {})
+    ...(p.hasRobots ? { wpa_rank_math_robots: p.robots } : {})
   });
   const mediaJson = m => ({
     id: m.id, slug: m.slug, status: m.status, link: m.source_url, title: { raw: m.title, rendered: m.title }, alt_text: m.alt_text,

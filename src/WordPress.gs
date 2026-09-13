@@ -229,7 +229,7 @@ function testWpConnection() {
 
 function testRankMathBridge() {
   const response = wpFetch_(
-    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots'
+    '/wp-json/wp/v2/pages?context=edit&per_page=1&_fields=id,slug,wpa_rank_math,wpa_rank_math_robots'
   );
 
   if (response.code < 200 || response.code >= 300) {
@@ -522,7 +522,7 @@ function getPageBySlug_(slug, commandId) {
     '/wp-json/wp/v2/pages' +
     '?slug=' + encodeURIComponent(slug) +
     '&context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,wpa_rank_math,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -556,7 +556,7 @@ function getPageRawById_(id, requireRankMath = false) {
   const path =
     '/wp-json/wp/v2/pages/' + encodeURIComponent(id) +
     '?context=edit' +
-    '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+    '&_fields=id,slug,status,link,title,excerpt,modified,content,wpa_rank_math,wpa_rank_math_robots';
 
   const response = wpFetch_(path);
 
@@ -607,7 +607,7 @@ function getAllPages_(commandId) {
         '&page=' + pageNo +
         '&orderby=id' +
         '&order=asc' +
-        '&_fields=id,slug,status,link,title,excerpt,modified,content,cc_rank_math,wpa_rank_math,cc_rank_math_robots,wpa_rank_math_robots';
+        '&_fields=id,slug,status,link,title,excerpt,modified,content,wpa_rank_math,wpa_rank_math_robots';
 
       const response = wpFetch_(path);
 
@@ -1019,14 +1019,17 @@ function getRankMathData_(page) {
 }
 
 /**
- * Nazwy pola REST z robots, w kolejności preferencji (#103).
+ * Nazwa pola REST z robots (#103).
  *
- * `wpa_rank_math_robots` jest nazwą docelową, spójną z prefiksem funkcji
- * w moście. `cc_rank_math_robots` to nazwa historyczna: repozytorium jest
- * publiczne, a ten prefiks pochodzi od nazwy firmy. Czytamy obie, dopóki
- * snippet w WordPressie nie zostanie zaktualizowany.
+ * Lista, a nie pojedyncza stała, bo ten sam kształt obsługuje przyszłą zmianę
+ * nazwy: czytamy pierwszą obecną, więc okres przejściowy sprowadza się
+ * do dopisania nazwy na końcu.
+ *
+ * Historyczna nazwa z prefiksem od skrótu firmy została usunięta po tym, jak
+ * instalacja potwierdziła wystawianie nazwy docelowej (*WordPress → Test Rank
+ * Math bridge*).
  */
-const WP_ROBOTS_FIELDS = ['wpa_rank_math_robots', 'cc_rank_math_robots'];
+const WP_ROBOTS_FIELDS = ['wpa_rank_math_robots'];
 
 /**
  * Nagłówki, które mówią, **która warstwa** oddała tę odpowiedź (#88).
@@ -1134,15 +1137,11 @@ function verifyRobotsOnPage_(page, expectedRobots) {
 function robotsBridgeStatusText_(page) {
   const field = robotsFieldName_(page);
   if (!field) return 'BRAK – zaktualizuj snippet page-layout-rest-bridge.php w WordPressie';
-  if (field === WP_ROBOTS_FIELDS[0]) return 'OK (pole ' + field + ')';
-  return 'OK, ale przez starą nazwę pola (' + field + '). Wgraj nowszy snippet page-layout-rest-bridge.php.';
+  return 'OK (pole ' + field + ')';
 }
 
-/**
- * Nazwy pola REST z tytułem i opisem SEO, w kolejności preferencji (#103).
- * Ta sama zasada co przy robots: `wpa_` jest docelowe, `cc_` historyczne.
- */
-const WP_RANK_MATH_META_FIELDS = ['wpa_rank_math', 'cc_rank_math'];
+/** Nazwa pola REST z tytułem i opisem SEO; ta sama zasada co przy robots (#103). */
+const WP_RANK_MATH_META_FIELDS = ['wpa_rank_math'];
 
 /** Która z nazw pola z tytułem i opisem jest obecna w odpowiedzi; '' gdy żadna. */
 function rankMathFieldName_(page) {
