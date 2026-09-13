@@ -132,6 +132,62 @@ describe('#152: twarda reguła — brak mediany blokuje usunięcie', () => {
   });
 });
 
+describe('#152: pokrycie znaczy użyteczna mediana, nie sam wiersz', () => {
+  test('wiersz agregatu z pustą medianą nie odblokowuje usunięcia', () => {
+    // Ręczna edycja albo przerwany zapis zostawia wiersz bez wartości. Uznanie go
+    // za pokrycie pozwoliłoby skasować surowe próby bezpowrotnie — a to jedyny
+    // nośnik wyniku, skoro mediany nie ma.
+    const h = historia(KEEP + 1);
+    h.summary[0][4] = '';
+    const gas = project(h);
+    const plan = plain(gas.planLabCleanup_());
+    assert.deepEqual(plan.remove, []);
+    assert.equal(plan.blocked, 1);
+  });
+
+  test('mediana zero jest poprawna — CLS bywa zerem', () => {
+    const h = historia(KEEP + 1);
+    h.summary[0][4] = 0;
+    const gas = project(h);
+    assert.equal(plain(gas.planLabCleanup_()).trimmed, 1, 'zero to wartość, nie brak');
+  });
+
+  test('mediana nieliczbowa nie odblokowuje usunięcia', () => {
+    const h = historia(KEEP + 1);
+    h.summary[0][4] = 'błąd';
+    const gas = project(h);
+    assert.deepEqual(plain(gas.planLabCleanup_()).remove, []);
+  });
+
+  test('wiersz agregatu bez znacznika albo bez strategii nie liczy się jako pokrycie', () => {
+    const h = historia(KEEP + 1);
+    h.summary[0][2] = '';
+    const gas = project(h);
+    assert.deepEqual(plain(gas.planLabCleanup_()).remove, []);
+  });
+});
+
+describe('#152: plan po potwierdzeniu nie obejmuje więcej, niż pokazał dialog', () => {
+  test('ograniczenie do potwierdzonych znaczników', () => {
+    // Między dialogiem a usunięciem może wejść kolejny pomiar i wypchnąć starszy poza
+    // próg. Świeży plan usunąłby go wtedy bez pytania — i to jest zabronione.
+    const h = historia(KEEP + 2);
+    const gas = project(h);
+    const pelny = plain(gas.planLabCleanup_());
+    assert.equal(pelny.trimmed, 2, 'bez ograniczeń dwa przebiegi');
+
+    const ograniczony = plain(gas.planLabCleanup_([pelny.keys[0]]));
+    assert.equal(ograniczony.trimmed, 1, 'tylko potwierdzony przebieg');
+    assert.deepEqual(ograniczony.keys, [pelny.keys[0]]);
+    assert.equal(ograniczony.keep, pelny.keep + 3, 'reszta policzona jako zostająca');
+  });
+
+  test('nieznany znacznik nie usuwa niczego', () => {
+    const gas = project(historia(KEEP + 2));
+    assert.deepEqual(plain(gas.planLabCleanup_(['2020-01-01 00:00:00'])).remove, []);
+  });
+});
+
 describe('#152: znacznik przebiegu po obu stronach', () => {
   test('data w surowych próbach i tekst w agregacie to ten sam przebieg', () => {
     // Realny stan produkcji: „PAGESPEED LAB” trzyma Pomiar datą, a
@@ -179,5 +235,43 @@ describe('#152: komunikat mówi, czego NIE usunięto', () => {
     const plan = plain(gas.planLabCleanup_());
     assert.deepEqual(plan.remove, []);
     assert.equal(plan.measurements, 0);
+  });
+});
+
+describe('#152: usuwanie idzie pod tą samą blokadą co pomiar', () => {
+  const SNAP = 'WP SNAPSHOTS';
+  const RES = 'WP RESULTS';
+
+  const zProbami = (opts = {}) => {
+    const h = historia(KEEP + 1);
+    return loadProject(Object.assign({
+      properties: {},
+      sheets: {
+        [LAB]: [LAB_HEADER].concat(h.lab),
+        [SUMMARY]: [SUMMARY_HEADER].concat(h.summary),
+        [SNAP]: [['id', 'created_at', 'page']],
+        [RES]: [['id', 'done_at']]
+      },
+      fetch: () => ({ code: 404, text: '{}' })
+    }, opts));
+  };
+
+  test('usunięcie zakłada blokadę i ją zwalnia', () => {
+    const gas = zProbami();
+    gas.$ui.$answer = 'YES';
+    const out = plain(gas.wyczyscStareSnapshotyIWyniki());
+
+    assert.equal(out.lab, 3, 'trzy wiersze najstarszego przebiegu');
+    const operacje = gas.$lock.map(entry => entry[0]);
+    assert.ok(operacje.indexOf('tryLock') >= 0, 'blokada założona: ' + JSON.stringify(gas.$lock));
+    assert.equal(operacje[operacje.length - 1], 'releaseLock', 'i zwolniona');
+  });
+
+  test('zajęta blokada nie usuwa niczego', () => {
+    const gas = zProbami({ lockHeld: true });
+    gas.$ui.$answer = 'YES';
+
+    assert.throws(() => gas.wyczyscStareSnapshotyIWyniki(), /Inne uruchomienie jeszcze trwa/);
+    assert.equal(gas.$sheet(LAB).length, 1 + (KEEP + 1) * 3, 'wszystkie wiersze na miejscu');
   });
 });
