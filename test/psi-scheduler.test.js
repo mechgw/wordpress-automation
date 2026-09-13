@@ -135,8 +135,14 @@ describe('#156: unikalność przebiegu', () => {
 
     const rows = labRows(gas);
     const znaczniki = [...new Set(rows.map(r => String(r[0])))];
-    assert.ok(znaczniki.indexOf('2026-09-13 10:00') >= 0, 'wiersz historyczny nietknięty');
-    const nowe = znaczniki.filter(z => z !== '2026-09-13 10:00');
+    // Po #168 zapis sprowadza `Pomiar` do jednej postaci, także w wierszach
+    // zachowanych: ta sama chwila, zapisana kanonicznie, nie osobny przebieg.
+    assert.ok(znaczniki.indexOf('2026-09-13 10:00:00') >= 0, 'wiersz historyczny przetrwał');
+    assert.equal(
+      rows.filter(r => String(r[0]).indexOf('2026-09-13 10:00') === 0).length, 1,
+      'jeden wiersz, nie dwie postaci tego samego znacznika'
+    );
+    const nowe = znaczniki.filter(z => z !== '2026-09-13 10:00:00');
     assert.equal(nowe.length, 1);
     assert.match(nowe[0], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'nowy znacznik ma sekundy');
   });
@@ -250,8 +256,8 @@ describe('#156: uzupełnienie nagłówka istniejącej zakładki', () => {
     gas.pomiarWydajnosciCykliczny();
 
     assert.equal(gas.$sheet(LAB)[0][8], 'Wyzwolenie', 'etykieta dopisana');
-    const historyczny = labRows(gas).find(r => String(r[0]) === '2026-09-13 10:00');
-    assert.ok(historyczny, 'wiersz sprzed zmiany schematu przetrwał');
+    const historyczny = labRows(gas).find(r => String(r[0]) === '2026-09-13 10:00:00');
+    assert.ok(historyczny, 'wiersz sprzed zmiany schematu przetrwał (znacznik kanoniczny, #168)');
     assert.equal(historyczny[5], 1111, 'z nietkniętą wartością');
   });
 

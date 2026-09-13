@@ -30,7 +30,7 @@ const ROOT = path.resolve(__dirname, '..', '..', 'src');
 const SCRIPT_TIME_ZONE = 'Europe/Warsaw';
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs', 'PerformanceMigration.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -80,10 +80,33 @@ function parseA1(a1, gridRows = 1) {
  * A sheet is a 2D grid with 1-based semantics (grid[r-1][c-1]); the fixture
  * rows start at row 1. Cells outside the grid read as ''.
  */
-function makeSheet(name, initialRows, sheetId = 0, limits = null) {
+function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) {
   const grid = initialRows.map(r => r.slice());
   // Siatka formuł, domyślnie pusta; fixture może podać ją przez { formulas }.
   const formulas = ((limits && limits.formulas) || []).map(r => r.slice());
+  // Formaty liczbowe komórek; '' znaczy „automatyczny”, '@' — zwykły tekst.
+  const numberFormats = [];
+  /**
+   * Arkusze Google PARSUJĄ zapisany łańcuch: '2026-09-13 13:14:11' w komórce
+   * o formacie automatycznym staje się datą i wraca z getValues() jako Date.
+   * Format '@' to wyłącza. To jest mechanizm #168, więc bez niego test kolejności
+   * „format przed zapisem” przechodziłby w obie strony i nie dowodził niczego.
+   *
+   * Włączane per zakładka przez fixture ({ rows, parsesOnWrite: true }), bo
+   * włączenie globalne zmieniłoby znaczenie fixture'ów w całej istniejącej suite.
+   */
+  const parsesOnWrite = Boolean(limits && limits.parsesOnWrite);
+  const DATE_LIKE = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+  const parseCell = (value, row, col) => {
+    if (!parsesOnWrite || typeof value !== 'string') return value;
+    if (String((numberFormats[row - 1] || [])[col - 1] || '') === '@') return value;
+    const m = DATE_LIKE.exec(value);
+    if (!m) return value;
+    // Data MUSI powstać w realm-ie VM: `value instanceof Date` w źródłach jest
+    // fałszem dla daty z realm-u testu.
+    const D = (realm && realm.Date) || Date;
+    return new D(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  };
   // Arkusz Google ma skończoną siatkę: nowy ma 1000 wierszy i 26 kolumn, a zapis
   // poza nią rzuca wyjątkiem zamiast ją powiększyć. Stub to odwzorowuje, bo
   // inaczej „zapis 5000 wierszy do nowego arkusza” przechodzi w teście i pada
@@ -157,14 +180,14 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
     setValue(value) {
       checkCell(value, row, col);
       ensure(row, col);
-      grid[row - 1][col - 1] = value;
+      grid[row - 1][col - 1] = parseCell(value, row, col);
       return this;
     },
     setValues(values) {
       values.forEach((line, i) => line.forEach((v, j) => checkCell(v, row + i, col + j)));
       values.forEach((line, i) => line.forEach((v, j) => {
         ensure(row + i, col + j);
-        grid[row + i - 1][col + j - 1] = v;
+        grid[row + i - 1][col + j - 1] = parseCell(v, row + i, col + j);
       }));
       return this;
     },
@@ -176,7 +199,27 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
       }
       return this;
     },
-    setNumberFormat() { return this; },
+    // Format komórki jest w tym stubie stanem, nie no-opem: od niego zależy, czy
+    // zapisany łańcuch zostanie tekstem, czy arkusz sparsuje go na datę (#168).
+    setNumberFormat(format) {
+      for (let r = row; r < row + rows; r++) {
+        while (numberFormats.length < r) numberFormats.push([]);
+        const line = numberFormats[r - 1];
+        while (line.length < col + cols - 1) line.push('');
+        for (let c = col; c < col + cols; c++) line[c - 1] = String(format);
+      }
+      return this;
+    },
+    getNumberFormat: () => String((numberFormats[row - 1] || [])[col - 1] || ''),
+    getNumberFormats: () => {
+      const out = [];
+      for (let r = row; r < row + rows; r++) {
+        const line = [];
+        for (let c = col; c < col + cols; c++) line.push(String((numberFormats[r - 1] || [])[c - 1] || ''));
+        out.push(line);
+      }
+      return out;
+    },
     setFontWeight() { return this; },
     setBackground() { return this; },
     setFontColor() { return this; },
@@ -222,12 +265,13 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
     getMaxRows: () => maxRows,
     getMaxColumns: () => maxCols,
     insertRowsAfter(after, howMany = 1) { maxRows += howMany; return sheet; },
-    insertRowBefore(row) { grid.splice(row - 1, 0, []); return this; },
+    insertRowBefore(row) { grid.splice(row - 1, 0, []); numberFormats.splice(row - 1, 0, []); return this; },
     insertColumnsAfter(after, howMany = 1) { maxCols += howMany; return sheet; },
     // Usunięcie wierszy zmniejsza też siatkę, tak jak w Arkuszach; bez tego
     // przycinanie pustego przydziału (#118) wyglądałoby w testach na nieskuteczne.
     deleteRows(row, n = 1) {
       grid.splice(row - 1, n);
+      numberFormats.splice(row - 1, n);
       maxRows = Math.max(1, maxRows - n);
       return this;
     },
@@ -249,13 +293,19 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null) {
 /** Builds a SpreadsheetApp stub from { sheetName: rows }; rows start at row 1. */
 function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT_TIME_ZONE) {
   const instances = new Map();
+  // Konstruktor Date z realm-u VM; podstawia go loadProject, bo tylko data
+  // utworzona w tym samym realm-ie przechodzi `instanceof Date` w źródłach.
+  const realm = { Date };
   // Fixture może podać { rows, maxRows, maxColumns } zamiast samej tablicy wierszy,
   // żeby odwzorować arkusz o ograniczonej siatce.
   const limits = {};
   Object.keys(sheets).forEach(name => {
     const value = sheets[name];
     if (value && !Array.isArray(value) && typeof value === 'object') {
-      limits[name] = { maxRows: value.maxRows, maxColumns: value.maxColumns, formulas: value.formulas };
+      limits[name] = {
+        maxRows: value.maxRows, maxColumns: value.maxColumns,
+        formulas: value.formulas, parsesOnWrite: value.parsesOnWrite
+      };
       sheets[name] = value.rows || [];
     }
   });
@@ -267,7 +317,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
     if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
     if (!instances.has(name)) {
       if (!ids.has(name)) ids.set(name, nextId++);
-      instances.set(name, makeSheet(name, sheets[name], ids.get(name), limits[name]));
+      instances.set(name, makeSheet(name, sheets[name], ids.get(name), limits[name], realm));
     }
     return instances.get(name);
   };
@@ -322,7 +372,8 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
     flush() {},
     $sheet: name => (sheetFor(name) || {}).$grid,
     $order: () => order.slice(),
-    $ui: ui
+    $ui: ui,
+    $realm: realm
   };
 }
 
@@ -456,6 +507,8 @@ function loadProject(opts = {}) {
   // Dates must be created inside the VM: an `instanceof Date` check in the
   // sources fails for Date objects from the test realm.
   ctx.$Date = vm.runInContext('Date', ctx);
+  // Arkusz parsujący zapisany łańcuch musi tworzyć daty w TYM realm-ie (#168).
+  if (ctx.SpreadsheetApp && ctx.SpreadsheetApp.$realm) ctx.SpreadsheetApp.$realm.Date = ctx.$Date;
   return ctx;
 }
 
