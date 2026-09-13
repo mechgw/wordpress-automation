@@ -515,7 +515,10 @@ describe('#88: weryfikacja robots na publicznej stronie', () => {
     });
     gas.processWpCommands();
     assert.equal(status(gas), 'DONE', message(gas));
-    assert.match(message(gas), /Strona na żywo potwierdza ustawienie\./);
+    assert.match(message(gas), /Strona na żywo potwierdza ustawienie \[/);
+    // Stan warstw zapisujemy także przy zgodności: to punkt odniesienia, którego
+    // przy pierwszym incydencie nie mieliśmy (#88).
+    assert.match(message(gas), /age=312; cache-control=public, max-age=604800; server=LiteSpeed; x-litespeed-cache=hit/);
   });
 
   test('strona serwująca co innego niż post meta jest błędem, a nie sukcesem', () => {
@@ -530,7 +533,18 @@ describe('#88: weryfikacja robots na publicznej stronie', () => {
     assert.match(message(gas), /publiczna strona nadal serwuje co innego/);
     assert.match(message(gas), /noindex: oczekiwano obecne, jest nieobecne/);
     assert.match(message(gas), /Post meta jest poprawne, więc to nie jest błąd zapisu/);
-    assert.match(message(gas), /pamięć podręczna strony albo CDN/);
+    // Komunikat ma **nie** kazać niszczyć dowodu: reguła operacyjna z #88 mówi wprost,
+    // żeby nie zapisywać strony w edytorze i nie czyścić cache przed zebraniem stanu.
+    assert.match(message(gas), /Stan warstw w chwili rozjazdu/);
+    // Konkretne wartości, nie sam fakt, że coś się wypisało: to one wskazują warstwę.
+    assert.match(message(gas), /x-litespeed-cache=hit/);
+    assert.match(message(gas), /age=312/);
+    assert.match(message(gas), /skopiuj go do #88, zanim cokolwiek naprawisz/);
+    assert.match(message(gas), /ręczny zapis w edytorze zostaw na koniec/);
+    assert.doesNotMatch(
+      message(gas), /otwórz stronę w edytorze i zapisz ją ręcznie/,
+      'poprzednia wersja kazała zrobić dokładnie to, czego #88 zakazuje'
+    );
   });
 
   test('dyrektywy dokładane przez Rank Math nie są rozjazdem', () => {
