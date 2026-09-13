@@ -236,44 +236,47 @@ describe('#162: kompletność katalogu arkuszy', () => {
 
   // Druga, niezależna reguła. Śledzenie wywołań zawsze będzie miało margines — audyt
   // pokazał kolejno: opakowania, `insertSheet` i funkcje strzałkowe. Ta reguła nie pyta,
-  // JAK zakładka powstaje: w tym projekcie każda ma stałą `*_SHEET`, więc porównanie
-  // stałych z katalogiem łapie nową zakładkę niezależnie od kształtu kodu.
+  // JAK zakładka powstaje: w tym projekcie każda ma stałą `*_SHEET`.
   //
-  // Wzorzec łapie wyłącznie NAZWĘ stałej; wartość bierzemy z kontekstu VM, więc
-  // cudzysłów, odstępy i łamanie wiersza nie mają znaczenia — wcześniejsza wersja
-  // wymagała apostrofów i przepuszczała `const X_SHEET = "X";` (audyt #170).
-  const SHEET_CONSTANT = /(?:^|[^\w$.])const\s+([A-Za-z0-9_$]+_SHEET)\s*=/g;
+  // Nie patrzymy też na KSZTAŁT deklaracji — wystarczy, że nazwa gdziekolwiek występuje,
+  // a wartość bierzemy z kontekstu VM, czyli tak jak widzi ją Apps Script. Kolejne wersje
+  // tego testu przepuszczały najpierw `const X_SHEET = "X";` (inny cudzysłów), potem
+  // `const A = [], X_SHEET = 'X';` (druga deklaracja w jednej instrukcji). Dopasowywanie
+  // składni deklaracji okazało się źródłem luk, więc przestało być częścią reguły.
+  const SHEET_CONSTANT = /(?:^|[^\w$.])([A-Za-z0-9_$]+_SHEET)\b/g;
 
   test('każda stała `*_SHEET` wskazuje zakładkę z katalogu — niezależnie od sposobu zakładania', () => {
-    const constants = [];
+    const byName = new Map();
     sources.forEach(source => {
       const re = new RegExp(SHEET_CONSTANT.source, 'g');
       let m;
       while ((m = re.exec(source.code)) !== null) {
+        if (byName.has(m[1])) continue;
         let value = null;
         try {
-          const resolvedValue = gas.$get(m[1]);
-          if (typeof resolvedValue === 'string') value = resolvedValue;
+          const resolved = gas.$get(m[1]);
+          if (typeof resolved === 'string') value = resolved;
         } catch {
           value = null;
         }
-        constants.push({ file: source.file, constant: m[1], name: value });
+        byName.set(m[1], { file: source.file, name: value });
       }
     });
 
-    assert.ok(constants.length >= 20, 'znaleziono tylko ' + constants.length + ' stałych; konwencja nazw się zmieniła');
+    assert.ok(byName.size >= 20, 'znaleziono tylko ' + byName.size + ' nazw `*_SHEET`; konwencja się zmieniła');
+    const unresolved = [...byName.entries()].filter(entry => entry[1].name === null);
     assert.deepEqual(
-      constants.filter(item => item.name === null).map(item => item.file + ': ' + item.constant),
+      unresolved.map(entry => entry[1].file + ': ' + entry[0]),
       [],
-      'tych stałych nie da się rozwiązać do nazwy zakładki, więc reguła ich nie sprawdza'
+      'tych nazw nie da się rozwiązać do łańcucha, więc reguła ich nie sprawdza'
     );
-    const missing = constants
-      .filter(item => !catalog.has(item.name) && OUTSIDE_CATALOG.indexOf(item.name) < 0)
-      .map(item => item.file + ': ' + item.constant + ' → „' + item.name + '”');
+    const missing = [...byName.entries()]
+      .filter(entry => !catalog.has(entry[1].name) && OUTSIDE_CATALOG.indexOf(entry[1].name) < 0)
+      .map(entry => entry[1].file + ': ' + entry[0] + ' → „' + entry[1].name + '”');
     assert.deepEqual(
       missing, [],
       'te zakładki mają stałą w źródłach, ale nie mają wpisu w sheetCatalog_(). ' +
-      'Ta reguła nie zależy od tego, jak zakładka jest zakładana — wystarczy, że kod ją zna.'
+      'Ta reguła nie zależy od tego, jak zakładka jest zakładana ani jak zadeklarowana.'
     );
   });
 
