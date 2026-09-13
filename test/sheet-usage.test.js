@@ -132,7 +132,7 @@ describe('#101: czyszczenie wymaga potwierdzenia', () => {
   test('odpowiedź NO nie usuwa niczego', () => {
     const gas = project(oldSnapshots(), [res('R1', 400)], 'NO');
     const out = plain(gas.wyczyscStareSnapshotyIWyniki());
-    assert.deepEqual(out, { snapshots: 0, results: 0 });
+    assert.deepEqual(out, { snapshots: 0, results: 0, lab: 0 });
     assert.equal(gas.$sheet(SNAPSHOTS).length, 9, 'wszystkie wiersze na miejscu');
     assert.match(gas.$alerts[1][0], /Anulowano/);
   });
@@ -140,7 +140,7 @@ describe('#101: czyszczenie wymaga potwierdzenia', () => {
   test('odpowiedź YES usuwa dokładnie zaplanowane wiersze, licząc od dołu', () => {
     const gas = project(oldSnapshots(), [res('R1', 400), res('R2', 10)], 'YES');
     const out = plain(gas.wyczyscStareSnapshotyIWyniki());
-    assert.deepEqual(out, { snapshots: 3, results: 1 });
+    assert.deepEqual(out, { snapshots: 3, results: 1, lab: 0 });
     const left = gas.$sheet(SNAPSHOTS).slice(1).map(r => r[0]);
     assert.deepEqual(left, ['S4', 'S5', 'S6', 'S7', 'S8'], 'zostają najnowsze, a nie przypadkowe');
     assert.deepEqual(gas.$sheet(RESULTS).slice(1).map(r => r[0]), ['R2']);
@@ -150,7 +150,7 @@ describe('#101: czyszczenie wymaga potwierdzenia', () => {
     const gas = project(oldSnapshots(), [], 'NO');
     gas.wyczyscStareSnapshotyIWyniki();
     const question = gas.$alerts[0].join(' ');
-    assert.match(question, /Usunąć nieodwracalnie 3 snapshot\(ów\) i 0 wynik\(ów\)\?/);
+    assert.match(question, /Usunąć nieodwracalnie 3 snapshot\(ów\), 0 wynik\(ów\) i 0 surowych prób PSI\?/);
     assert.match(question, /Zostanie 5 snapshot\(ów\) dla 1 stron\(y\)/);
     assert.equal(gas.$alerts[0][1], 'YES_NO', 'dialog z przyciskami TAK/NIE, nie zwykły komunikat');
   });
@@ -158,7 +158,7 @@ describe('#101: czyszczenie wymaga potwierdzenia', () => {
   test('gdy nie ma czego czyścić, nie pyta i nic nie rusza', () => {
     const gas = project([snap('S1', 7, 1)], [res('R1', 1)], 'YES');
     const out = plain(gas.wyczyscStareSnapshotyIWyniki());
-    assert.deepEqual(out, { snapshots: 0, results: 0 });
+    assert.deepEqual(out, { snapshots: 0, results: 0, lab: 0 });
     assert.equal(gas.$alerts.length, 1);
     assert.match(gas.$alerts[0][0], /^Nie ma czego czyścić\./);
   });
@@ -384,7 +384,7 @@ describe('#101: okno zajętości', () => {
     const text = gas.$alerts[0][0];
     assert.match(text, /^Zajętość arkusza: OK – /);
     assert.match(text, /WP SNAPSHOTS: 26000 komórek \(1000 x 26\)/);
-    assert.match(text, /Do wyczyszczenia: 3 snapshot\(ów\) i 1 wynik\(ów\)\./);
+    assert.match(text, /Do wyczyszczenia: 3 snapshot\(ów\), 1 wynik\(ów\) i 0 surowych prób PSI\./);
     assert.match(text, /Snapshot młodszy niż 30 dni zostaje zawsze, podobnie 5 najnowszych na stronę\./);
   });
 });

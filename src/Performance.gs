@@ -35,6 +35,32 @@ const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'War
 const PERF_FIELD_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2, 3];
 
 /**
+ * Ile ostatnich pomiarów zostaje w surowych próbach „PAGESPEED LAB” (#152).
+ *
+ * Osiem to dwie doby przy cyklu co 6 godz. — dość, żeby podejrzany przebieg porównać
+ * z sąsiednimi, bo po to surowe próby są. Sam wynik nie ginie: mediany zostają
+ * w „PERFORMANCE SUMMARY” na zawsze i to one są podstawą porównań przed/po.
+ */
+const PERF_LAB_KEEP_MEASUREMENTS = 8;
+
+/**
+ * Kanoniczny znacznik przebiegu, porównywalny między zakładkami.
+ *
+ * `Pomiar` bywa w arkuszu datą albo tekstem, a przed #156 nie miał sekund — więc
+ * te same przebiegi w „PAGESPEED LAB” i „PERFORMANCE SUMMARY” potrafią wyglądać
+ * inaczej po obu stronach. Retencja musi je zestawić, bo od tego zależy, czy wolno
+ * coś usunąć. Rozjeźdż typów jako taki należy do #168; tu sprowadzamy obie postaci
+ * do jednej wyłącznie na potrzeby porównania, niczego nie zapisując.
+ */
+function perfMeasurementKey_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  }
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text) ? text + ':00' : text;
+}
+
+/**
  * Wiersz, który nie opisuje pomiaru, tylko dostępność danych dla pary
  * (adres, form factor). Rozpoznaje się go po metryce „wszystkie”, bo stan
  * INSUFFICIENT_DATA nosi też zwykły wiersz metryki, której CrUX nie podał.
