@@ -327,6 +327,28 @@ describe('#154: upgrade istniejącego arkusza', () => {
     assert.deepEqual(out.added, [URL], 'adres dopisany mimo przyciętej siatki');
   });
 
+  test('12i: komplet etykiet nie powoduje czytania historii pod nagłówkiem', () => {
+    // Helper wchodzi na początku każdego przebiegu, także cyklicznego pomiaru PSI,
+    // gdzie `PAGESPEED LAB` rośnie bez ograniczeń. Skanowanie całej historii kolumna
+    // po kolumnie zjadałoby budżet czasu, nie ustalając niczego — kolumna z właściwą
+    // etykietą nie jest kandydatem do migracji.
+    const duzo = [];
+    for (let i = 0; i < 500; i++) duzo.push(wiersz('https://www.example.pl/s' + i + '/'));
+    const gas = project({ sheet: [HEADER].concat(duzo) });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(SHEET);
+    const zakresy = [];
+    const oryginal = sheet.getRange;
+    sheet.getRange = function () {
+      zakresy.push(Array.prototype.slice.call(arguments));
+      return oryginal.apply(sheet, arguments);
+    };
+
+    gas.ensureHeaderColumns_(SHEET, HEADER);
+
+    const podNaglowkiem = zakresy.filter(args => typeof args[0] === 'number' && args[0] >= 2);
+    assert.deepEqual(podNaglowkiem, [], 'żadna kolumna nie była skanowana w dół');
+  });
+
   test('13: arkusz zakładany od zera dostaje pełny, czternastokolumnowy nagłówek', () => {
     const gas = project({ sheet: [] });
     gas.sprawdzStronyLive();

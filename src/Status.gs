@@ -282,23 +282,55 @@ function headerColumnsState_(sheet, header) {
   const maxColumns = sheet.getMaxColumns();
   const lastRow = sheet.getLastRow();
   const headed = lastRow >= 1 && String(sheet.getRange(1, 1).getValue() || '') === header[0];
+  if (!headed) return { headed: false, columns: [] };
+
+  const width = Math.min(header.length, maxColumns);
+  const labels = sheet.getRange(1, 1, 1, width).getValues()[0];
+  const headerFormulas = sheet.getRange(1, 1, 1, width).getFormulas()[0];
   const dataRows = lastRow - 1;
+
   return {
-    headed: headed,
+    headed: true,
     columns: header.map(function (label, i) {
       const column = i + 1;
-      if (!headed || column > maxColumns) return { label: '', headerBlank: true, usedBelow: false };
+      if (column > maxColumns) return { label: '', headerBlank: true, usedBelow: false };
+      const current = String(labels[i] === undefined || labels[i] === null ? '' : labels[i]).trim();
+
+      // Kolumna z etykietą nie jest kandydatem do migracji, więc nie ma czego badać
+      // pod nią. To nie kosmetyka: `PAGESPEED LAB` rośnie bez ograniczeń, a ten helper
+      // wchodzi na początku każdego cyklicznego pomiaru — czytanie całej historii
+      // przy każdym przebiegu zjadałoby budżet czasu, niczego nie ustalając.
+      if (current !== '') return { label: current, headerBlank: false, usedBelow: false };
+
       return {
-        label: String(sheet.getRange(1, column).getValue() || '').trim(),
+        label: '',
         // Formuła zwracająca `""` daje pustą wartość, ale komórka pusta nie jest:
         // wpisanie w nią etykiety skasowałoby cudzą formułę.
-        headerBlank: rangeIsEmpty_(sheet.getRange(1, column, 1, 1)),
+        headerBlank: String(headerFormulas[i] || '') === '',
         usedBelow: dataRows > 0 && !rangeIsEmpty_(sheet.getRange(2, column, dataRows, 1))
       };
     })
   };
 }
 
+/**
+ * Nagłówek istniejącej zakładki uzupełniony o brakujące kolumny (#156, #154).
+ *
+ * `ensureSheetWithHeader_()` przepisuje nagłówek tylko wtedy, gdy `A1` różni się
+ * od pierwszej nazwy. Przy rozszerzeniu schematu `A1` się nie zmienia, więc
+ * istniejąca zakładka zostałaby ze starym, węższym nagłówkiem, a zapis wkładałby
+ * wartości do kolumny bez etykiety.
+ *
+ * Kolumnę z pustą etykietą uznajemy za wolną tylko wtedy, gdy pusta jest także
+ * używana część kolumny pod nią. Sam nagłówek nie wystarcza: `M1` bywa puste,
+ * a `M2:M20` trzyma notatki albo formuły operatora. Wpisanie tam etykiety nie
+ * nadpisałoby tych wartości, ale zaczęłoby je **czytać jako konfigurację** — to
+ * nadal przejęcie cudzej kolumny, tylko cichsze.
+ *
+ * Walidacja idzie PRZED jakimkolwiek zapisem: konflikt ma zatrzymać operację,
+ * a nie zostawić arkusza w połowie zmienionego — także przy rozszerzeniu o dwie
+ * kolumny naraz.
+ */
 function ensureHeaderColumns_(sheetName, header) {
   const existing = SpreadsheetApp.getActive().getSheetByName(sheetName);
   const state = existing ? headerColumnsState_(existing, header) : null;
