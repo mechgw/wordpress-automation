@@ -47,6 +47,17 @@ const PERF_FINDINGS_HEADER = [
   'Źródło', 'Pobrano'
 ];
 
+/**
+ * Identyfikatory audytów: aktualny, potem wycofany (#157).
+ *
+ * Zmierzone sondą na produkcji 2026-09-13, Lighthouse 13.4.1: wycofane
+ * `largest-contentful-paint-element` i `third-party-summary` NIE wracają,
+ * wracają ich następcy. Stare zostają jako fallback, bo PSI uruchamia wersję
+ * przypiętą i nic nie gwarantuje, że wszędzie jest ta sama.
+ */
+const PSI_LCP_AUDIT_IDS = ['lcp-breakdown-insight', 'largest-contentful-paint-element'];
+const PSI_THIRD_PARTY_AUDIT_IDS = ['third-parties-insight', 'third-party-summary'];
+
 const PSI_FINDING_LCP = 'ELEMENT LCP';
 /** Adnotacja, gdy PSI nie wskazał węzła LCP — brak też jest ustaleniem (#153). */
 const PSI_LCP_UNKNOWN = 'PSI nie wskazał elementu LCP w tej próbie';
@@ -261,12 +272,49 @@ function psiLcpNode_(audit) {
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
     if (group && group.node) return group.node;
+    // Lighthouse 13 kładzie węzeł jako POZYCJĘ, bez opakowania w `node`:
+    // `lcp-breakdown-insight` ma na pierwszym miejscu tabelę faz, a na drugim
+    // goły węzeł (`selector`, `nodeLabel`, `snippet`, `boundingRect`, `path`).
+    // Zmierzone na produkcji 2026-09-13, Lighthouse 13.4.1 (#157).
+    if (psiLooksLikeNode_(group)) return group;
     const inner = (group && group.items) || [];
     for (let j = 0; j < inner.length; j++) {
       if (inner[j] && inner[j].node) return inner[j].node;
+      if (psiLooksLikeNode_(inner[j])) return inner[j];
     }
   }
   return null;
+}
+
+/**
+ * Czy obiekt JEST węzłem DOM, a nie opakowaniem niosącym węzeł.
+ *
+ * Rozstrzygamy po polach opisujących element, nie po `type`: Lighthouse używa
+ * `type: 'node'` dla węzłów, ale to samo pole niesie też `type: 'table'` dla
+ * opakowań, a nazwy typów bywają zmieniane między wersjami. Pola opisujące
+ * element są stabilne, bo czyta je interfejs raportu.
+ */
+function psiLooksLikeNode_(item) {
+  if (!item || typeof item !== 'object') return false;
+  return ['selector', 'nodeLabel', 'snippet'].some(function (field) {
+    return String(item[field] || '').trim() !== '';
+  });
+}
+
+/**
+ * Pierwszy obecny audyt z listy identyfikatorów.
+ *
+ * Lighthouse wycofuje identyfikatory po cichu i przenosi audyty do `insights`
+ * (`replacesAudits`). PSI uruchamia WERSJĘ PRZYPIĘTĄ, więc w jednym środowisku
+ * wraca nowy identyfikator, a w innym może jeszcze stary. Kolejność w liście
+ * jest więc istotna: najpierw aktualny, potem wycofany.
+ */
+function psiAuditByIds_(audits, ids) {
+  for (let i = 0; i < ids.length; i++) {
+    const audit = (audits || {})[ids[i]];
+    if (audit) return { id: ids[i], audit: audit };
+  }
+  return { id: ids[ids.length - 1], audit: null };
 }
 
 /** Czytelny opis węzła: selektor, a gdy go brak — etykieta albo fragment HTML. */
@@ -331,9 +379,12 @@ function psiOpportunities_(audits) {
  */
 function psiLcpFindingRow_(response, url, strategy, attempt, measuredAt, now) {
   const audits = (response && response.lighthouseResult && response.lighthouseResult.audits) || {};
-  const label = psiNodeLabel_(psiLcpNode_(audits['largest-contentful-paint-element']));
+  const found = psiAuditByIds_(audits, PSI_LCP_AUDIT_IDS);
+  const label = psiNodeLabel_(psiLcpNode_(found.audit));
+  // W kolumnie `Nazwa` zapisujemy identyfikator, który NAPRAWDĘ wrócił — inaczej
+  // arkusz twierdziłby, że dane pochodzą z audytu, którego Lighthouse nie ma.
   return [
-    measuredAt, url, strategy, attempt, PSI_FINDING_LCP, 'largest-contentful-paint-element',
+    measuredAt, url, strategy, attempt, PSI_FINDING_LCP, found.id,
     cellSafeText_(label || PSI_LCP_UNKNOWN).text, '', '', '', '', 'PSI_LAB', now
   ];
 }
@@ -353,7 +404,7 @@ function parsePsiFindings_(response, url, strategy, attempt, measuredAt, now) {
       o.ms ? Math.round(o.ms) : '', o.bytes ? Math.round(o.bytes / 1024) : '');
   });
 
-  const thirdParty = ((audits['third-party-summary'] || {}).details || {}).items || [];
+  const thirdParty = ((psiAuditByIds_(audits, PSI_THIRD_PARTY_AUDIT_IDS).audit || {}).details || {}).items || [];
   thirdParty.forEach(function (item) {
     const name = psiEntityName_(item && item.entity);
     const time = Number((item && item.mainThreadTime) || 0);

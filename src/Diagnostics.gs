@@ -229,10 +229,14 @@ function psiProbeAuditShape_(audits, id) {
   const fields = psiProbeItemFields_(items, 0);
   // Obecność węzła DOM rozstrzyga, czy da się z tego odtworzyć ELEMENT LCP,
   // więc mówimy o niej wprost zamiast kazać jej szukać wzrokiem w liście pól.
-  // Prefiks zagnieżdżenia trzeba zdjąć przed porównaniem nazw pól, inaczej
-  // węzeł znaleziony piętro niżej — czyli tam, gdzie zwykle jest — umknie.
+  // Węzeł bywa opakowany w pole `node`, ale w Lighthouse 13 leży jako goła
+  // pozycja opisana `selector`/`nodeLabel`/`snippet` — i właśnie ten przypadek
+  // flaga przegapiła przy pierwszym uruchomieniu na produkcji (#157). Szukamy
+  // więc obu kształtów, bo inaczej flaga myli się dokładnie tam, gdzie ma pomóc.
   const node = fields.some(function (f) {
-    return f.replace(/^>\s*/, '').split('/').indexOf('node') >= 0;
+    const keys = f.replace(/^>\s*/, '').split('/');
+    return keys.indexOf('node') >= 0 ||
+      ['selector', 'nodeLabel', 'snippet'].some(function (k) { return keys.indexOf(k) >= 0; });
   }) ? 'TAK' : 'nie';
   return id + ': JEST, scoreDisplayMode=' + (audit.scoreDisplayMode || '?') +
     ', details.type=' + (details.type || '?') + ', pozycji=' + items.length +
