@@ -230,10 +230,25 @@ function planResultsCleanup_(now) {
 
 /** Usuwa wiersze od dołu, żeby numery pozostałych nie przesuwały się w trakcie. */
 function deleteSheetRows_(sheet, rows) {
-  rows.slice().sort(function (a, b) { return b - a; }).forEach(function (row) {
-    sheet.deleteRows(row, 1);
+  // Numery sąsiadujące łączymy w zakresy: jedno wywołanie usługi na zakres zamiast
+  // na wiersz. Dla snapshotów to kosmetyka, ale „PAGESPEED LAB” jest z założenia
+  // zakładką najszybciej rosnącą — przy kilku tysięcach wierszy różnica jest między
+  // „działa” a „nie mieści się w limicie czasu i kasuje plan połowicznie, bez raportu”.
+  const unique = [];
+  rows.slice().sort(function (a, b) { return a - b; }).forEach(function (row) {
+    if (unique[unique.length - 1] !== row) unique.push(row);
   });
-  return rows.length;
+
+  const ranges = [];
+  unique.forEach(function (row) {
+    const last = ranges[ranges.length - 1];
+    if (last && row === last.start + last.count) { last.count++; return; }
+    ranges.push({ start: row, count: 1 });
+  });
+
+  // Od dołu, żeby usunięcie nie przesuwało numerów zakresów jeszcze nieusuniętych.
+  ranges.reverse().forEach(function (range) { sheet.deleteRows(range.start, range.count); });
+  return unique.length;
 }
 
 /**

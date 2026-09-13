@@ -329,3 +329,44 @@ describe('#152: usuwanie idzie pod tą samą blokadą co pomiar', () => {
     assert.equal(gas.$sheet(RES).length, wynikiPrzed, 'i wyniki');
   });
 });
+
+describe('#152: usuwanie mieści się w limicie czasu', () => {
+  test('sąsiadujące wiersze kasowane zakresem, nie po jednym', () => {
+    // „PAGESPEED LAB” rośnie najszybciej ze wszystkich zakładek, więc przycinanie
+    // dotyczy setek albo tysięcy wierszy. Jedno wywołanie usługi na wiersz wyczerpuje
+    // okno wykonania i zostawia plan skasowany połowicznie, bez raportu.
+    const gas = project(historia(KEEP + 3));
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(LAB);
+    const wywolania = [];
+    const oryginal = sheet.deleteRows;
+    sheet.deleteRows = function (row, n) {
+      wywolania.push([row, n]);
+      return oryginal.call(sheet, row, n);
+    };
+
+    const plan = plain(gas.planLabCleanup_());
+    assert.equal(plan.remove.length, 9, 'dziewięć sąsiadujących wierszy');
+    const usuniete = gas.deleteSheetRows_(sheet, plan.remove);
+
+    assert.equal(usuniete, 9);
+    assert.deepEqual(wywolania, [[2, 9]], 'jedno wywołanie na cały zakres');
+    assert.equal(gas.$sheet(LAB).length, 1 + KEEP * 3, 'zostały wyłącznie najnowsze przebiegi');
+  });
+
+  test('rozłączne zakresy kasowane od dołu, każdy jednym wywołaniem', () => {
+    const gas = project(historia(KEEP));
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(LAB);
+    const wywolania = [];
+    const oryginal = sheet.deleteRows;
+    sheet.deleteRows = function (row, n) {
+      wywolania.push([row, n]);
+      return oryginal.call(sheet, row, n);
+    };
+
+    // Wiersze 2-3 oraz 6, podane w losowej kolejności i z duplikatem.
+    const usuniete = gas.deleteSheetRows_(sheet, [6, 2, 3, 6]);
+
+    assert.equal(usuniete, 3, 'duplikat policzony raz');
+    assert.deepEqual(wywolania, [[6, 1], [2, 2]], 'od dołu, żeby numery się nie przesunęły');
+  });
+});
