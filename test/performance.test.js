@@ -392,7 +392,10 @@ describe('#124: menu', () => {
     const gas = project();
     gas.onOpen();
     const seo = gas.$menus.find(m => m.title === 'SEO / GSC');
-    assert.deepEqual(seo.items.map(i => i.fn).slice(-2), ['przygotujPomiarWydajnosci', 'zmierzWydajnosc']);
+    assert.deepEqual(
+      seo.items.map(i => i.fn).slice(-3),
+      ['przygotujPomiarWydajnosci', 'zmierzWydajnosc', 'zbadajKsztaltOdpowiedziPsi']
+    );
   });
 });
 

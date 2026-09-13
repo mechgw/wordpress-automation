@@ -153,3 +153,130 @@ function diagnostykaSystemu() {
   SpreadsheetApp.getUi().alert(smokeReportText_(steps));
   return steps;
 }
+
+/**
+ * Sonda kształtu odpowiedzi PageSpeed Insights (#157).
+ *
+ * Kolektor sięga po audyty po ich identyfikatorach, a Lighthouse te
+ * identyfikatory wycofuje: `third-party-summary` zastąpił `third-parties-insight`,
+ * a `largest-contentful-paint-element` — `lcp-breakdown-insight`. Objaw jest
+ * cichy: audyt nie istnieje, więc nie powstaje żaden wiersz, a arkusz wygląda
+ * jak przy braku danych po stronie API.
+ *
+ * Sonda nie zgaduje. Odpytuje PSI kluczem ze Script Properties — bo tylko tam
+ * on jest — i pokazuje, KTÓRE identyfikatory naprawdę wracają i jaki mają
+ * kształt. Dopiero na tym wolno oprzeć poprawkę parsera i fixture testowy.
+ *
+ * Osobna pozycja menu, nie krok `smokeTest()`: każde uruchomienie kosztuje
+ * dwa wywołania PSI z dziennego limitu i trwa kilkadziesiąt sekund, a smoke
+ * test ma być szybki i darmowy.
+ */
+const PSI_PROBE_AUDITS = [
+  // Para LCP: następca i wycofany poprzednik.
+  'lcp-breakdown-insight',
+  'largest-contentful-paint-element',
+  // Para third-party: jak wyżej.
+  'third-parties-insight',
+  'third-party-summary'
+];
+
+/**
+ * Usuwa klucz API z tekstu, zanim trafi na ekran.
+ *
+ * Repozytorium jest publiczne, a raport diagnostyczny bywa wklejany do issue.
+ * Sami adresu żądania nie wypisujemy, ale komunikat błędu z API może go
+ * zacytować — dlatego czyszczenie jest tu, na ostatnim kroku przed wyświetleniem.
+ */
+function psiSanitizeKey_(text) {
+  return String(text === undefined || text === null ? '' : text).replace(/key=[^&\s'"]+/gi, 'key=***');
+}
+
+/** Ile pozycji próbkujemy na poziom i jak głęboko schodzimy. */
+const PSI_PROBE_ITEM_SAMPLE = 3;
+const PSI_PROBE_MAX_DEPTH = 2;
+
+/**
+ * Nazwy pól pozycji, także zagnieżdżonych. Bez wartości.
+ *
+ * Audyty `insights` bywają listami: pierwszy poziom niesie wtedy wyłącznie
+ * opakowanie (`type`, `headings`, `items`), a interesujące nas pola — `entity`,
+ * `transferSize`, `mainThreadTime`, `node` — siedzą piętro niżej. Sonda patrząca
+ * tylko na `items[0]` pokazałaby opakowanie i przemilczała to, po co powstała.
+ * Nasz własny `psiLcpNode_` już dziś szuka węzła na dwóch poziomach.
+ *
+ * Próbkujemy też kilka pozycji, nie jedną: węzeł potrafi siedzieć w drugiej.
+ */
+function psiProbeItemFields_(items, depth) {
+  const out = [];
+  (items || []).slice(0, PSI_PROBE_ITEM_SAMPLE).forEach(function (item) {
+    if (!item || typeof item !== 'object') return;
+    out.push(Object.keys(item).slice(0, 10).join('/'));
+    if (depth < PSI_PROBE_MAX_DEPTH && Array.isArray(item.items)) {
+      psiProbeItemFields_(item.items, depth + 1).forEach(function (nested) {
+        out.push('> ' + nested);
+      });
+    }
+  });
+  return out;
+}
+
+/** Kształt jednego audytu: czy jest i co niesie. Bez wartości pomiarowych. */
+function psiProbeAuditShape_(audits, id) {
+  const audit = (audits || {})[id];
+  if (!audit) return id + ': BRAK';
+  const details = audit.details || {};
+  const items = details.items || [];
+  const fields = psiProbeItemFields_(items, 0);
+  // Obecność węzła DOM rozstrzyga, czy da się z tego odtworzyć ELEMENT LCP,
+  // więc mówimy o niej wprost zamiast kazać jej szukać wzrokiem w liście pól.
+  // Prefiks zagnieżdżenia trzeba zdjąć przed porównaniem nazw pól, inaczej
+  // węzeł znaleziony piętro niżej — czyli tam, gdzie zwykle jest — umknie.
+  const node = fields.some(function (f) {
+    return f.replace(/^>\s*/, '').split('/').indexOf('node') >= 0;
+  }) ? 'TAK' : 'nie';
+  return id + ': JEST, scoreDisplayMode=' + (audit.scoreDisplayMode || '?') +
+    ', details.type=' + (details.type || '?') + ', pozycji=' + items.length +
+    ', węzeł=' + node +
+    ', pola=' + (fields.length ? fields.join(' | ') : 'brak pozycji');
+}
+
+/** Jedna strategia: wersja Lighthouse i kształt każdego z badanych audytów. */
+function psiProbeStrategy_(url, strategy, key) {
+  const request = PSI_API + '?url=' + encodeURIComponent(url) +
+    '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
+  const lh = (performanceApiRequest_(request) || {}).lighthouseResult || {};
+  const audits = lh.audits || {};
+  return ['Lighthouse ' + (lh.lighthouseVersion || 'wersja nieznana')]
+    .concat(PSI_PROBE_AUDITS.map(function (id) { return psiProbeAuditShape_(audits, id); }))
+    .join('\n        ');
+}
+
+/** Raport sondy; osobny od smokeReportText_, bo bez liczby błędów w nagłówku. */
+function psiProbeReportText_(url, steps) {
+  const lines = [
+    'Kształt odpowiedzi PageSpeed Insights (tylko odczyt) – wersja ' + versionLabel_(),
+    '',
+    'Adres: ' + url,
+    ''
+  ];
+  steps.forEach(function (s) { lines.push((s.ok ? 'OK    ' : 'BŁĄD  ') + s.name + ': ' + s.detail); });
+  lines.push('', 'Identyfikator z „BRAK” znaczy, że Lighthouse go nie zwraca — jeśli kolektor po niego');
+  lines.push('sięga, ustalenia tego rodzaju nie powstaną i zakładka będzie milczeć bez ostrzeżenia.');
+  return psiSanitizeKey_(lines.join('\n'));
+}
+
+/** Menu: sprawdza, po które identyfikatory audytów wolno sięgać (#157). */
+function zbadajKsztaltOdpowiedziPsi() {
+  const urls = performanceUrls_();
+  if (!urls.length) {
+    SpreadsheetApp.getUi().alert('Brak adresów w „' + PERF_URLS_SHEET + '”. Dodaj choć jeden i uruchom ponownie.');
+    return [];
+  }
+  const key = performanceApiKey_();
+  const url = urls[0].url;
+  const steps = ['mobile', 'desktop'].map(function (strategy) {
+    return smokeStep_('PSI ' + strategy, function () { return psiProbeStrategy_(url, strategy, key); });
+  });
+  SpreadsheetApp.getUi().alert(psiProbeReportText_(url, steps));
+  return steps;
+}
