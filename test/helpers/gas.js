@@ -127,6 +127,15 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     }
     return value;
   };
+  /**
+   * Zapis wartości KASUJE formułę w tej komórce, tak jak w Arkuszach. Bez tego
+   * test „formuła w innej kolumnie przetrwała migrację” przechodziłby także
+   * wtedy, gdy kod przepisuje całą szerokość wierszem wyników (#177, uwaga
+   * Codexa) — czyli nie dowodziłby niczego.
+   */
+  const clearFormula = (row, col) => {
+    if (formulas[row - 1] && formulas[row - 1].length >= col) formulas[row - 1][col - 1] = '';
+  };
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
@@ -181,6 +190,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
       checkCell(value, row, col);
       ensure(row, col);
       grid[row - 1][col - 1] = parseCell(value, row, col);
+      clearFormula(row, col);
       return this;
     },
     setValues(values) {
@@ -188,6 +198,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
       values.forEach((line, i) => line.forEach((v, j) => {
         ensure(row + i, col + j);
         grid[row + i - 1][col + j - 1] = parseCell(v, row + i, col + j);
+        clearFormula(row + i, col + j);
       }));
       return this;
     },

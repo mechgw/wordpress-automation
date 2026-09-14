@@ -315,6 +315,26 @@ describe('#168 migracja: mechanizm wykonania', () => {
       'poza kolumną „Pomiar” zakładka jest bit w bit taka sama');
   });
 
+  test('8: formuła w innej kolumnie przeżywa migrację', () => {
+    // `getValues()` oddaje WYNIK formuły, więc przepisanie pełnej szerokości
+    // zamieniłoby ją na liczbę — i to trwale (uwaga z audytu Codexa na #177).
+    const gas = project({
+      [LAB]: {
+        rows: [LAB_HEADER, lab('2026-09-13 13:14'), lab('2026-09-13 13:14', 2)],
+        formulas: [[], [], ['', '', '', '', '', '=ŚREDNIA(F2:F2)']]
+      }
+    });
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(LAB);
+    assert.equal(sheet.getRange(3, 6).getFormulas()[0][0], '=ŚREDNIA(F2:F2)', 'stan wyjściowy');
+
+    gas.$ui.$answer = 'YES';
+    gas.kanonizujZnacznikiPomiaru();
+
+    assert.equal(sheet.getRange(3, 6).getFormulas()[0][0], '=ŚREDNIA(F2:F2)',
+      'migracja dotyka wyłącznie kolumny „Pomiar”');
+    assert.deepEqual(pomiary(gas, LAB), ['2026-09-13 13:14:00', '2026-09-13 13:14:00']);
+  });
+
   test('9 i 12: drugie uruchomienie to no-op — zakładki nie są nawet czytane', () => {
     const gas = zHistoria();
     mieszana(gas);

@@ -113,6 +113,15 @@ function perfValueIsCanonical_(value, timeZone) {
 /**
  * Przepisanie jednej zakładki. Zwraca liczbę zmienionych wartości.
  *
+ * Czytamy i zapisujemy WYŁĄCZNIE kolumnę `Pomiar` (uwaga z audytu Codexa na
+ * #177). Przepisanie pełnej szerokości zamieniłoby każdą formułę w pozostałych
+ * kolumnach na jej wynik, bo `getValues()` oddaje wynik, nie formułę — czyli
+ * złamałoby obietnicę z dialogu, że nic poza znacznikiem się nie zmienia.
+ *
+ * Zapis kolumny w miejscu nie potrzebuje też `writeRowsThenTrim_()`: wierszy
+ * jest dokładnie tyle samo, nic nie jest czyszczone, więc okno, w którym
+ * zakładka bywa pusta (#151), tu w ogóle nie powstaje.
+ *
  * Format tekstowy ustawiamy ZAWSZE, także gdy żadna wartość nie wymaga zmiany:
  * bez niego kolumna zbiera dwa typy przy następnym zapisie, a wtedy migracja
  * wyleczyłaby objaw na jeden przebieg.
@@ -121,20 +130,18 @@ function migratePerfSheet_(entry, timeZone) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(entry.name);
   if (!sheet) return { rows: 0, changed: 0 };
   const lastRow = sheet.getLastRow();
-  const width = entry.header.length;
-  const values = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : [];
+  const column = perfSetMeasurementTextFormat_(sheet, entry.header, lastRow - 1);
+  if (column < 0 || lastRow < 2) return { rows: 0, changed: 0 };
 
+  const values = sheet.getRange(2, column + 1, lastRow - 1, 1).getValues();
   let changed = 0;
-  const column = entry.header.indexOf(PERF_MEASUREMENT_COLUMN);
-  values.forEach(function (row) {
-    if (!perfValueIsCanonical_(row[column], timeZone)) changed++;
+  const canonical = values.map(function (row) {
+    const value = performanceCanonicalDate_(row[0], PERF_CANONICAL_MEASUREMENT, timeZone);
+    if (!perfValueIsCanonical_(row[0], timeZone)) changed++;
+    return [value];
   });
 
-  // `perfCanonicalMeasurementRows_` ustawia format PRZED zapisem i kanonizuje
-  // wartości — ta sama funkcja co w ścieżce zapisu, żeby „kanoniczny” znaczyło
-  // w migracji dokładnie to samo co w pomiarze.
-  const rows = perfCanonicalMeasurementRows_(sheet, entry.header, values, timeZone);
-  if (changed) writeRowsThenTrim_(sheet, width, rows, lastRow);
+  if (changed) sheet.getRange(2, column + 1, canonical.length, 1).setValues(canonical);
   return { rows: values.length, changed: changed };
 }
 

@@ -724,23 +724,38 @@ function performanceTimeZone_() {
 }
 
 /**
- * Kolumna `Pomiar` sprowadzona do jednej postaci: format tekstowy USTAWIONY
- * PRZED zapisem, wartości skanonizowane.
+ * Format tekstowy kolumny `Pomiar`; zwraca jej indeks albo -1, gdy zakładka
+ * takiej kolumny nie ma.
  *
- * Kolejność jest częścią kontraktu. Odwrotna — najpierw zapis, potem format —
- * pozwala arkuszowi sparsować właśnie zapisane łańcuchy z powrotem na daty,
- * więc kolumna znów trzyma dwa typy, choć kod „zrobił swoje”.
+ * Kolejność jest częścią kontraktu: wywołanie MUSI poprzedzać zapis. Odwrotna —
+ * najpierw zapis, potem format — pozwala arkuszowi sparsować właśnie zapisane
+ * łańcuchy z powrotem na daty, więc kolumna znów trzyma dwa typy, choć kod
+ * „zrobił swoje”.
  *
  * Miejsce w siatce robimy tutaj, przed formatowaniem: wiersze dołożone dopiero
  * przy zapisie miałyby format domyślny, czyli ten, który parsuje — a to właśnie
  * wiersze poniżej dotychczasowego końca danych rozjechały się w #168.
  */
-function perfCanonicalMeasurementRows_(sheet, header, rows, timeZone) {
+function perfSetMeasurementTextFormat_(sheet, header, rowsNeeded) {
   const column = header.indexOf(PERF_MEASUREMENT_COLUMN);
-  if (column < 0) return rows;
-  ensureSheetRows_(sheet, rows.length + 1);
+  if (column < 0) return -1;
+  ensureSheetRows_(sheet, rowsNeeded + 1);
   const dataRows = sheet.getMaxRows() - 1;
   if (dataRows > 0) sheet.getRange(2, column + 1, dataRows, 1).setNumberFormat(PERF_TEXT_FORMAT);
+  return column;
+}
+
+/**
+ * Wiersze gotowe do zapisu: format tekstowy ustawiony (patrz wyżej — kolejność
+ * jest kontraktem), `Pomiar` w każdym wierszu sprowadzony do postaci kanonicznej.
+ *
+ * Dotyczy ścieżek, które i tak przepisują całe wiersze — upsertu i podmiany
+ * zakresów ustaleń. Migracja historii idzie inaczej: tam zapisujemy wyłącznie
+ * jedną kolumnę, żeby nie zamienić cudzych formuł na ich wyniki.
+ */
+function perfCanonicalMeasurementRows_(sheet, header, rows, timeZone) {
+  const column = perfSetMeasurementTextFormat_(sheet, header, rows.length);
+  if (column < 0) return rows;
   return rows.map(function (row) {
     const copy = row.slice();
     copy[column] = performanceCanonicalDate_(copy[column], PERF_CANONICAL_MEASUREMENT, timeZone);
