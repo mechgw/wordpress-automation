@@ -248,7 +248,10 @@ describe('#152: znacznik przebiegu po obu stronach', () => {
       summary: [['2026-09-01 06:00:00', A, 'mobile', 'LCP', 2000, 1, 'PSI_LAB', '2026-09-13']]
     });
     // Jeden przebieg, więc mieści się w progu — sprawdzamy sam klucz.
-    assert.equal(gas.perfMeasurementKey_('2026-09-01 06:00'), '2026-09-01 06:00:00');
+    assert.equal(
+      gas.performanceCanonicalDate_('2026-09-01 06:00', gas.$get('PERF_CANONICAL_MEASUREMENT'), 'Europe/Warsaw'),
+      '2026-09-01 06:00:00'
+    );
     assert.equal(plain(gas.planLabCleanup_()).measurements, 1);
   });
 });

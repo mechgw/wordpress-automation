@@ -730,6 +730,7 @@ function addStatusMenu_() {
     .addItem('Zajętość arkusza', 'pokazZajetoscArkusza')
     .addItem('Wyczyść stare snapshoty, wyniki i próby PSI', 'wyczyscStareSnapshotyIWyniki')
     .addItem('Przytnij puste wiersze', 'przytnijPusteWiersze')
+    .addItem('Kanonizuj znaczniki Pomiar', 'kanonizujZnacznikiPomiaru')
     .addSeparator()
     .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')
     .addItem('Ukryj arkusze techniczne', 'ukryjArkuszeTechniczne')
@@ -768,6 +769,7 @@ function showImportStatus() {
   observeWriteFlags_(now);
   writeFlagsStatusLines_(now).forEach(function (line) { lines.push(line); });
   lines.push(sitemapsStatusLine_());
+  lines.push(perfMigrationStatusLine_());
   lines.push('Alerty e-mail: ' + alertRecipientText_() + ' | strażnik: ' + (hasAlertGuardTrigger_() ? 'TAK' : 'NIE'));
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }

@@ -117,7 +117,9 @@ describe('#152: agregat jest historią, nie widokiem „ostatni wynik”', () =>
       sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']], [SUMMARY]: [SUMMARY_HEADER] }
     });
     const rows = [lab('2026-09-12 10:00', 'mobile', 1, 'LCP', 1000)];
-    const key = [0, 1, 2, 3];
+    // Klucz produkcyjny, nie wymyślony na potrzeby testu: `Pomiar` deklaruje postać
+    // kanoniczną, bo zapis sprowadza go do niej (#168).
+    const key = gas.$get('PERF_SUMMARY_KEY');
     gas.upsertPerformanceRows_(SUMMARY, SUMMARY_HEADER, key, gas.psiSummaryRows_(rows, '2026-09-12'));
     gas.upsertPerformanceRows_(SUMMARY, SUMMARY_HEADER, key, gas.psiSummaryRows_(rows, '2026-09-12'));
 
@@ -129,7 +131,7 @@ describe('#152: agregat jest historią, nie widokiem „ostatni wynik”', () =>
       properties: KEY,
       sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']], [SUMMARY]: [SUMMARY_HEADER] }
     });
-    const key = [0, 1, 2, 3];
+    const key = gas.$get('PERF_SUMMARY_KEY');
     gas.upsertPerformanceRows_(SUMMARY, SUMMARY_HEADER, key,
       gas.psiSummaryRows_([lab('2026-09-10 08:00', 'mobile', 1, 'LCP', 9000)], '2026-09-10'));
     gas.upsertPerformanceRows_(SUMMARY, SUMMARY_HEADER, key,
@@ -139,7 +141,9 @@ describe('#152: agregat jest historią, nie widokiem „ostatni wynik”', () =>
     assert.equal(rows.length, 2, 'historia median, nie nadpisanie');
     assert.deepEqual(
       rows.map(row => [row[COL.pomiar], row[COL.median]]).sort(),
-      [['2026-09-10 08:00', 9000], ['2026-09-12 10:00', 2000]],
+      // Zapis kanonizuje `Pomiar` (#168): znacznik sprzed sekund dostaje `:00`,
+      // ta sama chwila w jednej postaci po obu stronach zakładki.
+      [['2026-09-10 08:00:00', 9000], ['2026-09-12 10:00:00', 2000]],
       'stary baseline przetrwał — bez niego porównanie przed/po jest niemożliwe'
     );
   });

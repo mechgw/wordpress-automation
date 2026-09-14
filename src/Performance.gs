@@ -23,16 +23,44 @@ const PERF_FIELD_HEADER = ['Okres do', 'URL', 'Form factor', 'Metryka', 'p75', '
 const PERF_LAB_HEADER = ['Pomiar', 'URL', 'Strategia', 'Próba', 'Metryka', 'Wartość', 'Źródło', 'Pobrano', 'Wyzwolenie'];
 
 /**
+ * Kanoniczne postaci wartości czasowych. Deklaruje je WYWOŁUJĄCY per kolumna,
+ * bo zależą od kontraktu zakładki, a nie od typu wartości w komórce (#155, #168).
+ *
+ * Sprowadzenie każdej daty do pełnego znacznika zepsułoby „CWV FIELD”: `Okres do`
+ * to doba CrUX, więc `2026-09-09 00:00:00` po jednej stronie klucza i `2026-09-09`
+ * po drugiej rozjechałyby idempotencję, tylko w drugą stronę niż przed #155.
+ */
+const PERF_CANONICAL_DAY = 'yyyy-MM-dd';
+const PERF_CANONICAL_MEASUREMENT = 'yyyy-MM-dd HH:mm:ss';
+
+/**
+ * Jedyna kolumna trzymana jako kanoniczny TEKST (#168).
+ *
+ * Rozpoznajemy ją po nazwie w nagłówku, bo to ona niesie kontrakt: te same cztery
+ * pierwsze kolumny łączą „PAGESPEED LAB”, „PAGESPEED FINDINGS” i „PERFORMANCE
+ * SUMMARY”. Zakładka bez `Pomiar` — czyli „CWV FIELD” — nie jest ruszana.
+ */
+const PERF_MEASUREMENT_COLUMN = 'Pomiar';
+
+/** Format „zwykły tekst”: wyłącza parsowanie zapisanego łańcucha na datę. */
+const PERF_TEXT_FORMAT = '@';
+
+/**
  * Klucz zapisu „CWV FIELD” (#155). Liczba znaczy „porównuj surowe wartości”,
  * obiekt — „sprowadź do tej postaci przed porównaniem”.
  *
  * `Okres do` wymaga postaci kanonicznej, bo arkusz parsuje zapisany tam łańcuch
- * `RRRR-MM-DD` na wartość daty i przy odczycie oddaje obiekt `Date`. Kanoniczną
- * postać deklaruje wywołujący PER KOLUMNĘ, nie zgaduje jej typ wartości: ta sama
- * funkcja obsługuje zakładki o różnych kontraktach, a sprowadzenie każdej daty
- * do pełnego znacznika zepsułoby „CWV FIELD” w drugą stronę.
+ * `RRRR-MM-DD` na wartość daty i przy odczycie oddaje obiekt `Date`.
  */
-const PERF_FIELD_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2, 3];
+const PERF_FIELD_KEY = [{ column: 0, dateFormat: PERF_CANONICAL_DAY }, 1, 2, 3];
+
+/**
+ * Klucze zapisu zakładek PSI. `Pomiar` jest pierwszą kolumną każdej z nich, więc
+ * wymaga tej samej postaci kanonicznej po obu stronach porównania — inaczej ten
+ * sam przebieg odczytany raz jako data, raz jako tekst nie rozpoznaje sam siebie.
+ */
+const PERF_LAB_KEY = [{ column: 0, dateFormat: PERF_CANONICAL_MEASUREMENT }, 1, 2, 3, 4];
+const PERF_SUMMARY_KEY = [{ column: 0, dateFormat: PERF_CANONICAL_MEASUREMENT }, 1, 2, 3];
 
 /**
  * Ile ostatnich pomiarów zostaje w surowych próbach „PAGESPEED LAB” (#152).
@@ -42,23 +70,6 @@ const PERF_FIELD_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2, 3];
  * w „PERFORMANCE SUMMARY” na zawsze i to one są podstawą porównań przed/po.
  */
 const PERF_LAB_KEEP_MEASUREMENTS = 8;
-
-/**
- * Kanoniczny znacznik przebiegu, porównywalny między zakładkami.
- *
- * `Pomiar` bywa w arkuszu datą albo tekstem, a przed #156 nie miał sekund — więc
- * te same przebiegi w „PAGESPEED LAB” i „PERFORMANCE SUMMARY” potrafią wyglądać
- * inaczej po obu stronach. Retencja musi je zestawić, bo od tego zależy, czy wolno
- * coś usunąć. Rozjeźdż typów jako taki należy do #168; tu sprowadzamy obie postaci
- * do jednej wyłącznie na potrzeby porównania, niczego nie zapisując.
- */
-function perfMeasurementKey_(value) {
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm:ss');
-  }
-  const text = String(value === null || value === undefined ? '' : value).trim();
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text) ? text + ':00' : text;
-}
 
 /**
  * Wiersz, który nie opisuje pomiaru, tylko dostępność danych dla pary
@@ -573,7 +584,11 @@ function replaceFindingsScopes_(rows, scopes) {
     return String(row[1] || '') !== '' && !replaced[scopeOf(row)];
   });
 
-  const combined = kept.concat(rows);
+  // Ta zakładka nie idzie przez upsert, więc kanonizacja `Pomiar` musi być tutaj
+  // osobno — zmiana samego helpera zapisu nie objęłaby jej (#168).
+  const combined = perfCanonicalMeasurementRows_(
+    sheet, PERF_FINDINGS_HEADER, kept.concat(rows), performanceTimeZone_()
+  );
   writeRowsThenTrim_(sheet, width, combined, lastRow);
   return { written: rows.length, kept: kept.length };
 }
@@ -670,10 +685,103 @@ function psiMedians_(rows) {
  * duplikat, któremu ta normalizacja ma zapobiegać.
  */
 function performanceKeyPart_(value, dateFormat, timeZone) {
-  if (dateFormat && value instanceof Date) {
-    return Utilities.formatDate(value, timeZone, dateFormat);
+  if (!dateFormat) return String(value);
+  return performanceCanonicalDate_(value, dateFormat, timeZone);
+}
+
+/**
+ * JEDYNA definicja kanonicznej postaci wartości czasowej (#168).
+ *
+ * Ta sama funkcja obsługuje trzy ścieżki — budowę klucza, nowy zapis i migrację
+ * historii — bo inaczej „kanoniczny” znaczyłoby co innego w każdej z nich, a to
+ * jest dokładnie stan, który ta issue naprawia.
+ *
+ * Znacznik bez sekund pochodzi sprzed #156 i opisuje pełną minutę, więc dopisujemy
+ * `:00` zamiast uznać go za inny przebieg. Reguła dotyczy wyłącznie znacznika
+ * pomiaru: w postaci dziennej sekund nie ma czego uzupełniać.
+ */
+function performanceCanonicalDate_(value, dateFormat, timeZone) {
+  if (value instanceof Date) return Utilities.formatDate(value, timeZone, dateFormat);
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  if (dateFormat === PERF_CANONICAL_MEASUREMENT && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) {
+    return text + ':00';
   }
-  return String(value);
+  return text;
+}
+
+/**
+ * Strefa ARKUSZA — jedyne źródło prawdy dla kluczy, nowych zapisów i migracji.
+ *
+ * Nie `Session.getScriptTimeZone()`: strefa skryptu jest przypięta w
+ * `src/appsscript.json`, a strefę arkusza właściciel zmienia w Plik → Ustawienia
+ * i nic w repozytorium tego nie pilnuje. Komórka z datą to północ w strefie
+ * ARKUSZA, więc tylko ta strefa odwraca to, co arkusz zrobił przy zapisie.
+ *
+ * Wywoływana raz na operację, nie raz na wiersz.
+ */
+function performanceTimeZone_() {
+  return SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+}
+
+/**
+ * Format tekstowy kolumny `Pomiar`; zwraca jej indeks albo -1, gdy zakładka
+ * takiej kolumny nie ma.
+ *
+ * Kolejność jest częścią kontraktu: wywołanie MUSI poprzedzać zapis. Odwrotna —
+ * najpierw zapis, potem format — pozwala arkuszowi sparsować właśnie zapisane
+ * łańcuchy z powrotem na daty, więc kolumna znów trzyma dwa typy, choć kod
+ * „zrobił swoje”.
+ *
+ * Miejsce w siatce robimy tutaj, przed formatowaniem: wiersze dołożone dopiero
+ * przy zapisie miałyby format domyślny, czyli ten, który parsuje — a to właśnie
+ * wiersze poniżej dotychczasowego końca danych rozjechały się w #168.
+ */
+function perfSetMeasurementTextFormat_(sheet, header, rowsNeeded) {
+  const column = header.indexOf(PERF_MEASUREMENT_COLUMN);
+  if (column < 0) return -1;
+  ensureSheetRows_(sheet, rowsNeeded + 1);
+  const dataRows = sheet.getMaxRows() - 1;
+  if (dataRows > 0) sheet.getRange(2, column + 1, dataRows, 1).setNumberFormat(PERF_TEXT_FORMAT);
+  return column;
+}
+
+/**
+ * Wiersze gotowe do zapisu: format tekstowy ustawiony (patrz wyżej — kolejność
+ * jest kontraktem), `Pomiar` w każdym wierszu sprowadzony do postaci kanonicznej.
+ *
+ * Dotyczy ścieżek, które i tak przepisują całe wiersze — upsertu i podmiany
+ * zakresów ustaleń. Migracja historii idzie inaczej: tam zapisujemy wyłącznie
+ * jedną kolumnę, żeby nie zamienić cudzych formuł na ich wyniki.
+ */
+function perfCanonicalMeasurementRows_(sheet, header, rows, timeZone) {
+  const column = perfSetMeasurementTextFormat_(sheet, header, rows.length);
+  if (column < 0) return rows;
+  return rows.map(function (row) {
+    const copy = row.slice();
+    copy[column] = performanceCanonicalDate_(copy[column], PERF_CANONICAL_MEASUREMENT, timeZone);
+    return copy;
+  });
+}
+
+/**
+ * Kolumna `Pomiar` w kluczu MUSI deklarować postać kanoniczną (#168).
+ *
+ * Zapis sprowadza tę kolumnę do kanonicznego tekstu, więc klucz liczony z surowej
+ * wartości przestałby rozpoznawać własny wiersz zaraz po pierwszym zapisie
+ * i historia zaczęłaby się dublować — cicho, bo pojedynczy przebieg wygląda wtedy
+ * poprawnie. Deklarację zostawiamy wywołującemu, bo zakładki mają różne kontrakty,
+ * ale rozminięcie się z zapisem ma wywrócić pierwsze wywołanie, a nie mnożyć wiersze.
+ */
+function perfAssertMeasurementKey_(sheetName, header, parts) {
+  const column = header.indexOf(PERF_MEASUREMENT_COLUMN);
+  if (column < 0) return;
+  const declared = parts.filter(function (part) { return part.column === column; });
+  if (!declared.length) return;
+  if (declared.every(function (part) { return part.dateFormat === PERF_CANONICAL_MEASUREMENT; })) return;
+  throw new Error(
+    'Zakładka „' + sheetName + '”: kolumna „' + PERF_MEASUREMENT_COLUMN + '” w kluczu zapisu musi ' +
+    'deklarować postać „' + PERF_CANONICAL_MEASUREMENT + '”, bo zapis sprowadza ją do tej postaci.'
+  );
 }
 
 /**
@@ -699,10 +807,11 @@ function performanceRowTime_(value) {
  */
 function upsertPerformanceRows_(sheetName, header, keyColumns, rows, obsolete) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
-  const timeZone = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+  const timeZone = performanceTimeZone_();
   const parts = keyColumns.map(function (entry) {
     return typeof entry === 'object' ? entry : { column: entry, dateFormat: '' };
   });
+  perfAssertMeasurementKey_(sheetName, header, parts);
   const keyOf = function (row) {
     return parts.map(function (part) {
       return performanceKeyPart_(row[part.column], part.dateFormat, timeZone);
@@ -739,7 +848,10 @@ function upsertPerformanceRows_(sheetName, header, keyColumns, rows, obsolete) {
   Object.keys(best).forEach(function (key) { chosen[best[key]] = true; });
   const kept = existing.filter(function (row, index) { return chosen[index] === true; });
 
-  const combined = kept.concat(rows);
+  // Kanonizacja obejmuje też wiersze zachowane: `writeRowsThenTrim_` przepisuje
+  // całą zakładkę, więc każdy zapis zostawia `Pomiar` w jednej postaci zamiast
+  // utrwalać tę, w której wiersz akurat wrócił z odczytu (#168).
+  const combined = perfCanonicalMeasurementRows_(sheet, header, kept.concat(rows), timeZone);
   writeRowsThenTrim_(sheet, header.length, combined, lastRow);
   return { written: rows.length, kept: kept.length };
 }
@@ -833,9 +945,15 @@ function psiDailyBudget_() {
   return isFinite(raw) && raw > 0 ? Math.floor(raw) : PSI_DEFAULT_DAILY_BUDGET;
 }
 
-/** Dzień budżetu w strefie arkusza; licznik zeruje się przy zmianie doby. */
+/**
+ * Dzień budżetu w strefie arkusza; licznik zeruje się przy zmianie doby.
+ *
+ * Strefa arkusza, bo doba budżetu jest pojęciem operatora — tego samego, który
+ * patrzy na zakładki. Kod liczył ją dotąd w strefie skryptu wbrew temu opisowi;
+ * po #168 plik ma jedno źródło strefy i ta rozbieżność znika razem z nim.
+ */
 function psiBudgetDay_(now) {
-  return Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return Utilities.formatDate(now, performanceTimeZone_(), PERF_CANONICAL_DAY);
 }
 
 /** Stan licznika: `{ day, used }`. Inny dzień znaczy licznik od zera. */
@@ -888,7 +1006,10 @@ function runPsiMeasurement_(trigger) {
   // kasował wiersze drugiego. Blokada z D1 nie dopuszcza dwóch równoległych
   // przebiegów, a jeden trwa minuty, więc sekunda wystarcza i `run_id` byłby
   // drugim mechanizmem unikalności obok istniejącego klucza.
-  const measuredAt = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  //
+  // Strefa ARKUSZA, nie skryptu (#168): znacznik jest kluczem porównywanym z
+  // wartościami odczytanymi z komórek, a te wracają jako chwile w strefie arkusza.
+  const measuredAt = Utilities.formatDate(now, performanceTimeZone_(), PERF_CANONICAL_MEASUREMENT);
   const startedAt = Date.now();
   const rows = [];
   const start = psiStartIndex_(urls.length);
@@ -991,8 +1112,8 @@ function runPsiMeasurement_(trigger) {
       // w `PAGESPEED LAB` bez agregatu i nigdy by go nie dostał, bo kursor nie
       // ruszył, a kolejny przebieg ma już inny `Pomiar`.
       const summaryRows = psiSummaryRows_(addressRows, now);
-      upsertPerformanceRows_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER, [0, 1, 2, 3], summaryRows);
-      upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, [0, 1, 2, 3, 4], addressRows);
+      upsertPerformanceRows_(PERF_SUMMARY_SHEET, PERF_SUMMARY_HEADER, PERF_SUMMARY_KEY, summaryRows);
+      upsertPerformanceRows_(PERF_LAB_SHEET, PERF_LAB_HEADER, PERF_LAB_KEY, addressRows);
       addressRows.forEach(function (row) { rows.push(row); });
 
       // Kompletność zakresu liczymy z FAKTYCZNIE powstałych median, nie z tego,

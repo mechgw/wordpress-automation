@@ -69,7 +69,7 @@ describe('sitemapy: lista w arkuszu', () => {
     assert.match(gas.$alerts[0][0], /\nUWAGA:\n- https:\/\/www\.example\.pl\/page-sitemap\.xml: błędy: 3$/);
 
     gas.showImportStatus();
-    assert.match(gas.$alerts[1][0], /\nSitemapy: 2 \| UWAGA: https:\/\/www\.example\.pl\/page-sitemap\.xml: błędy: 3 \(sprawdzono \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)\nAlerty e-mail:/);
+    assert.match(gas.$alerts[1][0], /\nSitemapy: 2 \| UWAGA: https:\/\/www\.example\.pl\/page-sitemap\.xml: błędy: 3 \(sprawdzono \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)\n/);
   });
 
   test('T2b: isPending dłużej niż 7 dni od zgłoszenia → UWAGA; świeże oczekiwanie → OK; oczekiwanie bez daty → UWAGA', () => {

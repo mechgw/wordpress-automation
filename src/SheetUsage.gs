@@ -113,6 +113,7 @@ function summaryCoverage_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(PERF_SUMMARY_SHEET);
   const covered = {};
   if (!sheet || sheet.getLastRow() < 2) return covered;
+  const timeZone = performanceTimeZone_();
 
   sheet.getRange(2, 1, sheet.getLastRow() - 1, PERF_SUMMARY_HEADER.length).getValues()
     .forEach(function (row) {
@@ -125,7 +126,7 @@ function summaryCoverage_() {
       // wstawiona ręcznie uchodziłyby za medianę. Zero zostaje poprawne (CLS bywa zerem).
       const median = row[4];
       if (typeof median !== 'number' || !isFinite(median)) return;
-      covered[perfMeasurementKey_(row[0]) + ' | ' + String(row[1]) + ' | ' + String(row[2]) + ' | ' + String(row[3])] = true;
+      covered[performanceCanonicalDate_(row[0], PERF_CANONICAL_MEASUREMENT, timeZone) + ' | ' + String(row[1]) + ' | ' + String(row[2]) + ' | ' + String(row[3])] = true;
     });
   return covered;
 }
@@ -149,12 +150,13 @@ function planLabCleanup_(onlyMeasurements) {
 
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, PERF_LAB_HEADER.length).getValues();
   const covered = summaryCoverage_();
+  const timeZone = performanceTimeZone_();
   const order = [];
   const byMeasurement = {};
 
   values.forEach(function (row, i) {
     if (String(row[1] || '') === '') return;
-    const key = perfMeasurementKey_(row[0]);
+    const key = performanceCanonicalDate_(row[0], PERF_CANONICAL_MEASUREMENT, timeZone);
     if (!byMeasurement[key]) {
       byMeasurement[key] = { rows: [], pairs: {} };
       order.push(key);
