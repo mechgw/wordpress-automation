@@ -126,7 +126,16 @@ function sheetPlan_() {
   return plan;
 }
 
-/** Buduje treść arkusza START z planu. */
+/**
+ * Buduje treść arkusza START z planu: wiersze wartości i, równolegle, adresy
+ * linków kolumny A (pusty łańcuch = bez linku).
+ *
+ * Link NIE jest formułą (#175). `=HYPERLINK(…)` zapisane przez `setValues` Arkusze
+ * parsują w ustawieniach regionalnych pliku, a przy dziesiętnym przecinku separatorem
+ * argumentów jest średnik — formuła z przecinkiem dawała `#ERROR!` w całej kolumnie.
+ * Zamiana przecinka na średnik przeniosłaby błąd do plików z kropką dziesiętną;
+ * rich text usuwa zależność, a nazwa zakładki przestaje być fragmentem składni.
+ */
 function startSheetRows_(plan) {
   const url = spreadsheetUrl_().replace(/#.*$/, '').replace(/\/edit.*$/, '/edit');
   const ss = SpreadsheetApp.getActive();
@@ -136,15 +145,14 @@ function startSheetRows_(plan) {
     [],
     START_HEADER
   ];
+  const links = rows.map(() => '');
   plan.forEach(item => {
     if (item.name === START_SHEET) return;
     const sheet = ss.getSheetByName(item.name);
-    // Cudzysłów w nazwie arkusza podwajamy, jak każdy tekst w formule Sheets.
-    const label = String(item.name).replace(/"/g, '""');
-    const link = sheet ? '=HYPERLINK("' + url + '#gid=' + sheet.getSheetId() + '","' + label + '")' : item.name;
-    rows.push([link, sheetCategory_(item.category).label, item.owner, item.description]);
+    rows.push([item.name, sheetCategory_(item.category).label, item.owner, item.description]);
+    links.push(sheet ? url + '#gid=' + sheet.getSheetId() : '');
   });
-  return rows;
+  return { rows: rows, links: links };
 }
 
 /**
@@ -172,15 +180,22 @@ function writeStartSheet_(plan) {
     throw new Error('Arkusz „' + START_SHEET + '” istnieje i nie został utworzony przez skrypt (A1 nie zaczyna się od „' +
       START_SIGNATURE + '”). Zmień jego nazwę albo opróżnij go, potem uruchom porządkowanie ponownie. Nic nie zostało zmienione.');
   }
-  const rows = startSheetRows_(plan);
+  const content = startSheetRows_(plan);
   const width = START_HEADER.length;
+  const values = content.rows.map(row => row.concat(new Array(Math.max(0, width - row.length)).fill('')));
   sheet.clear();
-  rows.forEach((row, i) => {
-    const padded = row.concat(new Array(Math.max(0, width - row.length)).fill(''));
-    sheet.getRange(i + 1, 1, 1, width).setValues([padded]);
-  });
+  // Dwa zapisy na cały arkusz, niezależnie od liczby zakładek (#175, #118): wcześniej
+  // pętla pisała wiersz po wierszu, czyli jedno wywołanie usługi na zakładkę.
+  ensureSheetRows_(sheet, values.length);
+  sheet.getRange(1, 1, values.length, width).setValues(values);
+  // RichTextValue także w komórkach bez linku (uwaga z audytu #175): macierz jest
+  // pełna, zamiast polegać na tym, co Apps Script zrobi z `null`.
+  sheet.getRange(1, 1, values.length, 1).setRichTextValues(values.map((row, i) => {
+    const text = SpreadsheetApp.newRichTextValue().setText(String(row[0]));
+    return [content.links[i] ? text.setLinkUrl(content.links[i]).build() : text.build()];
+  }));
   sheet.setFrozenRows(4);
-  return rows.length;
+  return content.rows.length;
 }
 
 /**
