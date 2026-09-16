@@ -77,6 +77,14 @@ function parseA1(a1, gridRows = 1) {
 }
 
 /**
+ * RichTextValue: tekst komórki i opcjonalny link (#175). Tylko to, co czytają
+ * źródła i testy — `getText()` i `getLinkUrl()`.
+ */
+function makeRichTextValue(text, link) {
+  return { getText: () => text, getLinkUrl: () => link, $richText: true };
+}
+
+/**
  * A sheet is a 2D grid with 1-based semantics (grid[r-1][c-1]); the fixture
  * rows start at row 1. Cells outside the grid read as ''.
  */
@@ -136,6 +144,12 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
   const clearFormula = (row, col) => {
     if (formulas[row - 1] && formulas[row - 1].length >= col) formulas[row - 1][col - 1] = '';
   };
+  // Linki rich text, równolegle do wartości. Zwykły zapis wartości zastępuje
+  // treść komórki razem z linkiem — tak jak w Arkuszach.
+  const links = [];
+  const clearLink = (row, col) => {
+    if (links[row - 1] && links[row - 1].length >= col) links[row - 1][col - 1] = null;
+  };
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
@@ -191,6 +205,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
       ensure(row, col);
       grid[row - 1][col - 1] = parseCell(value, row, col);
       clearFormula(row, col);
+      clearLink(row, col);
       return this;
     },
     setValues(values) {
@@ -199,13 +214,50 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
         ensure(row + i, col + j);
         grid[row + i - 1][col + j - 1] = parseCell(v, row + i, col + j);
         clearFormula(row + i, col + j);
+        clearLink(row + i, col + j);
       }));
       return this;
     },
+    /**
+     * Rich text zapisuje TEKST (nie jest parsowany ani jako formuła, ani jako
+     * data) i link. Wymiary muszą się zgadzać z zakresem, a każda komórka musi
+     * być RichTextValue — także ta bez linku (uwaga z audytu #175): nie polegamy
+     * na tym, co Apps Script zrobi z `null` w macierzy.
+     */
+    setRichTextValues(values) {
+      if (values.length !== rows || values.some(line => line.length !== cols)) {
+        throw new Error(`The number of rows or columns in the data does not match the range (${rows}x${cols}) of "${name}".`);
+      }
+      values.forEach((line, i) => line.forEach((v, j) => {
+        if (!v || v.$richText !== true) {
+          throw new Error(`Sheet stub: setRichTextValues wymaga RichTextValue w każdej komórce (R${row + i}C${col + j} ma ${v}).`);
+        }
+        checkCell(v.getText(), row + i, col + j);
+        ensure(row + i, col + j);
+        grid[row + i - 1][col + j - 1] = v.getText();
+        clearFormula(row + i, col + j);
+        while (links.length < row + i) links.push([]);
+        links[row + i - 1][col + j - 1] = v.getLinkUrl();
+      }));
+      return this;
+    },
+    getRichTextValues: () => {
+      const out = [];
+      for (let r = row; r < row + rows; r++) {
+        const line = [];
+        for (let c = col; c < col + cols; c++) {
+          line.push(makeRichTextValue(String((grid[r - 1] || [])[c - 1] ?? ''), (links[r - 1] || [])[c - 1] ?? null));
+        }
+        out.push(line);
+      }
+      return out;
+    },
+    getRichTextValue: () => makeRichTextValue(String((grid[row - 1] || [])[col - 1] ?? ''), (links[row - 1] || [])[col - 1] ?? null),
     clearContent() {
       for (let r = row; r < row + rows; r++) {
         for (let c = col; c < col + cols; c++) {
           if (grid[r - 1] && grid[r - 1].length >= c) grid[r - 1][c - 1] = '';
+          clearLink(r, c);
         }
       }
       return this;
@@ -263,7 +315,8 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     hideSheet() { sheet.$hidden = true; return sheet; },
     showSheet() { sheet.$hidden = false; return sheet; },
     isSheetHidden: () => sheet.$hidden,
-    clear() { grid.length = 0; return sheet; },
+    // clear() w Arkuszach usuwa treść razem z formułami i linkami.
+    clear() { grid.length = 0; formulas.length = 0; links.length = 0; return sheet; },
     getRange: (...args) => {
       if (typeof args[0] === 'string') {
         const { row, col, rows, cols } = parseA1(args[0], grid.length);
@@ -276,13 +329,14 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     getMaxRows: () => maxRows,
     getMaxColumns: () => maxCols,
     insertRowsAfter(after, howMany = 1) { maxRows += howMany; return sheet; },
-    insertRowBefore(row) { grid.splice(row - 1, 0, []); numberFormats.splice(row - 1, 0, []); return this; },
+    insertRowBefore(row) { grid.splice(row - 1, 0, []); numberFormats.splice(row - 1, 0, []); links.splice(row - 1, 0, []); return this; },
     insertColumnsAfter(after, howMany = 1) { maxCols += howMany; return sheet; },
     // Usunięcie wierszy zmniejsza też siatkę, tak jak w Arkuszach; bez tego
     // przycinanie pustego przydziału (#118) wyglądałoby w testach na nieskuteczne.
     deleteRows(row, n = 1) {
       grid.splice(row - 1, n);
       numberFormats.splice(row - 1, n);
+      links.splice(row - 1, n);
       maxRows = Math.max(1, maxRows - n);
       return this;
     },
@@ -381,6 +435,22 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
     getActive: () => active,
     getUi: () => ui,
     flush() {},
+    // Budowniczy RichTextValue (#175). Tylko link na całym tekście: wariant
+    // z przedziałem znaków rzuca, zamiast udawać, że działa.
+    newRichTextValue() {
+      let text = '';
+      let link = null;
+      const builder = {
+        setText(value) { text = String(value); return builder; },
+        setLinkUrl(...args) {
+          if (args.length !== 1) throw new Error('Sheet stub: obsługiwane jest tylko setLinkUrl(url) na całym tekście.');
+          link = args[0] === null ? null : String(args[0]);
+          return builder;
+        },
+        build: () => makeRichTextValue(text, link)
+      };
+      return builder;
+    },
     $sheet: name => (sheetFor(name) || {}).$grid,
     $order: () => order.slice(),
     $ui: ui,

@@ -597,6 +597,13 @@ function ensureGa4BusinessSheet_() {
   }
 
   // KPI na dashboardzie — tylko jeśli wiersz 8 jest pusty.
+  //
+  // Te cztery formuły ZOSTAJĄ formułami (#175): to liczby liczone na żywo z zakresu
+  // dat w E2, a nie etykiety ani linki, więc rich text ich nie zastąpi. Separator `;`
+  // jest ZAŁOŻENIEM, nie przypadkiem: `setValues` zapisuje formułę tak, jakby wpisał
+  // ją człowiek, czyli w ustawieniach regionalnych pliku, i działa tylko w pliku
+  // z dziesiętnym przecinkiem. W pliku z kropką dziesiętną ten wiersz pokaże `#ERROR!`
+  // z tego samego powodu, z którego przecinek psuł linki w arkuszu START.
   const dash = ss.getSheetByName('Analityka marketingowa');
   if (dash && dash.getRange('A8:H8').isBlank()) {
     dash.getRange('A8:H8').setValues([[

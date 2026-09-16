@@ -30,6 +30,14 @@ function sheets(extra = {}) {
 }
 
 const project = (extra, opts = {}) => loadProject(Object.assign({ sheets: sheets(extra) }, opts));
+const LINK_BASE = 'https://docs.google.com/spreadsheets/d/test-sheet/edit#gid=';
+const gidOf = (gas, name) => gas.SpreadsheetApp.getActive().getSheetByName(name).getSheetId();
+/** Kolumna A arkusza START tak, jak widzi ją człowiek: tekst i adres, pod który prowadzi kliknięcie. */
+const startColumnA = gas => {
+  const sheet = gas.SpreadsheetApp.getActive().getSheetByName(START);
+  return sheet.getRange(1, 1, sheet.getLastRow(), 1).getRichTextValues()
+    .map(line => ({ text: line[0].getText(), link: line[0].getLinkUrl() }));
+};
 const names = gas => gas.SpreadsheetApp.getActive().getSheets().map(s => s.getName());
 const colors = gas => Object.fromEntries(gas.SpreadsheetApp.getActive().getSheets().map(s => [s.getName(), s.getTabColor()]));
 
@@ -100,15 +108,15 @@ describe('#78: arkusz START', () => {
     assert.match(grid[1][0], /Odświeżany przez Dane → Uporządkuj arkusze/);
     assert.deepEqual(grid[3], HEADER);
 
-    const gid = gas.SpreadsheetApp.getActive().getSheetByName('Kierunki SEO').getSheetId();
-    assert.deepEqual(grid[4], ['=HYPERLINK("https://docs.google.com/spreadsheets/d/test-sheet/edit#gid=' + gid + '","Kierunki SEO")', 'Analiza (arkusze własne)', 'człowiek', 'Arkusz własny, nie zarządzany przez skrypt.']);
+    assert.deepEqual(grid[4], ['Kierunki SEO', 'Analiza (arkusze własne)', 'człowiek', 'Arkusz własny, nie zarządzany przez skrypt.']);
+    assert.deepEqual(startColumnA(gas)[4], { text: 'Kierunki SEO', link: LINK_BASE + gidOf(gas, 'Kierunki SEO') });
 
     const rows = grid.slice(4);
     assert.equal(rows.length, 10, 'every sheet except START');
-    assert.ok(!rows.some(r => String(r[0]).includes('"START"')), 'START does not list itself');
-    const raw = rows.find(r => String(r[0]).includes('"GSC RAW"'));
+    assert.ok(!rows.some(r => r[0] === START), 'START does not list itself');
+    const raw = rows.find(r => r[0] === 'GSC RAW');
     assert.deepEqual(raw.slice(1), ['Dane surowe i logi', 'skrypt', 'Surowe dane Search Console. Nie edytuj ręcznie.']);
-    const commands = rows.find(r => String(r[0]).includes('"WP COMMANDS"'));
+    const commands = rows.find(r => r[0] === 'WP COMMANDS');
     assert.equal(commands[2], 'człowiek + skrypt');
   });
 
@@ -117,6 +125,7 @@ describe('#78: arkusz START', () => {
     const gas = loadProject({ sheets: s });
     gas.uporzadkujArkusze();
     const first = plain(gas.$sheet(START)).length;
+    assert.ok(plain(gas.$sheet(START)).some(r => r[0] === 'Quick wins'), 'warunek wstępny: pierwszy spis zawiera arkusz');
 
     delete s['Quick wins'];
     delete s['GA4 RAW'];
@@ -124,7 +133,7 @@ describe('#78: arkusz START', () => {
     gas2.uporzadkujArkusze();
     const second = plain(gas2.$sheet(START));
     assert.equal(second.length, first - 2);
-    assert.ok(!second.some(r => String(r[0]).includes('"Quick wins"')));
+    assert.ok(!second.some(r => r[0] === 'Quick wins'));
   });
 
   test('wygenerowany wcześniej START jest przepisywany: stara treść znika, arkusz zostaje pierwszy', () => {
@@ -148,15 +157,6 @@ describe('#78: arkusz START', () => {
     assert.match(plain(empty.$sheet(START))[0][0], /^START – spis arkuszy/, 'an empty START is adopted');
   });
 
-  test('#78/Codex: cudzysłów w nazwie arkusza jest podwajany w formule HYPERLINK', () => {
-    const gas = project({ 'Raport "roczny"': [['a']] });
-    gas.uporzadkujArkusze();
-    const row = plain(gas.$sheet(START)).find(r => String(r[0]).includes('roczny'));
-    const label = String(row[0]).slice(String(row[0]).indexOf(',') + 1, -1);
-    assert.equal(label, '"Raport ""roczny"""');
-    assert.equal((String(row[0]).match(/"/g) || []).length % 2, 0, 'quotes stay balanced');
-  });
-
   test('wyścig o insertSheet: duplikat kończy się użyciem istniejącego arkusza, inny błąd nie jest ukrywany', () => {
     const gas = project({ [START]: [[SIGNATURE + ' (wersja skryptu: v1.0.0)']] });
     const ss = gas.SpreadsheetApp.getActive();
@@ -176,6 +176,113 @@ describe('#78: arkusz START', () => {
     bss.getSheetByName = name => (name === START ? null : brokenGet(name));
     bss.insertSheet = () => { throw new Error('brak uprawnień do dodania arkusza'); };
     assert.throws(() => broken.uporzadkujArkusze(), /brak uprawnień do dodania arkusza/);
+  });
+});
+
+/**
+ * #175: kolumna A arkusza START to linki rich text, nie formuły.
+ *
+ * `=HYPERLINK(…)` zapisane przez `setValues` jest parsowane w ustawieniach
+ * regionalnych pliku; przy dziesiętnym przecinku separatorem argumentów jest
+ * średnik, więc formuła z przecinkiem dawała `#ERROR!` w każdym wierszu. Testy
+ * sprawdzają to, co widzi i klika człowiek — tekst i adres linku — a nie łańcuch
+ * formuły, bo stub formuł nie oblicza i żaden test na łańcuch nie wykryłby błędu.
+ */
+describe('#175: kolumna A arkusza START', () => {
+  test('1: każdy wiersz danych prowadzi do SWOJEJ zakładki, a tekstem jest jej nazwa', () => {
+    const gas = project();
+    gas.uporzadkujArkusze();
+    const data = startColumnA(gas).slice(4);
+
+    assert.equal(data.length, 10, 'warunek wstępny: spis ma wiersze');
+    data.forEach(cell => {
+      assert.equal(cell.link, LINK_BASE + gidOf(gas, cell.text), cell.text + ': link do właściwej zakładki');
+    });
+    assert.equal(new Set(data.map(c => c.link)).size, data.length, 'żadne dwa wiersze nie prowadzą w to samo miejsce');
+  });
+
+  test('2: wpis bez istniejącej zakładki to sama nazwa, bez linku i bez błędu', () => {
+    const gas = project();
+    const plan = [
+      { name: START, category: 'start', owner: 'skrypt', description: 'spis' },
+      { name: 'Kierunki SEO', category: 'wlasne', owner: 'człowiek', description: 'jest' },
+      { name: 'Zakładka usunięta w międzyczasie', category: 'wlasne', owner: 'człowiek', description: 'nie ma' }
+    ];
+    gas.writeStartSheet_(plan);
+    const cells = startColumnA(gas).slice(4);
+
+    assert.deepEqual(cells[0], { text: 'Kierunki SEO', link: LINK_BASE + gidOf(gas, 'Kierunki SEO') });
+    assert.deepEqual(cells[1], { text: 'Zakładka usunięta w międzyczasie', link: null });
+  });
+
+  test('3: cudzysłów w nazwie trafia do komórki dosłownie — nie jest już fragmentem składni', () => {
+    const gas = project({ 'Raport "roczny"': [['a']] });
+    gas.uporzadkujArkusze();
+    const cell = startColumnA(gas).find(c => c.text.indexOf('roczny') >= 0);
+
+    assert.deepEqual(cell, { text: 'Raport "roczny"', link: LINK_BASE + gidOf(gas, 'Raport "roczny"') });
+  });
+
+  test('4: przecinek i średnik w nazwie nie mają znaczenia składniowego', () => {
+    const name = 'Koszty; paliwo, opłaty';
+    const gas = project({ [name]: [['a']] });
+    gas.uporzadkujArkusze();
+
+    assert.deepEqual(startColumnA(gas).find(c => c.text === name), { text: name, link: LINK_BASE + gidOf(gas, name) });
+  });
+
+  test('5: podpis, opis i nagłówek to zwykły tekst bez linku', () => {
+    const gas = project();
+    gas.uporzadkujArkusze();
+    const head = startColumnA(gas).slice(0, 4);
+
+    assert.match(head[0].text, /^START – spis arkuszy/);
+    assert.equal(head[3].text, 'Arkusz');
+    head.forEach((cell, i) => assert.equal(cell.link, null, 'wiersz ' + (i + 1) + ' bez linku'));
+  });
+
+  test('6: liczba zapisów do START nie rośnie z liczbą zakładek', () => {
+    const writes = extra => {
+      const gas = project(Object.assign({ [START]: [[SIGNATURE + ' (wersja skryptu: v1.0.0)']] }, extra));
+      const sheet = gas.SpreadsheetApp.getActive().getSheetByName(START);
+      const real = sheet.getRange.bind(sheet);
+      let count = 0;
+      sheet.getRange = (...args) => {
+        const range = real(...args);
+        ['setValues', 'setValue', 'setRichTextValues'].forEach(method => {
+          const original = range[method].bind(range);
+          range[method] = (...values) => { count++; return original(...values); };
+        });
+        return range;
+      };
+      gas.uporzadkujArkusze();
+      return count;
+    };
+    const many = {};
+    for (let i = 1; i <= 8; i++) many['Arkusz ' + i] = [['a']];
+
+    assert.equal(writes({}), 2, 'jeden zapis wartości i jeden zapis linków');
+    assert.equal(writes(many), 2, 'osiem zakładek więcej, ta sama liczba wywołań');
+  });
+
+  test('START nie zawiera ani jednej formuły — niezależnie od ustawień regionalnych pliku', () => {
+    const gas = project();
+    gas.uporzadkujArkusze();
+    const sheet = gas.SpreadsheetApp.getActive().getSheetByName(START);
+    const values = sheet.getRange(1, 1, sheet.getLastRow(), 4).getValues();
+
+    assert.ok(values.length > 4, 'warunek wstępny: spis ma wiersze');
+    assert.deepEqual(values.flat().filter(v => String(v).charAt(0) === '='), [], 'żadna komórka nie jest formułą');
+  });
+
+  test('ponowne porządkowanie odtwarza linki — clear() nie zostawia spisu bez nich', () => {
+    const gas = project();
+    gas.uporzadkujArkusze();
+    const first = startColumnA(gas);
+    gas.uporzadkujArkusze();
+
+    assert.deepEqual(startColumnA(gas), first);
+    assert.ok(first.slice(4).every(c => c.link), 'każdy wiersz danych ma link');
   });
 });
 
@@ -250,7 +357,7 @@ describe('#78: katalog i menu', () => {
     assert.equal(c['Analiza'], null);
     assert.deepEqual(names(gas), ['START', 'Analiza', 'Konfiguracja GA4', 'GA4 LANDING', 'GA4 ADS']);
     const rows = plain(gas.$sheet(START)).slice(4);
-    assert.equal(rows.find(r => String(r[0]).includes('"GA4 LANDING"'))[1], 'Dane surowe i logi');
+    assert.equal(rows.find(r => r[0] === 'GA4 LANDING')[1], 'Dane surowe i logi');
     assert.deepEqual(plain(gas.ukryjArkuszeTechniczne()), ['GA4 LANDING', 'GA4 ADS']);
 
     // Bez arkusza konfiguracji katalog wraca do nazw domyślnych zamiast paść.
@@ -267,7 +374,7 @@ describe('#78: katalog i menu', () => {
     assert.deepEqual(names(gas).slice(0, 4), ['START', 'Kierunki SEO', 'Quick wins', 'Dziennik zmian'], 'zostaje wśród arkuszy własnych');
     assert.equal(out.own, 3, 'liczony jako arkusz własny, nie skryptu');
 
-    const row = plain(gas.$sheet(START)).slice(4).find(r => String(r[0]).includes('"Dziennik zmian"'));
+    const row = plain(gas.$sheet(START)).slice(4).find(r => r[0] === 'Dziennik zmian');
     assert.deepEqual(row.slice(1), ['Analiza (arkusze własne)', 'człowiek', 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.']);
     assert.equal(plain(gas.ukryjArkuszeTechniczne()).includes('Dziennik zmian'), false, 'nigdy nie jest ukrywany');
   });
@@ -282,7 +389,7 @@ describe('#78: katalog i menu', () => {
     gas.uporzadkujArkusze();
 
     assert.equal(colors(gas)['Dziennik zmian'], '#434343', 'liczy się wpis arkusza skryptu, nie człowieka');
-    const row = plain(gas.$sheet(START)).slice(4).find(r => String(r[0]).includes('"Dziennik zmian"'));
+    const row = plain(gas.$sheet(START)).slice(4).find(r => r[0] === 'Dziennik zmian');
     assert.equal(row[1], 'Dane surowe i logi');
     assert.equal(row[3], 'Surowe dane GA4: strony docelowe. Nie edytuj ręcznie.');
     assert.deepEqual(plain(gas.ukryjArkuszeTechniczne()), ['Dziennik zmian'], 'ukrywanie i opis mówią to samo');
