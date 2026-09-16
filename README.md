@@ -117,11 +117,18 @@ Pojedyncza podstrona rzadko ma dość ruchu, żeby CrUX ją opisał, a cała dom
 
 Dwie decyzje wpływające na wiarygodność. Brak danych terenowych jest zapisywany jako `INSUFFICIENT_DATA`, nigdy jako zero: zero znaczyłoby wynik doskonały, czyli dokładną odwrotność prawdy. Pomiar laboratoryjny wykonuje trzy próby na adres i strategię, zapisuje każdą osobno i porównuje przez medianę, bo Lighthouse jest zmienny i pojedynczy słaby wynik nie jest dowodem regresji.
 
-Nieudany przebieg Lighthouse nie przerywa pomiaru. PageSpeed potrafi zwrócić błąd dla pojedynczego adresu i zdarza się to losowo po stronie Google; taka próba jest liczona jako nieudana, pozostałe idą dalej, a raport wymienia adres i strategię wraz z liczbą udanych prób. Przerwanie następuje wyłącznie przy błędzie systemowym, czyli złym kluczu albo wyczerpanym limicie, bo kolejne próby dałyby to samo i tylko zużyły limit.
+Nieudana próba Lighthouse nie zawsze przerywa pomiar — i nie zawsze jest szumem. Próba zakończona **błędem 5xx** jest liczona jako nieudana, pozostałe idą dalej, a raport wymienia adres i strategię wraz z liczbą udanych prób; mediana liczy się z udanych. **Każdy inny błąd przerywa cały przebieg**: zły klucz (403) i wyczerpany limit (429) celowo, bo kolejne próby dałyby to samo, ale także `FAILED_DOCUMENT_REQUEST`, który Lighthouse zgłasza jako 400, gdy nie może załadować strony. Przy tym błędzie **nie zakładaj, że to przypadek po stronie Google**: 14–15.09.2026 pojawiał się, gdy domena była za CDN, a ręczny PageSpeed też nie mógł wtedy sprawdzić strony; zniknął po powrocie do pierwotnego DNS. Klasyfikację tych błędów porządkuje #179.
 
 Pomiar laboratoryjny ma budżet czasu. Jedno wywołanie PSI trwa kilkanaście do kilkudziesięciu sekund, a przy trzech próbach i dwóch strategiach daje sześć wywołań na adres, więc kilka adresów przekroczyłoby limit czasu wykonania Apps Script. Przebieg mierzy tyle adresów, ile mieści się w budżecie czterech minut, i zapamiętuje, gdzie skończył; kolejny zaczyna od następnego adresu. Przy cyklicznym uruchamianiu wszystkie doczekają się pomiaru, a komunikat mówi, ile zostało na później. Budżet jest sprawdzany przed rozpoczęciem adresu, nie w trakcie, bo mediana z dwóch prób zamiast trzech jest gorsza niż jej brak.
 
 Zapis jest idempotentny: ponowny pomiar tego samego okresu CrUX podmienia wiersze zamiast je dublować, a historia wcześniejszych okresów zostaje.
+
+**Cykliczny pomiar i dzienny budżet wywołań.** *Włącz cykliczny pomiar wydajności* zakłada wyzwalacz uruchamiający CrUX i PSI razem. Dwie opcjonalne Script Properties:
+
+- `PAGESPEED_INTERVAL_HOURS` — co ile godzin; dozwolone są wyłącznie wartości przyjmowane przez wyzwalacz czasowy Apps Script: `1`, `2`, `4`, `6`, `8`, `12`. Brak albo inna wartość oznacza `6`. Po zmianie trzeba ponownie uruchomić *Włącz cykliczny pomiar wydajności* — wyzwalacz nie czyta tej właściwości sam.
+- `PAGESPEED_DAILY_BUDGET` — ile wywołań PSI wolno wykonać w ciągu doby liczonej w strefie arkusza; domyślnie `500`, wartość niedodatnia albo nieczytelna też oznacza `500`. To **nasz licznik, nie limit Google**: chroni przed zużyciem cudzego limitu, ale go nie odczytuje. Budżet jest rezerwowany na cały adres (sześć wywołań) przed jego rozpoczęciem, więc adres nigdy nie zostaje zmierzony w połowie. Stan licznika trzyma `PAGESPEED_BUDGET_STATE` — nie edytuj go ręcznie.
+
+Adres do monitorowania dodaje się wierszem w `PERFORMANCE URLS`. Musi zaczynać się od `http://` albo `https://` — wiersz z czymkolwiek innym w kolumnie `URL` jest pomijany bez komunikatu. Kolumna `Rola` jest zwykłym tekstem dla człowieka i nie zmienia sposobu pomiaru.
 
 #### Diagnoza: `PAGESPEED FINDINGS`
 
