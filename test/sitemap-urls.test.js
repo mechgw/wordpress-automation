@@ -217,7 +217,7 @@ describe('#89: błędy i limity', () => {
     const GZ = 'https://www.example.pl/page-sitemap.xml.gz';
     const gas = project({
       sitemaps: [{ path: GZ }],
-      files: { [GZ]: { code: 200, text: ' bajty gzip', gzip: urlset([['https://www.example.pl/a/', '2026-09-01']]) } }
+      files: { [GZ]: { code: 200, text: '\x1f\x8b\x08 bajty gzip', gzip: urlset([['https://www.example.pl/a/', '2026-09-01']]) } }
     });
     const out = plain(gas.odswiezMonitoringZSitemap());
     assert.equal(out.urls, 1, 'without ungzip the parser would silently find nothing');

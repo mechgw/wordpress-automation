@@ -190,7 +190,7 @@ function parseGbpKeywords_(response) {
  */
 function upsertGbpRows_(sheetName, header, keyColumns, rows) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
-  const keyOf = function (row) { return keyColumns.map(function (i) { return String(row[i]); }).join(' '); };
+  const keyOf = function (row) { return keyColumns.map(function (i) { return String(row[i]); }).join('\u0000'); };
   const incoming = {};
   rows.forEach(function (row) { incoming[keyOf(row)] = true; });
 
