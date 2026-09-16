@@ -15,14 +15,20 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-/** Te same katalogi i rozszerzenia co w test/repo-identity.test.js. */
-const SCAN_DIRS = ['src', 'test', 'wordpress', 'scripts', 'docs', '.github'];
-const SCAN_FILES = ['README.md', 'CLAUDE.md'];
-const EXTENSIONS = ['.gs', '.js', '.php', '.md', '.json', '.yml', '.yaml'];
+
+/**
+ * Pliki pomijane jako binarne — WYŁĄCZNIE po rozszerzeniu.
+ *
+ * Nie korzystamy z wykrywania binarności przez gita (`git ls-files --eol`): git uznaje
+ * plik za binarny właśnie wtedy, gdy znajdzie bajt NUL w pierwszych 8000 bajtach, więc
+ * skan pominąłby dokładnie ten przypadek, dla którego istnieje.
+ */
+const BINARY_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.woff', '.woff2', '.ttf', '.zip', '.gz'];
 
 /**
  * Zakazane: znaki sterujące C0 poza tabulatorem, LF i CR, znak DEL oraz sterujące C1.
@@ -36,22 +42,20 @@ function isForbiddenCode(code) {
   return code < 0x20 || (code >= 0x7f && code <= 0x9f);
 }
 
+/**
+ * Wszystkie pliki śledzone przez gita, poza binarnymi — ścieżki względne z `/`.
+ *
+ * Lista katalogów (pierwsza wersja, wzorem `repo-identity`) pomijała pliki w katalogu
+ * głównym i ukrytych: `eslint.config.js`, `.githooks/pre-commit`, `package.json`,
+ * `.quality/*.json` (uwaga Codexa z recenzji #184). Zbiór z gita nie wymaga pamiętania
+ * o nowych katalogach. Separator `-z` to NUL, więc nazwy z odstępami też przechodzą.
+ */
 function scanFiles() {
-  const out = [];
-  const walk = dir => {
-    if (!fs.existsSync(dir)) return;
-    fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(full); return; }
-      if (EXTENSIONS.indexOf(path.extname(entry.name)) >= 0) out.push(full);
-    });
-  };
-  SCAN_DIRS.forEach(dir => walk(path.join(ROOT, dir)));
-  SCAN_FILES.forEach(name => {
-    const full = path.join(ROOT, name);
-    if (fs.existsSync(full)) out.push(full);
-  });
-  return out;
+  const listing = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
+  return listing.split(String.fromCharCode(0))
+    .filter(Boolean)
+    .filter(name => BINARY_EXTENSIONS.indexOf(path.extname(name).toLowerCase()) < 0)
+    .filter(name => fs.existsSync(path.join(ROOT, name)));
 }
 
 /** `plik:wiersz U+XXXX` dla każdego znaku zakazanego w tekście. */
@@ -69,23 +73,30 @@ function findControlChars(text, name) {
 }
 
 describe('surowe znaki sterujące w plikach repozytorium', () => {
-  test('żaden plik z kodem, testami ani dokumentacją ich nie zawiera', () => {
-    const files = scanFiles();
+  test('żaden plik śledzony przez gita ich nie zawiera', () => {
     const hits = [];
-    files.forEach(full => {
-      const name = path.relative(ROOT, full).split(path.sep).join('/');
-      findControlChars(fs.readFileSync(full, 'utf8'), name).forEach(hit => hits.push(hit));
+    scanFiles().forEach(name => {
+      findControlChars(fs.readFileSync(path.join(ROOT, name), 'utf8'), name).forEach(hit => hits.push(hit));
     });
 
     assert.deepEqual(hits, [], 'zapisz te znaki sekwencją ucieczki, np. \\u0000 albo \\x1f:\n' + hits.join('\n'));
   });
 
-  test('skan naprawdę obejmuje pliki, w których znaki się pojawiły', () => {
-    const names = scanFiles().map(full => path.relative(ROOT, full).split(path.sep).join('/'));
+  test('skan obejmuje pliki, w których znaki się pojawiły, oraz te w katalogu głównym i ukrytych', () => {
+    const names = scanFiles();
 
     assert.ok(names.length > 50, 'warunek wstępny: skan widzi repozytorium, nie pusty katalog');
-    assert.ok(names.indexOf('src/BusinessProfile.gs') >= 0);
-    assert.ok(names.indexOf('test/sitemap-urls.test.js') >= 0);
+    [
+      'src/BusinessProfile.gs', 'test/sitemap-urls.test.js',
+      // Pomijane przez pierwszą wersję opartą na liście katalogów:
+      'eslint.config.js', 'package.json', '.githooks/pre-commit', '.quality/coverage-policy.json'
+    ].forEach(name => assert.ok(names.indexOf(name) >= 0, name + ' musi być w skanie'));
+  });
+
+  test('binarne są pomijane wyłącznie po rozszerzeniu, nie po zawartości', () => {
+    const names = scanFiles();
+    assert.ok(names.every(name => BINARY_EXTENSIONS.indexOf(path.extname(name).toLowerCase()) < 0));
+    assert.ok(names.indexOf('LICENSE') >= 0, 'plik bez rozszerzenia jest tekstem i jest skanowany');
   });
 
   test('detektor łapie NUL, znaki C0 i C1, a przepuszcza tabulator, końce wierszy i polskie litery', () => {
