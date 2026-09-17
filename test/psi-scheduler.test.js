@@ -188,8 +188,10 @@ describe('#156: lokalny budżet wywołań', () => {
         ? { code: 500, text: 'lighthouseError' }
         : { code: 404, text: '{}' })
     });
-    const out = plain(gas.runPsiMeasurement_('cykliczny'));
-    assert.equal(out.budgetUsed, 6, 'sześć nieudanych prób zjadło komplet');
+    // Po #179 przebieg bez ani jednego zmierzonego zakresu kończy się błędem,
+    // ale licznik budżetu jest zapisywany wcześniej: żądania i tak poszły.
+    assert.throws(() => gas.runPsiMeasurement_('cykliczny'), /nie zmierzył żadnego/);
+    assert.match(String(gas.$properties.PAGESPEED_BUDGET_STATE), / 6$/, 'sześć nieudanych prób zjadło komplet');
   });
 
   test('11a: błąd przerywający przebieg nie gubi zużytych wywołań', () => {

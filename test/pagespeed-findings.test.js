@@ -291,7 +291,8 @@ describe('#140: wybór próby i model snapshotu', () => {
         ? { code: 500, text: 'lighthouseError' }
         : { code: 404, text: '{}' })
     });
-    gas.zmierzWydajnosc();
+    // Po #179 zakres bez ani jednej udanej próby jest awarią zadania, a nie ciszą.
+    assert.throws(() => gas.zmierzWydajnosc(), /nie zmierzył żadnego z rozpoczętych zakresów/);
     const rows = findings(gas);
     assert.equal(rows.length, 1);
     assert.equal(rows[0][COL.detail], 'section.hero', 'ostatnia dobra diagnoza zostaje');
@@ -308,20 +309,25 @@ describe('#140: granice danych', () => {
     assert.match(detail, /OBCIĘTO/, 'przycięcie nigdy po cichu');
   });
 
-  test('12: odpowiedź bez sekcji audits nie wywraca przebiegu', () => {
+  test('12 (#179): odpowiedź bez ani jednej metryki jest nieudaną próbą, nie cichym sukcesem', () => {
+    const stara = [
+      '2026-09-01 10:00', URL, 'mobile', 1, 'ELEMENT LCP', 'largest-contentful-paint-element', 'section.hero',
+      '', '', '', '', 'PSI_LAB', '2026-09-01'
+    ];
     const gas = loadProject({
       properties: KEY,
-      sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']] },
+      sheets: { [URLS]: [URLS_HEADER, [URL, 'homepage', '']], [FINDINGS]: [FINDINGS_HEADER, stara] },
       fetch: url => (String(url).indexOf('pagespeedonline') >= 0
         ? { code: 200, text: '{}' }
         : { code: 404, text: '{}' })
     });
-    assert.doesNotThrow(() => gas.zmierzWydajnosc());
-    // #153: pusta odpowiedź to nadal udana próba, więc powstaje wiersz z adnotacją
-    // o braku węzła. Nie ma za to ani szans, ani third-party — nie było z czego.
-    const rows = findings(gas);
-    assert.deepEqual([...new Set(rows.map(row => row[COL.kind]))], ['ELEMENT LCP']);
-    rows.forEach(row => assert.match(String(row[COL.detail]), /nie wskazał elementu LCP/));
+
+    // Do #179 taka odpowiedź uchodziła za udaną próbę: ustawiała `lastGood`
+    // i podmieniała diagnozę zakresu adnotacją „brak węzła LCP”, choć nie było
+    // w niej ani jednej wartości. Zakres bez danych nie może kasować diagnozy (#140).
+    assert.throws(() => gas.zmierzWydajnosc(), /brak metryk/);
+    assert.deepEqual(findings(gas).map(row => row[COL.detail]), ['section.hero'],
+      'poprzednia diagnoza nietknięta');
   });
 
   test('arkusz i podsumowanie mówią o ustaleniach', () => {
@@ -411,7 +417,7 @@ describe('#153: element LCP per próba', () => {
         ? { code: 500, text: 'lighthouseError' }
         : { code: 404, text: '{}' })
     });
-    gas.zmierzWydajnosc();
+    assert.throws(() => gas.zmierzWydajnosc(), /nie zmierzył żadnego z rozpoczętych zakresów/);
 
     assert.deepEqual(
       findings(gas).map(row => row[COL.detail]),
