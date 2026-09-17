@@ -392,7 +392,9 @@ describe('#124: menu', () => {
     });
     gas.zmierzWydajnosc();
     const text = gas.$alerts[0][0];
-    assert.match(text, /nieudane próby:/);
+    // „nieudane próby:” to nagłówek jednoliniowego `detail` dla logu i statusu.
+    // Okno ma na to własny wiersz, więc wypisanie obu byłoby tą samą listą dwa razy.
+    assert.ok(text.indexOf('nieudane próby:') < 0, 'okno nie powtarza linii logu');
     assert.match(text, /zakresy: OK 1 \| z ostrzeżeniem 1 \| nieudane 0/);
     assert.match(text, /Zakresy bez kompletu prób:/);
     assert.ok(text.indexOf('losowo po stronie Google') < 0, 'okno nie zgaduje już przyczyny');

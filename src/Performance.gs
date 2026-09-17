@@ -1264,6 +1264,20 @@ function runPsiMeasurement_(trigger) {
   // Adres, od którego ruszy kolejny przebieg — tylko gdy jest co wznawiać.
   const resumeAt = skipped ? urls[index % urls.length].url : '';
 
+  // „Kompletny” i „budżet wyczerpany” muszą wyglądać inaczej: wcześniej oba
+  // kończyły się tym samym zdaniem i operator nie wiedział, czy ma baseline.
+  const runDetail = rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
+    PSI_ATTEMPTS + ' próby na adres i strategię)' +
+    (skipped
+      ? '; budżet wyczerpany, ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu, zaczynając od ' + resumeAt
+      : '; przebieg kompletny') +
+    '; mediany dla ' + pairs + ' z ' + (urls.length * 2) + ' par (URL × strategia)' +
+    (complete.length ? '; komplet ' + (PSI_ATTEMPTS * 2) + ' prób: ' + complete.join(', ') : '') +
+    (budgetStopped
+      ? '; PRZERWANO: wyczerpany nasz dzienny budżet wywołań (' + budgetState.used + ' z ' + budget +
+        '), reszta w kolejnym przebiegu'
+      : '; budżet wywołań: ' + budgetState.used + ' z ' + budget);
+
   const counts = psiScopeCounts_(scopes);
   const failedLines = scopes
     .filter(function (scope) { return scope.state === PSI_SCOPE_FAILED; })
@@ -1277,6 +1291,11 @@ function runPsiMeasurement_(trigger) {
     error.psiAllScopesFailed = true;
     throw error;
   }
+
+  // Stan zakresów jako jedno zdanie do logu i statusu; okno menu składa go sobie
+  // samo z `scopeCounts` i `failures`, żeby nie powtórzyć tej samej treści dwa razy.
+  const scopeDetail = psiScopeSummary_(counts) +
+    (failures.length ? '; nieudane próby: ' + failures.join(', ') : '');
 
   return {
     rows: rows.length,
@@ -1302,21 +1321,12 @@ function runPsiMeasurement_(trigger) {
     budgetLimit: budget,
     budgetStopped: budgetStopped,
     medians: psiMedians_(rows),
-    // „Kompletny” i „budżet wyczerpany” muszą wyglądać inaczej: wcześniej oba
-    // kończyły się tym samym zdaniem i operator nie wiedział, czy ma baseline.
-    detail: rows.length + ' pomiarów dla ' + measured + ' z ' + urls.length + ' adresów (' +
-      PSI_ATTEMPTS + ' próby na adres i strategię)' +
-      (skipped
-        ? '; budżet wyczerpany, ' + skipped + ' zostanie zmierzonych w kolejnym przebiegu, zaczynając od ' + resumeAt
-        : '; przebieg kompletny') +
-      '; mediany dla ' + pairs + ' z ' + (urls.length * 2) + ' par (URL × strategia)' +
-      (complete.length ? '; komplet ' + (PSI_ATTEMPTS * 2) + ' prób: ' + complete.join(', ') : '') +
-      (budgetStopped
-        ? '; PRZERWANO: wyczerpany nasz dzienny budżet wywołań (' + budgetState.used + ' z ' + budget +
-          '), reszta w kolejnym przebiegu'
-        : '; budżet wywołań: ' + budgetState.used + ' z ' + budget) +
-      '; ' + psiScopeSummary_(counts) +
-      (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
+    // `runDetail` opisuje sam przebieg, `detail` dokleja do niego stan zakresów.
+    // Dwóch pól nie ma dla ozdoby: log i status mieszczą jedną linię, a okno menu
+    // pokazuje zakresy w osobnych wierszach — gdyby czytało `detail`, wypisałoby
+    // liczniki i listę nieudanych zakresów po raz drugi w tym samym okienku.
+    runDetail: runDetail,
+    detail: runDetail + '; ' + scopeDetail
   };
 }
 
@@ -1427,7 +1437,10 @@ function zmierzWydajnosc() {
     'Pomiar wydajności zakończony.',
     '',
     'Dane terenowe (CrUX): ' + field.detail + '.',
-    'Dane laboratoryjne (PSI): ' + lab.detail + '.',
+    // `runDetail`, nie `detail`: stan zakresów ma własne wiersze niżej, a `detail`
+    // zawiera go już w sobie — okno wypisałoby liczniki i listę nieudanych zakresów
+    // po raz drugi w tym samym okienku.
+    'Dane laboratoryjne (PSI): ' + lab.runDetail + '.',
     'Ustalenia diagnostyczne: ' + (lab.findings || 0) + ' w arkuszu „' + PERF_FINDINGS_SHEET + '”.',
     '',
     'Brak danych terenowych nie jest błędem strony, tylko informacją o zbyt małym ruchu.',

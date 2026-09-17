@@ -299,6 +299,25 @@ describe('#179: incydent, ślad i komunikaty', () => {
     assert.ok(okno.indexOf('losowo po stronie Google') < 0);
   });
 
+  test('16b: okno menu podaje stan zakresów raz, a log nadal całość w jednej linii', () => {
+    // `detail` jest jedną linią logu i statusu, więc zawiera i liczniki, i listę
+    // nieudanych zakresów. Okno ma te same treści w osobnych wierszach — gdyby
+    // wypisywało `detail`, podałoby jedno i drugie po raz drugi w tym samym okienku.
+    const gas = project({ psi: (call, url) => (url.indexOf('strategy=mobile') > 0 ? TIMEOUT_400 : OK_200()) });
+    const out = plain(gas.zmierzWydajnosc());
+    const okno = gas.$alerts[gas.$alerts.length - 1][0];
+
+    const ile = (tekst, igla) => tekst.split(igla).length - 1;
+    assert.equal(ile(okno, 'zakresy: OK 1 | z ostrzeżeniem 0 | nieudane 1'), 1, 'liczniki dokładnie raz');
+    assert.equal(ile(okno, 'PSI nie zdołał zmierzyć adresu'), 1, 'opis nieudanego zakresu dokładnie raz');
+    assert.ok(okno.indexOf('nieudane próby:') < 0, 'okno używa własnego nagłówka, nie tego z linii logu');
+
+    // Log i status muszą mieć komplet mimo to — czytają jedno pole.
+    assert.match(out.lab.detail, /zakresy: OK 1 \| z ostrzeżeniem 0 \| nieudane 1/);
+    assert.match(out.lab.detail, /nieudane próby: .*PSI nie zdołał zmierzyć adresu/);
+    assert.ok(out.lab.runDetail.indexOf('zakresy:') < 0, 'opis samego przebiegu jest bez zakresów');
+  });
+
   test('17: licznik budżetu rośnie przed każdym żądaniem, także nieudanym', () => {
     const gas = project({ psi: call => (call % 2 === 0 ? TIMEOUT_400 : OK_200()) });
     const out = plain(gas.runPsiMeasurement_());
