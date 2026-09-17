@@ -72,7 +72,7 @@ function scheduledJobs_() {
     { key: 'URL_INSPECTION', handler: URL_INSPECTION_TRIGGER_HANDLER, label: 'inspekcja URL', schedule: 'poniedziałek ok. 07:00', prop: 'LAST_RUN_URL_INSPECTION', staleAfterHours: WEEKLY_STALE_AFTER_HOURS, optional: true },
     { key: 'SEO_LIVE', handler: SEO_LIVE_TRIGGER_HANDLER, label: 'live check SEO', schedule: 'codziennie ok. 09:00', prop: 'LAST_RUN_SEO_LIVE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true },
     { key: 'RECRAWL', handler: RECRAWL_TRIGGER_HANDLER, label: 'kolejka recrawl', schedule: 'codziennie ok. 10:00', prop: 'LAST_RUN_RECRAWL', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true },
-    { key: 'PERFORMANCE', handler: PSI_TRIGGER_HANDLER, label: 'pomiar wydajności', schedule: 'co 6 godz. (interwał konfigurowalny)', prop: 'LAST_RUN_PERFORMANCE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true }
+    { key: 'PERFORMANCE', handler: PSI_TRIGGER_HANDLER, label: 'pomiar wydajności', schedule: 'co 6 godz. (interwał konfigurowalny)', prop: 'LAST_RUN_PERFORMANCE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true }
   ];
 }
 
@@ -386,7 +386,10 @@ function appendImportLog_(source, run) {
     source,
     importRunType_(run),
     Number(run.days) || 0,
-    run.ok ? 'OK' : 'BŁĄD',
+    // `UWAGA` tylko dla zadań monitorujących. Import z anomalią zostaje `OK`,
+    // bo `importLogHistory_()` czyta tę kolumnę jako „udany run” i inna wartość
+    // wypadłaby z bazy porównawczej anomalii — wpis o anomalii jest w kolumnie obok.
+    run.ok ? (run.warning && !importSources_()[source] ? 'UWAGA' : 'OK') : 'BŁĄD',
     run.ok ? Number(run.rows) || 0 : '',
     Math.round((run.durationMs || 0) / 1000),
     run.ok ? String(run.detail || '') : '',
@@ -600,6 +603,7 @@ function recordJobRun_(key, trigger, fn) {
       durationMs: Date.now() - startedAt
     };
     writeJobRecord_(key, record);
+    if (scheduledJob_(key).log) appendImportLog_(key, record.lastRun);
     updateImportIncident_(key, record);
     throw e;
   }
@@ -609,7 +613,11 @@ function recordJobRun_(key, trigger, fn) {
     finishedAt: new Date().toISOString(),
     ok: true,
     trigger: Boolean(trigger),
+    rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
+    // Ostrzeżenie zadania: przebieg się udał, ale coś w nim wymaga uwagi.
+    // Otwiera incydent `warning` (Alerts.gs), a nie błąd — dane są zapisane.
+    warning: String(summary.warning || ''),
     durationMs: Date.now() - startedAt
   };
   record.lastOk = record.lastRun;
@@ -617,6 +625,9 @@ function recordJobRun_(key, trigger, fn) {
   // świeżość liczy się od ostatniego udanego uruchomienia.
   delete record.waitingSince;
   writeJobRecord_(key, record);
+  // Ślad przebiegu dla zadań, które go potrzebują (#179): przy otwartym
+  // incydencie kolejne awarie milkną, więc bez wpisu w logu znikają bez śladu.
+  if (scheduledJob_(key).log) appendImportLog_(key, record.lastRun);
   updateImportIncident_(key, record);
   return result;
 }

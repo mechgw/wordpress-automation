@@ -74,7 +74,7 @@ function sheetCatalog_() {
     { name: ga4.adsSheet, category: 'dane', owner: 'skrypt', description: 'Surowe dane GA4: ruch z Google Ads. Nie edytuj ręcznie.' },
     { name: GBP_PERFORMANCE_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe metryki Google Business Profile per dzień i lokalizacja (#123). Nie edytuj ręcznie.' },
     { name: GBP_KEYWORDS_SHEET, category: 'dane', owner: 'skrypt', description: 'Surowe frazy wyszukiwania z Google Business Profile per miesiąc i lokalizacja (#123). Nie edytuj ręcznie.' },
-    { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i podstawa wykrywania anomalii; retencja 90 dni.' },
+    { name: IMPORT_LOG_SHEET, category: 'dane', owner: 'skrypt', description: 'Historia importów i przebiegów pomiaru wydajności; podstawa wykrywania anomalii; retencja 90 dni.' },
     { name: PERF_FIELD_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Dane terenowe CrUX (p75) per adres, form factor i okres. Historia po okresach; wiersz „wszystkie/INSUFFICIENT_DATA” mówi o dostępności danych, nie o wyniku strony.' },
     { name: PERF_LAB_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Surowe próby Lighthouse: jeden wiersz na pomiar, adres, strategię, próbę i metrykę. Pojedyncza próba nie jest dowodem regresji — do porównań służy „PERFORMANCE SUMMARY”.' },
     { name: PERF_FINDINGS_SHEET, category: 'monitoring', owner: 'skrypt', description: 'Ustalenia diagnostyczne PSI: element i fazy LCP, zasoby firm trzecich. Migawka ostatniego udanego pomiaru per adres i strategia, nie historia.' },

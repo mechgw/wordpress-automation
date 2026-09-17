@@ -82,13 +82,13 @@ describe('#152: mediana i liczba prób', () => {
     assert.equal(lcp[0][COL.median], 2500, 'przy parzystej liczbie — średnia dwóch środkowych');
   });
 
-  test('3: zero udanych prób nie daje wiersza — ani zera, ani pustego', () => {
+  test('3 (#179): zero udanych prób nie daje wiersza i kończy przebieg błędem', () => {
     const gas = run({
       fetch: url => (String(url).indexOf('pagespeedonline') >= 0
         ? { code: 500, text: 'lighthouseError' }
         : { code: 404, text: '{}' })
     });
-    gas.runPsiMeasurement_();
+    assert.throws(() => gas.runPsiMeasurement_(), /nie zmierzył żadnego z rozpoczętych zakresów/);
     assert.deepEqual(rowsOf(gas), [], 'zero byłoby doskonałym wynikiem, a pusty wiersz — pomiarem, którego nie było');
   });
 
@@ -177,18 +177,16 @@ describe('#152: kompletność zakresu', () => {
 });
 
 describe('#152/Codex: kompletność liczona z median, nie z braku błędu', () => {
-  test('odpowiedź 200 bez liczbowych audytów nie liczy się jako para z medianą', () => {
-    // `performanceApiRequest_` toleruje pustą odpowiedź, więc próba jest „udana”,
-    // ale nie powstaje z niej ani surowy wiersz, ani mediana.
+  test('#179: odpowiedź 200 bez liczbowych audytów nie daje mediany ani nie udaje sukcesu', () => {
+    // Do #179 taka odpowiedź uchodziła za udaną próbę: nie powstawała z niej
+    // mediana, ale przebieg kończył się zielono i nikt się o tym nie dowiadywał.
     const gas = run({
       fetch: url => (String(url).indexOf('pagespeedonline') >= 0
         ? { code: 200, text: '{}' }
         : { code: 404, text: '{}' })
     });
-    const out = plain(gas.runPsiMeasurement_());
 
+    assert.throws(() => gas.runPsiMeasurement_(), /brak metryk/);
     assert.deepEqual(rowsOf(gas), [], 'brak median');
-    assert.equal(out.pairs, 0, 'para bez mediany nie jest parą przetworzoną');
-    assert.match(out.detail, /mediany dla 0 z 2 par/, 'komunikat nie może obiecywać median, których nie ma');
   });
 });

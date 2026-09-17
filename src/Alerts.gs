@@ -12,7 +12,7 @@
  *   ALERT_RECOVERY  'FALSE' wyłącza e-mail o powrocie do normy (domyślnie włączony)
  *
  * Stan incydentu jest częścią rekordu LAST_IMPORT_*:
- *   incident: { open, reason ('error'|'anomaly'|'stale'), openedAt, detail, notifiedAt }
+ *   incident: { open, reason ('error'|'anomaly'|'warning'|'stale'), openedAt, detail, notifiedAt }
  *
  * Codzienny strażnik `sprawdzAktualnoscImportow` (trigger ok. 08:00, po obu
  * importach) otwiera incydent 'stale', gdy źródło jest NIEAKTUALNE, i wysyła
@@ -97,8 +97,12 @@ function sendImportAlert_(subject, lines) {
 
 /** E-mail otwierający incydent (błąd lub anomalia). Zwraca true, gdy wysłano. */
 function sendIncidentOpenedAlert_(label, run, record, problem, now) {
+  // Temat mówi, CO się stało: błąd importu, anomalia wolumenu albo ostrzeżenie
+  // zadania monitorującego (#179). Jeden temat dla wszystkich powodów zmuszałby
+  // do czytania treści, żeby odróżnić awarię od uwagi.
+  const subjects = { error: 'BŁĄD importu: ', anomaly: 'UWAGA, mało danych: ', warning: 'UWAGA: ' };
   return sendImportAlert_(
-    (problem.reason === 'error' ? 'BŁĄD importu: ' : 'UWAGA, mało danych: ') + label,
+    (subjects[problem.reason] || 'UWAGA: ') + label,
     [
       'Źródło: ' + label,
       'Czas: ' + formatImportTime_(run.finishedAt || now),
@@ -127,6 +131,11 @@ function updateImportIncident_(source, record) {
     problem = { reason: 'error', detail: String(run.error || 'nieznany błąd') };
   } else if (run.anomaly) {
     problem = { reason: 'anomaly', detail: String(run.anomaly) };
+  } else if (run.warning && !importSources_()[source]) {
+    // Ostrzeżenie zadania monitorującego: przebieg się udał i dane są zapisane,
+    // ale część pracy się nie powiodła (#179). Importy mają własną ścieżkę przez
+    // `anomaly`, więc ich zachowanie się nie zmienia.
+    problem = { reason: 'warning', detail: String(run.warning) };
   }
 
   if (problem && !incident) {
@@ -158,7 +167,12 @@ function updateImportIncident_(source, record) {
       // Import raportuje liczbę wierszy; zadanie monitorujące nie ma wierszy,
       // więc mówi tylko, co zrobiło.
       const isImport = Boolean(importSources_()[source]);
-      sendImportAlert_((isImport ? 'Import ponownie działa: ' : 'Zadanie ponownie działa: ') + label, [
+      // Zamknięcie mówi o tym, co się skończyło: awaria „ponownie działa”,
+      // ostrzeżenie „wróciło do normy” — zadanie działało przez cały czas (#179).
+      const closing = incident.reason === 'warning'
+        ? 'Zadanie wróciło do normy: '
+        : (isImport ? 'Import ponownie działa: ' : 'Zadanie ponownie działa: ');
+      sendImportAlert_(closing + label, [
         'Źródło: ' + label,
         'Czas: ' + formatImportTime_(run.finishedAt || now),
         isImport

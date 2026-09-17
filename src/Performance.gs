@@ -140,6 +140,20 @@ const PSI_API = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const PSI_ATTEMPTS = 3;
 
 /**
+ * Stan zakresu `(URL, strategia)` — trzy poziomy zamiast „udało się / nie udało” (#179).
+ *
+ * `OSTRZEŻENIE` (1–2 udane próby z 3) to wciąż wynik, ale słabszy: mediana stoi
+ * na jednej albo dwóch próbach i czytający musi to widzieć. `NIEUDANY` (0 z 3)
+ * znaczy tylko tyle, że PSI nie zmierzył adresu — nie przesądza przyczyny.
+ */
+const PSI_SCOPE_OK = 'OK';
+const PSI_SCOPE_WARNING = 'OSTRZEŻENIE';
+const PSI_SCOPE_FAILED = 'NIEUDANY';
+
+/** Rodzaj nieudanej próby: odpowiedź 2xx, w której nie było ani jednej wartości. */
+const PSI_KIND_NO_METRICS = 'brak metryk';
+
+/**
  * Budżet czasu na pomiar laboratoryjny w jednym przebiegu.
  *
  * Jedno wywołanie PSI trwa kilkanaście do kilkudziesięciu sekund, a przy trzech
@@ -237,9 +251,79 @@ function performanceUrls_() {
 }
 
 /**
- * Wywołanie API z rozróżnieniem powodów odmowy. 403 przy tych usługach znaczy
- * najczęściej niewłączone API dla klucza, a 429 wyczerpany limit; jedno i drugie
- * wymaga innego działania niż zwykły błąd.
+ * Rodzaj nieudanej próby: krótki opis zamiast surowej odpowiedzi (#179).
+ *
+ * W alercie liczy się, CO się stało, a nie 800 znaków JSON-a obciętych w połowie.
+ * Kod Lighthouse i szczegół transportowy wyciągamy, gdy są — to one odróżniają
+ * „Lighthouse nie załadował strony” od zwykłej awarii usługi.
+ */
+function psiErrorKind_(code, text) {
+  const body = String(text || '');
+  const lighthouse = /Lighthouse returned error:\s*([A-Z_]+)/.exec(body);
+  const transport = /(net::[A-Z_]+)/.exec(body);
+  return 'HTTP ' + code +
+    (lighthouse ? ' ' + lighthouse[1] : '') +
+    (transport ? ' (' + transport[1] + ')' : '');
+}
+
+/** Rodzaj próby przerwanej wyjątkiem — np. gdy `UrlFetchApp.fetch` w ogóle nie odpowie. */
+function psiFailureKind_(error) {
+  if (error && error.kind) return String(error.kind);
+  const message = String((error && error.message) || error || '').replace(/\s+/g, ' ');
+  return 'wyjątek: ' + message.slice(0, 120);
+}
+
+/** Rodzaje błędów zakresu z krotnością: `HTTP 400 … ×3`, w kolejności wystąpienia. */
+function psiKindsSummary_(kinds) {
+  const order = [];
+  const counts = {};
+  (kinds || []).forEach(function (kind) {
+    if (counts[kind] === undefined) { counts[kind] = 0; order.push(kind); }
+    counts[kind]++;
+  });
+  return order.map(function (kind) { return kind + ' ×' + counts[kind]; }).join(', ');
+}
+
+/**
+ * Jeden wiersz opisu zakresu, którego nie udało się zmierzyć w komplecie.
+ *
+ * Zakres bez ani jednej udanej próby mówi wprost, że POMIAR się nie udał —
+ * i nic ponad to. Przypisanie przyczyny (strona, sieć, PSI) wymaga innych
+ * danych, więc komunikat jej nie zgaduje (#179).
+ */
+function psiScopeLine_(scope) {
+  const kinds = psiKindsSummary_(scope.kinds);
+  const head = scope.state === PSI_SCOPE_FAILED
+    ? scope.url + ' (' + scope.strategy + '): PSI nie zdołał zmierzyć adresu w żadnej z ' + PSI_ATTEMPTS + ' prób'
+    : scope.url + ' (' + scope.strategy + '): ' + scope.ok + ' z ' + PSI_ATTEMPTS + ' prób';
+  return head + (kinds ? ' — ' + kinds : '');
+}
+
+/** Liczniki stanów zakresów jednego przebiegu. */
+function psiScopeCounts_(scopes) {
+  const counts = { ok: 0, warning: 0, failed: 0 };
+  (scopes || []).forEach(function (scope) {
+    if (scope.state === PSI_SCOPE_OK) counts.ok++;
+    else if (scope.state === PSI_SCOPE_WARNING) counts.warning++;
+    else counts.failed++;
+  });
+  return counts;
+}
+
+/** `zakresy: OK 3 | z ostrzeżeniem 1 | nieudane 0` — to samo zdanie w logu, w statusie i w menu. */
+function psiScopeSummary_(counts) {
+  return 'zakresy: OK ' + counts.ok + ' | z ostrzeżeniem ' + counts.warning + ' | nieudane ' + counts.failed;
+}
+
+/**
+ * Jedno żądanie do API pomiaru.
+ *
+ * Rozróżniamy tylko dwie rzeczy (#179): błąd KONFIGURACJI albo LIMITU, który
+ * przerywa cały przebieg (`fatal`), i wszystko inne — czyli nieudaną próbę.
+ * Wcześniej o tym decydował sam kod HTTP (`>= 500` znaczyło „przejściowy”),
+ * przez co `400 FAILED_DOCUMENT_REQUEST` — Lighthouse nie załadował strony —
+ * przerywał cały pomiar, a seria błędów 5xx kończyła się zielonym zadaniem.
+ * O tym, czy niepowodzenie jest szumem, decyduje teraz wynik CAŁEGO zakresu.
  */
 function performanceApiRequest_(url) {
   const res = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true });
@@ -247,23 +331,33 @@ function performanceApiRequest_(url) {
   const text = res.getContentText() || '';
 
   if (code === 403) {
-    throw new Error(
+    const error = new Error(
       'Odmowa dostępu (403). Sprawdź, czy klucz z PAGESPEED_API_KEY ma włączone PageSpeed Insights API ' +
       'i Chrome UX Report API oraz czy jego ograniczenia nie blokują wywołań z Apps Script.\n\n' + text.slice(0, 400)
     );
-  }
-  if (code === 429) {
-    throw new Error('Przekroczony limit zapytań (429). Ponów pomiar później albo zmniejsz liczbę adresów.');
-  }
-  if (code < 200 || code >= 300) {
-    // Lighthouse potrafi wywrócić się na pojedynczym adresie i zwraca wtedy 500
-    // z domeną „lighthouse”. To awaria jednej próby, a nie konfiguracji ani
-    // klucza, więc nie może przerywać całego pomiaru.
-    const error = new Error('HTTP ' + code + ':\n' + text.slice(0, 800));
-    error.transient = code >= 500;
+    error.fatal = true;
     throw error;
   }
-  return text ? JSON.parse(text) : {};
+  if (code === 429) {
+    const error = new Error('Przekroczony limit zapytań (429). Ponów pomiar później albo zmniejsz liczbę adresów.');
+    error.fatal = true;
+    throw error;
+  }
+  if (code < 200 || code >= 300) {
+    const error = new Error('HTTP ' + code + ':\n' + text.slice(0, 800));
+    error.kind = psiErrorKind_(code, text);
+    throw error;
+  }
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // Odpowiedź 2xx, której nie da się sparsować, jest nieudaną próbą, a nie
+    // błędem programu: kolejna próba może się udać.
+    const error = new Error('Nieczytelna odpowiedź API (HTTP ' + code + '): ' + String(e.message || e));
+    error.kind = 'nieczytelna odpowiedź';
+    throw error;
+  }
 }
 
 /**
@@ -1022,6 +1116,9 @@ function runPsiMeasurement_(trigger) {
   const failures = [];
   const findings = [];
   const complete = [];
+  // Stan każdego zmierzonego zakresu (URL × strategia) — podstawa wyniku
+  // przebiegu, alertu i śladu w logu (#179).
+  const scopes = [];
 
   // Zakładki muszą istnieć także po przebiegu, w którym nic się nie udało.
   // Wcześniej gwarantował to zapis na końcu, wołany bezwarunkowo; po przejściu
@@ -1071,24 +1168,38 @@ function runPsiMeasurement_(trigger) {
       // Element LCP to wyjątek — bywa różny między próbami, więc zapisujemy go
       // z KAŻDEJ udanej próby (#153). Jeden wiersz na próbę, koszt znikomy.
       const lcpRows = [];
+      // Rodzaje nieudanych prób tego zakresu — materiał na alert i na ślad.
+      const kinds = [];
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
         budgetState.used++;
+        let response;
         try {
-          const response = performanceApiRequest_(url);
-          parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now, source)
-            .forEach(function (row) { addressRows.push(row); });
-          ok++;
-          lastGood = { response: response, attempt: attempt };
-          psiLcpAttemptRows_(response, entry.url, strategy, attempt, measuredAt, now, source)
-            .forEach(function (row) { lcpRows.push(row); });
+          response = performanceApiRequest_(url);
         } catch (e) {
-          // Błąd systemowy (klucz, limit) przerywa pomiar, bo kolejne próby dadzą
-          // to samo i tylko zużyją limit. Awaria pojedynczego przebiegu nie:
-          // Lighthouse wywraca się losowo i to normalne.
-          if (!e.transient) throw e;
+          // Błąd konfiguracji albo limitu przerywa pomiar, bo kolejne próby dadzą
+          // to samo i tylko zużyją limit. Każdy inny to nieudana PRÓBA — o tym,
+          // czy to szum, czy problem, decyduje wynik całego zakresu (#179).
+          if (e.fatal) throw e;
+          kinds.push(psiFailureKind_(e));
+          continue;
         }
+        // Wyjątek spoza żądania (błąd w naszym kodzie) świadomie NIE jest łapany:
+        // udawałby nieudaną próbę i ginąłby w statystyce zakresu.
+        const metricRows = parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now, source);
+        if (!metricRows.length) {
+          // Odpowiedź 2xx bez ani jednej wartości nie jest pomiarem. Wcześniej
+          // liczyła się jako udana próba i ustawiała `lastGood`, więc mogła
+          // zastąpić ostatnią dobrą diagnozę zakresu pustą — wbrew #140.
+          kinds.push(PSI_KIND_NO_METRICS);
+          continue;
+        }
+        metricRows.forEach(function (row) { addressRows.push(row); });
+        ok++;
+        lastGood = { response: response, attempt: attempt };
+        psiLcpAttemptRows_(response, entry.url, strategy, attempt, measuredAt, now, source)
+          .forEach(function (row) { lcpRows.push(row); });
       }
       if (lastGood) {
         addressScopes.push(entry.url + ' ' + strategy);
@@ -1096,8 +1207,15 @@ function runPsiMeasurement_(trigger) {
         parsePsiFindings_(lastGood.response, entry.url, strategy, lastGood.attempt, measuredAt, now, source)
           .forEach(function (row) { addressFindings.push(row); });
       }
+      scopes.push({
+        url: entry.url,
+        strategy: strategy,
+        ok: ok,
+        state: ok === PSI_ATTEMPTS ? PSI_SCOPE_OK : (ok > 0 ? PSI_SCOPE_WARNING : PSI_SCOPE_FAILED),
+        kinds: kinds
+      });
       if (ok < PSI_ATTEMPTS) {
-        failures.push(entry.url + ' (' + strategy + '): ' + ok + ' z ' + PSI_ATTEMPTS + ' prób');
+        failures.push(psiScopeLine_(scopes[scopes.length - 1]));
       }
       addressOk += ok;
     });
@@ -1145,8 +1263,29 @@ function runPsiMeasurement_(trigger) {
   const skipped = urls.length - measured;
   // Adres, od którego ruszy kolejny przebieg — tylko gdy jest co wznawiać.
   const resumeAt = skipped ? urls[index % urls.length].url : '';
+
+  const counts = psiScopeCounts_(scopes);
+  const failedLines = scopes
+    .filter(function (scope) { return scope.state === PSI_SCOPE_FAILED; })
+    .map(psiScopeLine_);
+
+  // Wszystkie ROZPOCZĘTE zakresy nieudane — to awaria zadania, nie szum.
+  // Rzucamy po zapisaniu kursora (per adres) i licznika budżetu (`finally`),
+  // więc martwy adres nie blokuje rotacji ani nie fałszuje budżetu.
+  if (scopes.length && counts.failed === scopes.length) {
+    const error = new Error('PSI nie zmierzył żadnego z rozpoczętych zakresów: ' + failedLines.join('; '));
+    error.psiAllScopesFailed = true;
+    throw error;
+  }
+
   return {
     rows: rows.length,
+    scopes: scopes,
+    scopeCounts: counts,
+    // Ostrzeżenie powstaje tylko wtedy, gdy JAKIŚ zakres padł, a inny dał dane.
+    // Sama degradacja (1–2 udane próby z 3) jest widoczna w opisie i w logu,
+    // ale nie otwiera incydentu: to normalna zmienność Lighthouse.
+    warning: failedLines.length ? 'zakresy bez pomiaru: ' + failedLines.join('; ') : '',
     urls: urls.length,
     measured: measured,
     skipped: skipped,
@@ -1176,6 +1315,7 @@ function runPsiMeasurement_(trigger) {
         ? '; PRZERWANO: wyczerpany nasz dzienny budżet wywołań (' + budgetState.used + ' z ' + budget +
           '), reszta w kolejnym przebiegu'
         : '; budżet wywołań: ' + budgetState.used + ' z ' + budget) +
+      '; ' + psiScopeSummary_(counts) +
       (failures.length ? '; nieudane próby: ' + failures.join(', ') : '')
   };
 }
@@ -1218,7 +1358,17 @@ function runPerformanceMeasurement_(trigger) {
   return withScriptLock_('pomiar wydajności', function () {
     const field = runCruxMeasurement_();
     const lab = runPsiMeasurement_(trigger);
-    return { field: field, lab: lab };
+    // `detail` i `warning` na NAJWYŻSZYM poziomie, bo tylko stamtąd czyta je
+    // `recordJobRun_()` (#179). Wcześniej zwracany był sam `{ field, lab }`,
+    // więc status zadania nie miał ani opisu, ani ostrzeżenia — nieudane
+    // zakresy nie docierały nigdzie poza okno menu.
+    return {
+      field: field,
+      lab: lab,
+      rows: lab.rows,
+      detail: 'CrUX: ' + field.detail + ' | PSI: ' + lab.detail,
+      warning: lab.warning || ''
+    };
   });
 }
 
@@ -1281,9 +1431,12 @@ function zmierzWydajnosc() {
     'Ustalenia diagnostyczne: ' + (lab.findings || 0) + ' w arkuszu „' + PERF_FINDINGS_SHEET + '”.',
     '',
     'Brak danych terenowych nie jest błędem strony, tylko informacją o zbyt małym ruchu.',
+    // Bez zgadywania przyczyny (#179): komunikat podaje stan zakresów i rodzaje
+    // błędów. Wcześniej twierdził, że nieudane przebiegi „zdarzają się losowo po
+    // stronie Google” — 14–15.09.2026 było to nieprawdą przez półtorej doby.
+    (lab.scopeCounts ? psiScopeSummary_(lab.scopeCounts) + '.' : ''),
     (lab.failures && lab.failures.length
-      ? 'Nieudane przebiegi Lighthouse zdarzają się losowo po stronie Google. Pomiar zapisał to, ' +
-        'co się udało, a mediana liczy się z udanych prób.'
+      ? 'Zakresy bez kompletu prób: ' + lab.failures.join('; ') + '.'
       : '')
   ].join('\n'));
   return { field: field, lab: lab };

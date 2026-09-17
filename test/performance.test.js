@@ -324,18 +324,26 @@ describe('#124: dane laboratoryjne z PSI', () => {
     assert.match(out.detail, /nieudane próby:/);
   });
 
-  test('#124: adres, którego Lighthouse w ogóle nie zmierzył, jest wypisany wprost', () => {
+  test('#179: adres, którego PSI w ogóle nie zmierzył, kończy przebieg błędem z opisem zakresów', () => {
     const gas = project({ fetch: () => ({ code: 500, text: '{"error":{"errors":[{"domain":"lighthouse"}]}}' }) });
-    const out = plain(gas.runPsiMeasurement_());
-    assert.equal(out.rows, 0);
-    assert.equal(out.failures.length, 2, 'obie strategie bez ani jednej udanej próby');
-    assert.match(out.failures[0], /0 z 3 prób/);
+
+    // Do #179 taki przebieg kończył się zielonym zadaniem: błąd 5xx był
+    // „przejściowy”, więc ginął w tablicy `failures`, której nikt nie czytał.
+    let error = null;
+    try { gas.runPsiMeasurement_(); } catch (e) { error = e; }
+    assert.ok(error, 'przebieg bez ani jednego zmierzonego zakresu nie może kończyć się sukcesem');
+    assert.match(error.message, /PSI nie zdołał zmierzyć adresu w żadnej z 3 prób/);
+    assert.match(error.message, /mobile/);
+    assert.match(error.message, /desktop/);
+    assert.match(error.message, /HTTP 500 ×3/, 'rodzaj błędu z krotnością, nie surowy JSON');
+    assert.equal(gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '').length, 0);
   });
 
-  test('pusta odpowiedź nie wywraca pomiaru', () => {
+  test('#179: pusta odpowiedź to nieudana próba, a nie ciche zero', () => {
     const gas = project({ fetch: () => ({ code: 200, text: '' }) });
-    const out = plain(gas.runPsiMeasurement_());
-    assert.equal(out.rows, 0, 'brak audytów to brak wierszy, nie wyjątek');
+    assert.throws(() => gas.runPsiMeasurement_(), /brak metryk ×3/);
+    assert.equal(gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '').length, 0,
+      'brak metryk to brak wierszy');
   });
 
   test('zapytanie zawiera strategię, kategorię i klucz', () => {
@@ -385,7 +393,9 @@ describe('#124: menu', () => {
     gas.zmierzWydajnosc();
     const text = gas.$alerts[0][0];
     assert.match(text, /nieudane próby:/);
-    assert.match(text, /zdarzają się losowo po stronie Google/);
+    assert.match(text, /zakresy: OK 1 \| z ostrzeżeniem 1 \| nieudane 0/);
+    assert.match(text, /Zakresy bez kompletu prób:/);
+    assert.ok(text.indexOf('losowo po stronie Google') < 0, 'okno nie zgaduje już przyczyny');
   });
 
   test('pozycje są w menu SEO / GSC', () => {
@@ -461,9 +471,14 @@ describe('#151: zapis przyrostowy i postęp kursora', () => {
       // 5xx jest awarią pojedynczej próby Lighthouse, nie konfiguracji.
       fetch: () => ({ code: 500, text: 'lighthouse' })
     });
-    const out = plain(gas.runPsiMeasurement_());
+    // Po #179 przebieg bez ani jednego zmierzonego zakresu kończy się błędem —
+    // ale dopiero PO przejściu obu adresów, zapisaniu kursora i budżetu.
+    let error = null;
+    try { gas.runPsiMeasurement_(); } catch (e) { error = e; }
+    assert.ok(error, 'brak jakiegokolwiek pomiaru jest awarią zadania');
 
-    assert.equal(out.measured, two.length, 'rotacja przeszła przez oba adresy');
+    assert.equal(gas.$properties.PAGESPEED_CURSOR, '0', 'kursor przeszedł przez oba adresy i wrócił na początek');
+    assert.match(String(gas.$properties.PAGESPEED_BUDGET_STATE), / 12$/, 'oba adresy spróbowane: 2 × 6 żądań');
     assert.equal(gas.$sheet(LAB).slice(1).filter(row => String(row[1] || '') !== '').length, 0);
     const findings = gas.$sheet(FINDINGS).slice(1).filter(row => String(row[1] || '') !== '');
     assert.deepEqual(findings.map(row => row[5]), ['stara-diagnoza'], 'poprzednia diagnoza nietknięta');
