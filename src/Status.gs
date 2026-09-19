@@ -34,8 +34,14 @@ const WEEKLY_STALE_AFTER_HOURS = 8 * 24;
  * dzienny (1 dzień) nigdy nie jest porównywany z ręcznym importem 90 dni.
  */
 const IMPORT_LOG_SHEET = 'IMPORT LOG';
-const IMPORT_LOG_HEADER = ['Czas', 'Źródło', 'Typ', 'Dni', 'Wynik', 'Wiersze', 'Czas [s]', 'Szczegóły', 'Błąd / uwaga'];
+// `Zakres danych` jest OSTATNIĄ kolumną (#180), żeby kolumny A–I istniejących
+// zakładek nie zmieniły pozycji; istniejącej zakładce etykietę dopisuje
+// `importLogRangeColumnReady_()`.
+const IMPORT_LOG_HEADER = ['Czas', 'Źródło', 'Typ', 'Dni', 'Wynik', 'Wiersze', 'Czas [s]', 'Szczegóły', 'Błąd / uwaga', 'Zakres danych'];
+const IMPORT_LOG_RANGE_COL = IMPORT_LOG_HEADER.length;
 const IMPORT_LOG_RETENTION_DAYS = 90;
+// Liczba PRÓBEK profilu, a nie runów: po #180 kilka importów tego samego zakresu
+// danych to jedna próbka (nazwa stałej zostaje, żeby nie mnożyć zmian).
 const IMPORT_ANOMALY_MIN_RUNS = 7;
 
 /** Definicje źródeł; funkcja (nie stała), bo stałe innych plików mogą nie być jeszcze załadowane. */
@@ -148,6 +154,11 @@ function recordImportRun_(source, trigger, fn) {
     ok: true,
     trigger: Boolean(trigger),
     days: Number(summary.days) || 0,
+    // Zakres danych, który import faktycznie pobrał (#180). Bez niego baza
+    // porównawcza liczyła runy, a nie dni danych: ten sam dzień zaimportowany
+    // dwa razy wchodził do mediany dwa razy.
+    dataFrom: String(summary.dataFrom || ''),
+    dataTo: String(summary.dataTo || ''),
     rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
     warning: String(summary.warning || ''),
@@ -378,10 +389,39 @@ function importRunType_(run) {
   return run.trigger ? 'trigger' : 'ręczny';
 }
 
+/** `RRRR-MM-DD..RRRR-MM-DD` — klucz zakresu danych przebiegu; '' gdy nieznany (#180). */
+function importRangeKey_(run) {
+  return run && run.dataFrom && run.dataTo ? run.dataFrom + '..' + run.dataTo : '';
+}
+
+/**
+ * Czy kolumna `Zakres danych` jest nasza i można do niej pisać (#180).
+ *
+ * Nagłówek istniejącej zakładki jest przepisywany tylko wtedy, gdy różni się
+ * `A1` (`ensureImportLogSheet_`), więc nowa etykieta sama by nie powstała.
+ * Dopisujemy ją wyłącznie do PUSTEJ komórki nad PUSTĄ kolumną — cokolwiek
+ * innego (cudza treść, zakładka przycięta do 9 kolumn) znaczy, że kolumna nie
+ * jest nasza, i wiersz idzie bez zakresu. Bez wyjątku: logowanie nie może
+ * zamienić udanego importu w błąd.
+ */
+function importLogRangeColumnReady_(sheet) {
+  const label = IMPORT_LOG_HEADER[IMPORT_LOG_RANGE_COL - 1];
+  if (sheet.getMaxColumns() < IMPORT_LOG_RANGE_COL) return false;
+  const current = String(sheet.getRange(1, IMPORT_LOG_RANGE_COL).getValue() || '');
+  if (current === label) return true;
+  if (current !== '') return false;
+  const below = sheet.getLastRow() > 1
+    ? sheet.getRange(2, IMPORT_LOG_RANGE_COL, sheet.getLastRow() - 1, 1).getValues()
+    : [];
+  if (below.some(function (row) { return String(row[0] || '') !== ''; })) return false;
+  sheet.getRange(1, IMPORT_LOG_RANGE_COL).setValue(label);
+  return true;
+}
+
 /** Dopisuje wiersz historii i usuwa wpisy starsze niż IMPORT_LOG_RETENTION_DAYS. */
 function appendImportLog_(source, run) {
   const sheet = ensureImportLogSheet_();
-  sheet.appendRow([
+  const row = [
     new Date(run.finishedAt),
     source,
     importRunType_(run),
@@ -397,7 +437,10 @@ function appendImportLog_(source, run) {
     typeof run.durationMs === 'number' ? Math.round(run.durationMs / 1000) : '',
     run.ok ? String(run.detail || '') : '',
     run.ok ? String(run.warning || '') : String(run.error || '')
-  ]);
+  ];
+  // Przebiegi bez zakresu (błąd, zadania monitorujące) dostają pustą komórkę.
+  if (importLogRangeColumnReady_(sheet)) row.push(importRangeKey_(run));
+  sheet.appendRow(row);
   pruneImportLog_(sheet, new Date(run.finishedAt));
 }
 
@@ -435,17 +478,26 @@ function pruneImportLog_(sheet, now) {
   return removed;
 }
 
-/** Historia jako tablica obiektów { at, source, trigger, days, ok, rows }. */
+/**
+ * Historia jako tablica obiektów { at, source, trigger, days, ok, rows, rangeKey }.
+ * `rangeKey` czytamy z kolumny `Zakres danych` tylko wtedy, gdy jej nagłówek jest
+ * nasz — cudza treść w tej kolumnie nie może udawać zakresu danych (#180).
+ * Wiersz bez zakresu (sprzed zmiany) ma `rangeKey = ''`.
+ */
 function importLogHistory_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(IMPORT_LOG_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues().map(r => ({
+  const width = Math.max(6, Math.min(sheet.getLastColumn(), IMPORT_LOG_RANGE_COL));
+  const ours = width === IMPORT_LOG_RANGE_COL &&
+    String(sheet.getRange(1, IMPORT_LOG_RANGE_COL).getValue() || '') === IMPORT_LOG_HEADER[IMPORT_LOG_RANGE_COL - 1];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues().map(r => ({
     at: new Date(r[0]),
     source: String(r[1] || ''),
     trigger: String(r[2] || '') === 'trigger',
     days: Number(r[3]) || 0,
     ok: String(r[4] || '') === 'OK',
-    rows: Number(r[5]) || 0
+    rows: Number(r[5]) || 0,
+    rangeKey: ours ? String(r[IMPORT_LOG_RANGE_COL - 1] || '') : ''
   }));
 }
 
@@ -456,29 +508,70 @@ function medianOf_(values) {
 }
 
 /**
- * Tekst ostrzeżenia, gdy liczba wierszy odstaje od mediany ostatnich
- * IMPORT_ANOMALY_MIN_RUNS udanych runów tego samego profilu; '' gdy w normie
- * albo historia zbyt krótka (bez fałszywych alarmów na starcie).
+ * Próbki bazy porównawczej: udane przebiegi profilu z okna retencji, po
+ * deduplikacji po zakresie danych (#180), od najstarszej.
+ *
+ * - z próbek o tym samym niepustym zakresie zostaje najnowsza;
+ * - próbki zakresu bieżącego przebiegu są wykluczone: bieżący je zastępuje,
+ *   a nie porównuje się sam ze sobą;
+ * - próbki bez zakresu (wiersze sprzed zmiany) liczą się każda osobno.
+ *
+ * 09.09.2026 ten sam dzień danych GA4 zaimportowano dwa razy w odstępie 31 s
+ * i oba wpisy weszły do mediany; bez tego duplikatu żaden z dwóch fałszywych
+ * alarmów „mało danych” z 14–15.09 by nie powstał.
  */
-function importAnomaly_(source, run, history, now) {
+function importAnomalySamples_(source, run, history, now) {
   const cutoff = importLogCutoff_(now || new Date(run.finishedAt));
   // Tylko udane runy tego profilu z okna retencji, posortowane po czasie:
   // kolejność wierszy w arkuszu nie ma znaczenia (mógł być posortowany ręcznie),
   // a wpisy starsze niż retencja nie liczą się, nawet jeśli jeszcze nie zostały usunięte.
-  const same = history
+  const profile = history
     .filter(h =>
       h.ok && h.source === source && h.trigger === Boolean(run.trigger) && h.days === (Number(run.days) || 0) &&
       !isNaN(h.at.getTime()) && h.at.getTime() >= cutoff
     )
     .sort((a, b) => a.at - b.at);
-  if (same.length < IMPORT_ANOMALY_MIN_RUNS) return '';
 
-  const recent = same.slice(-IMPORT_ANOMALY_MIN_RUNS).map(h => h.rows);
-  const median = medianOf_(recent);
+  const current = importRangeKey_(run);
+  const seen = {};
+  const samples = [];
+  // Od najnowszej, żeby z duplikatów zakresu została właśnie ona.
+  for (let i = profile.length - 1; i >= 0; i--) {
+    const key = profile[i].rangeKey;
+    if (key) {
+      if (key === current || seen[key]) continue;
+      seen[key] = true;
+    }
+    samples.unshift(profile[i]);
+  }
+  return samples;
+}
+
+/**
+ * Tekst ostrzeżenia, gdy liczba wierszy odstaje od mediany ostatnich
+ * IMPORT_ANOMALY_MIN_RUNS próbek tego samego profilu; '' gdy w normie albo
+ * historia zbyt krótka (bez fałszywych alarmów na starcie).
+ *
+ * Wyjątek od rozgrzewki (#180): ZERO wierszy alarmuje, gdy profil wcześniej
+ * zwracał dane — bez względu na liczbę próbek. Warunek zera stał dawniej za
+ * warunkiem rozgrzewki, więc import zwracający nic przy krótkiej historii
+ * przechodził bez śladu; każdy podział bazy na klasy wydłużyłby tę lukę.
+ */
+function importAnomaly_(source, run, history, now) {
+  const samples = importAnomalySamples_(source, run, history, now);
   const rows = Number(run.rows) || 0;
+  const median = samples.length >= IMPORT_ANOMALY_MIN_RUNS
+    ? medianOf_(samples.slice(-IMPORT_ANOMALY_MIN_RUNS).map(h => h.rows))
+    : null;
 
-  if (median > 0 && rows === 0) {
-    return 'mało danych: 0 wierszy vs mediana ' + median;
+  if (rows === 0) {
+    if (median > 0) return 'mało danych: 0 wierszy vs mediana ' + median;
+    const withData = samples.filter(h => h.rows > 0);
+    if (withData.length) {
+      return 'mało danych: 0 wierszy, a wcześniej ten profil zwracał dane (ostatnio ' +
+        withData[withData.length - 1].rows + ')';
+    }
+    return '';
   }
   if (median > 0 && rows < median / 2) {
     return 'mało danych: ' + rows + ' wierszy vs mediana ' + median;

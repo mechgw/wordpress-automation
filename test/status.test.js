@@ -233,6 +233,11 @@ describe('Kod.gs GSC import end to end', () => {
     assert.equal(rec.lastOk.trigger, true);
     assert.equal(rec.lastOk.detail, `2 wierszy (${day} – ${day})`);
     assert.match(gas.$cell(GSC_SHEET, 'B8'), new RegExp(`^AKTYWNE – ostatni import: .* \\| 2 wierszy \\(${day} – ${day}\\) \\| trigger: NIE$`));
+
+    // #180 (12): zakres danych pobranego dnia w wyniku, w rekordzie i w IMPORT LOG.
+    assert.deepEqual([plain(out).dataFrom, plain(out).dataTo], [day, day]);
+    assert.equal(rec.lastOk.dataFrom + '..' + rec.lastOk.dataTo, day + '..' + day);
+    assert.equal(gas.$sheet('IMPORT LOG').slice(-1)[0][9], day + '..' + day);
   });
 
   test('importOstatniZakres covers daysBack days ending at the lag and is recorded as manual', () => {
@@ -241,6 +246,7 @@ describe('Kod.gs GSC import end to end', () => {
     const payload = JSON.parse(gas.$fetchCalls[0].params.payload);
     assert.deepEqual([payload.startDate, payload.endDate], [localDate(4), localDate(2)]);
     assert.equal(record(gas, 'GSC').lastOk.trigger, false);
+    assert.equal(gas.$sheet('IMPORT LOG').slice(-1)[0][9], localDate(4) + '..' + localDate(2), '#180: zakres wielodniowy');
   });
 
   test('an API failure is recorded, surfaces in B8 and is rethrown', () => {
@@ -291,6 +297,10 @@ describe('GA4.gs import end to end', () => {
     assert.match(plain(out).warning, /^ADS: Google Analytics API HTTP 400: ads dims not allowed$/);
     assert.match(gas.$cell(GA4_SHEET, 'B9'), /^AKTYWNE – ostatni import: .* \| landing: 1 \| key events: 1 \| business: 1 \| ads: 0 \| UWAGA: ADS: Google Analytics API HTTP 400: ads dims not allowed \| trigger: NIE$/);
     assert.equal(gas.$cell(GA4_SHEET, 'A11'), 'businessEventsSheet', 'config row added by ensureGa4BusinessSheet_');
+
+    // #180 (12): zakres danych w tej samej postaci, w jakiej poszedł do Data API.
+    assert.deepEqual([plain(out).dataFrom, plain(out).dataTo], [day, day]);
+    assert.equal(gas.$sheet('IMPORT LOG').slice(-1)[0][9], day + '..' + day);
   });
 
   test('importGA4OstatniZakres spans daysBack days and is recorded as manual', () => {

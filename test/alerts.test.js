@@ -149,7 +149,10 @@ describe('incydent: anomalia liczby wierszy', () => {
 
     gas.recordImportRun_('GSC', true, () => ({ rows: 300, days: 1 }));
     assert.equal(gas.$mails.length, 2);
-    assert.match(gas.$mails[1].subject, /Import ponownie działa/);
+    // #180: import działał przez cały incydent, więc „ponownie działa” byłoby
+    // nieprawdą — temat zamknięcia zależy od powodu incydentu.
+    assert.equal(gas.$mails[1].subject, '[wordpress-automation] Dane wróciły do normy: Search Console (GSC)');
+    assert.match(gas.$mails[1].body, /\(anomaly\)/, 'treść nadal podaje powód');
   });
 
   test('błąd podczas otwartego incydentu anomalii nie wysyła kolejnego maila, zmienia powód', () => {

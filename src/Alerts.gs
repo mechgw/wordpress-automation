@@ -167,11 +167,15 @@ function updateImportIncident_(source, record) {
       // Import raportuje liczbę wierszy; zadanie monitorujące nie ma wierszy,
       // więc mówi tylko, co zrobiło.
       const isImport = Boolean(importSources_()[source]);
-      // Zamknięcie mówi o tym, co się skończyło: awaria „ponownie działa”,
-      // ostrzeżenie „wróciło do normy” — zadanie działało przez cały czas (#179).
+      // Zamknięcie mówi o tym, co się skończyło, a temat zależy od powodu
+      // incydentu: awaria „ponownie działa”, ostrzeżenie zadania „wróciło do
+      // normy” (#179), a anomalia importu to dane, które wróciły do normy —
+      // import działał przez cały czas, więc „ponownie działa” byłoby nieprawdą (#180).
       const closing = incident.reason === 'warning'
         ? 'Zadanie wróciło do normy: '
-        : (isImport ? 'Import ponownie działa: ' : 'Zadanie ponownie działa: ');
+        : (incident.reason === 'anomaly'
+          ? 'Dane wróciły do normy: '
+          : (isImport ? 'Import ponownie działa: ' : 'Zadanie ponownie działa: '));
       sendImportAlert_(closing + label, [
         'Źródło: ' + label,
         'Czas: ' + formatImportTime_(run.finishedAt || now),

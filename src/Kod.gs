@@ -207,7 +207,14 @@ function importRange_(startDate, endDate) {
 
   // Status komórki B8 zapisuje recordImportRun_() na podstawie tego wyniku.
   const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
-  return { rows: output.length, days: days, detail: output.length + ' wierszy (' + startDate + ' – ' + endDate + ')' };
+  // `dataFrom`/`dataTo`: zakres danych dla IMPORT LOG i bazy porównawczej anomalii (#180).
+  return {
+    rows: output.length,
+    days: days,
+    dataFrom: startDate,
+    dataTo: endDate,
+    detail: output.length + ' wierszy (' + startDate + ' – ' + endDate + ')'
+  };
 }
 
 function replaceRange_(startDate, endDate, newRows) {

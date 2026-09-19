@@ -33,7 +33,8 @@ describe('IMPORT LOG: zapis historii', () => {
     const gas = loadProject({ sheets: baseSheets() });
     gas.recordImportRun_('GSC', true, () => ({ rows: 42, days: 1, detail: '42 wierszy' }));
     const log = gas.$sheet(LOG);
-    assert.deepEqual(plain(log[0]), HEADER);
+    // Nowa zakładka dostaje od razu pełny nagłówek, z `Zakres danych` na końcu (#180).
+    assert.deepEqual(plain(log[0]), HEADER.concat(['Zakres danych']));
     const row = log[1];
     assert.ok(row[0] instanceof gas.$Date);
     assert.deepEqual(plain(row.slice(1, 9)), ['GSC', 'trigger', 1, 'OK', 42, 0, '42 wierszy', '']);
@@ -134,13 +135,24 @@ describe('IMPORT LOG: zapis historii', () => {
 });
 
 describe('IMPORT LOG: anomalie', () => {
-  test('poniżej 7 runów w profilu nie ma alarmu, nawet przy 0 wierszy', () => {
-    const sheets = baseSheets();
-    sheets[LOG] = [HEADER, ...history(6, 300)];
-    const gas = loadProject({ sheets });
-    gas.recordImportRun_('GSC', true, () => ({ rows: 0, days: 1 }));
-    assert.equal(JSON.parse(gas.$properties.LAST_IMPORT_GSC).lastRun.anomaly, undefined);
-    assert.doesNotMatch(gas.$cell(GSC_SHEET, 'B8'), /UWAGA/);
+  test('poniżej 7 próbek spadek nie alarmuje (rozgrzewka), ale zero przy wcześniejszych danych — tak (#180)', () => {
+    // Rozgrzewka nadal chroni przed fałszywym alarmem o SPADKU przy krótkiej historii.
+    const spadek = baseSheets();
+    spadek[LOG] = [HEADER, ...history(6, 300)];
+    const a = loadProject({ sheets: spadek });
+    a.recordImportRun_('GSC', true, () => ({ rows: 10, days: 1 }));
+    assert.equal(JSON.parse(a.$properties.LAST_IMPORT_GSC).lastRun.anomaly, undefined);
+    assert.doesNotMatch(a.$cell(GSC_SHEET, 'B8'), /UWAGA/);
+
+    // Do #180 ten test sprawdzał, że ZERO też nie alarmuje — i to był defekt:
+    // warunek zera stał za warunkiem rozgrzewki, więc import zwracający nic
+    // przy krótkiej historii przechodził bez śladu.
+    const zero = baseSheets();
+    zero[LOG] = [HEADER, ...history(6, 300)];
+    const b = loadProject({ sheets: zero });
+    b.recordImportRun_('GSC', true, () => ({ rows: 0, days: 1 }));
+    assert.equal(JSON.parse(b.$properties.LAST_IMPORT_GSC).lastRun.anomaly,
+      'mało danych: 0 wierszy, a wcześniej ten profil zwracał dane (ostatnio 300)');
   });
 
   test('0 wierszy przy medianie > 0 → UWAGA w rekordzie, komórce i historii', () => {
