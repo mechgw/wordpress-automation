@@ -293,6 +293,20 @@ function requestFailureKind_(error) {
   return 'wyjątek: ' + message.slice(0, 120);
 }
 
+/**
+ * Czas jednego żądania CrUX albo PSI w logu wykonania (#189) — widoczny w „Logach
+ * Cloud” rejestru wykonań Apps Script. To dane, z których etap 2 #189 ustali
+ * rezerwę czasu na żądanie; dziś nigdzie ich nie ma.
+ *
+ * Bez adresu endpointu i bez klucza: `scope` to mierzony adres z form factorem albo
+ * strategią, a `outcome` to rodzaj błędu, już zamaskowany (#187). Diagnostyka czasu
+ * nie może otworzyć klucza, który maskujemy w błędach.
+ */
+function logRequestTiming_(source, scope, attempt, startedMs, outcome) {
+  console.log('[czas żądania] ' + source + ' | ' + scope + ' | próba ' + attempt + ' | ' +
+    (Date.now() - startedMs) + ' ms | ' + outcome);
+}
+
 /** Rodzaje błędów z krotnością: `HTTP 400 … ×3`, w kolejności wystąpienia. Wspólne dla PSI i CrUX. */
 function failureKindsSummary_(kinds) {
   const order = [];
@@ -356,11 +370,14 @@ function performanceApiRequest_(url) {
       'i Chrome UX Report API oraz czy jego ograniczenia nie blokują wywołań z Apps Script.\n\n' + redactApiKey_(text).slice(0, 400)
     );
     error.fatal = true;
+    // Rodzaj także przy błędzie przerywającym: trafia do logu czasu żądania (#189).
+    error.kind = 'HTTP 403';
     throw error;
   }
   if (code === 429) {
     const error = new Error('Przekroczony limit zapytań (429). Ponów pomiar później albo zmniejsz liczbę adresów.');
     error.fatal = true;
+    error.kind = 'HTTP 429';
     throw error;
   }
   if (code < 200 || code >= 300) {
@@ -466,11 +483,16 @@ function cruxRequest_(target, formFactor, key, byOrigin) {
 function cruxQuery_(target, formFactor, key, byOrigin) {
   const kinds = [];
   let error = null;
+  const scope = target + ' (' + formFactor + (byOrigin ? ', dane domeny' : '') + ')';
   for (let attempt = 1; attempt <= CRUX_ATTEMPTS; attempt++) {
+    const requestStarted = Date.now();
     try {
-      return { record: cruxRequest_(target, formFactor, key, byOrigin) };
+      const record = cruxRequest_(target, formFactor, key, byOrigin);
+      logRequestTiming_('CrUX', scope, attempt, requestStarted, record ? 'OK' : 'brak danych');
+      return { record: record };
     } catch (e) {
       if (!e || !e.kind) throw e;
+      logRequestTiming_('CrUX', scope, attempt, requestStarted, e.kind);
       kinds.push(e.kind);
       error = e;
       if (!e.transient) break;
@@ -1334,11 +1356,21 @@ function runPsiMeasurement_(trigger) {
       for (let attempt = 1; attempt <= PSI_ATTEMPTS; attempt++) {
         const url = PSI_API + '?url=' + encodeURIComponent(entry.url) +
           '&strategy=' + strategy + '&category=performance&key=' + encodeURIComponent(key);
+        // Punkt kontrolny PRZED żądaniem (#189): licznik liczy żądania ROZPOCZĘTE,
+        // a nie potwierdzone przez dostawcę. Twardy limit Apps Script ubija wykonanie
+        // najczęściej w trakcie `UrlFetchApp.fetch` — zapis po żądaniu albo tylko
+        // w `finally` zgubiłby dokładnie tę próbę. Przy ubiciu licznik jest zawyżony
+        // o najwyżej jedno żądanie, nigdy zaniżony; dla lokalnego limitera to
+        // właściwy kierunek błędu, bo zaniżenie pozwalałoby przekroczyć własny limit.
         budgetState.used++;
+        savePsiBudgetState_(budgetState);
+        const scope = entry.url + ' (' + strategy + ')';
+        const requestStarted = Date.now();
         let response;
         try {
           response = performanceApiRequest_(url);
         } catch (e) {
+          logRequestTiming_('PSI', scope, attempt, requestStarted, requestFailureKind_(e));
           // Błąd konfiguracji albo limitu przerywa pomiar, bo kolejne próby dadzą
           // to samo i tylko zużyją limit. Każdy inny to nieudana PRÓBA — o tym,
           // czy to szum, czy problem, decyduje wynik całego zakresu (#179).
@@ -1346,6 +1378,7 @@ function runPsiMeasurement_(trigger) {
           kinds.push(requestFailureKind_(e));
           continue;
         }
+        logRequestTiming_('PSI', scope, attempt, requestStarted, 'OK');
         // Wyjątek spoza żądania (błąd w naszym kodzie) świadomie NIE jest łapany:
         // udawałby nieudaną próbę i ginąłby w statystyce zakresu.
         const metricRows = parsePsiRun_(response, entry.url, strategy, attempt, measuredAt, now, source);

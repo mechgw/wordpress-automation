@@ -13,6 +13,7 @@
  *
  * Observability for assertions:
  *   ctx.$fetchCalls        every UrlFetchApp.fetch(url, params)
+ *   ctx.$console           every console.log/info/warn/error from the sources: [level, text]
  *   ctx.$alerts            every SpreadsheetApp.getUi().alert(...) (args array)
  *   ctx.$sheet(name)       the live cell grid of a stubbed sheet (row 1 first)
  *   ctx.$cell(name, 'B9')  a single cell value
@@ -466,6 +467,13 @@ function createStubs(opts) {
   const menus = [];
   const lockLog = [];
   const mails = [];
+  // `console` w źródłach trafia do logów Cloud; w testach zbieramy linie tutaj,
+  // zamiast zaśmiecać wyjście testów (#189: czas każdego żądania CrUX i PSI).
+  const consoleLines = [];
+  const capture = level => (...args) => { consoleLines.push([level, args.map(String).join(' ')]); };
+  // Kolejne UUID różnią się końcówką; pierwsze 8 znaków zostaje stałe, bo źródła
+  // biorą `getUuid().slice(0, 8)` do nazw, a testy te nazwy sprawdzają.
+  let uuidCounter = 0;
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
   const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus, opts.timeZone || SCRIPT_TIME_ZONE);
 
@@ -477,7 +485,10 @@ function createStubs(opts) {
         setProperty: (key, value) => { properties[key] = String(value); },
         // Usunięcie właściwości to nie to samo co zapisanie w niej pustego
         // tekstu: pusta wartość blokuje edytor Script Properties (#124).
-        deleteProperty: key => { delete properties[key]; }
+        deleteProperty: key => { delete properties[key]; },
+        // Kopia, jak w Apps Script: zmiana zwróconego obiektu nie zmienia właściwości.
+        getProperties: () => Object.assign({}, properties),
+        getKeys: () => Object.keys(properties)
       })
     },
     UrlFetchApp: {
@@ -504,7 +515,7 @@ function createStubs(opts) {
       // stub robi to samo, żeby konwersja na hex była testowana naprawdę (#109).
       DigestAlgorithm: { SHA_256: 'SHA_256' },
       computeDigest: (_alg, value) => Array.from(require('crypto').createHash('sha256').update(String(value), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
-      getUuid: () => '00000000-0000-4000-8000-000000000000',
+      getUuid: () => '00000000-0000-4000-8000-' + String(uuidCounter++).padStart(12, '0'),
       sleep() {}
     },
     ScriptApp: {
@@ -547,7 +558,8 @@ function createStubs(opts) {
       sendEmail: (to, subject, body) => { mails.push({ to, subject, body }); },
       getRemainingDailyQuota: () => 100
     },
-    console,
+    console: { log: capture('log'), info: capture('info'), warn: capture('warn'), error: capture('error') },
+    $console: consoleLines,
     $mails: mails,
     $lock: lockLog,
     $fetchCalls: fetchCalls,
