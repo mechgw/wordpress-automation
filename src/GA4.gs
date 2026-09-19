@@ -550,6 +550,9 @@ function importGa4Range_(startDate, endDate, cfg) {
   return {
     rows: landingRows.length + eventRows.length + businessRows.length + adsRows.length,
     days: Math.round((endDate - startDate) / 86400000) + 1,
+    // Zakres danych w tej samej postaci, w jakiej poszedł do Data API (#180).
+    dataFrom: start,
+    dataTo: end,
     detail: 'landing: ' + landingRows.length +
       ' | key events: ' + eventRows.length +
       ' | business: ' + businessRows.length +
