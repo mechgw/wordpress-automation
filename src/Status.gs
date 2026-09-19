@@ -548,6 +548,27 @@ function importAnomalySamples_(source, run, history, now) {
 }
 
 /**
+ * Okno i rozgrzewka baz klasowych GA4 (#180, etap 2, wariant 6A). Dni robocze
+ * zbierają 5 próbek w tydzień, weekend 4 w dwa tygodnie — obie bazy zaczynają
+ * działać po mniej więcej tym czasie.
+ */
+const IMPORT_ANOMALY_CLASS_WINDOW = { roboczy: 5, weekend: 4 };
+const IMPORT_ANOMALY_CLASS_LABEL = { roboczy: 'dni robocze', weekend: 'weekend' };
+
+/**
+ * Klasa dnia DANYCH z klucza zakresu: sobota i niedziela → `weekend`, reszta →
+ * `roboczy`; '' gdy zakresu brak. Z daty danych, nie z daty uruchomienia: import
+ * z poniedziałku pobiera sobotę. Dzień tygodnia liczony z daty kalendarzowej
+ * w UTC, więc nie zależy od strefy skryptu ani maszyny.
+ */
+function importDataClass_(rangeKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})\.\./.exec(String(rangeKey || ''));
+  if (!m) return '';
+  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  return day === 0 || day === 6 ? 'weekend' : 'roboczy';
+}
+
+/**
  * Tekst ostrzeżenia, gdy liczba wierszy odstaje od mediany ostatnich
  * IMPORT_ANOMALY_MIN_RUNS próbek tego samego profilu; '' gdy w normie albo
  * historia zbyt krótka (bez fałszywych alarmów na starcie).
@@ -560,12 +581,25 @@ function importAnomalySamples_(source, run, history, now) {
 function importAnomaly_(source, run, history, now) {
   const samples = importAnomalySamples_(source, run, history, now);
   const rows = Number(run.rows) || 0;
-  const median = samples.length >= IMPORT_ANOMALY_MIN_RUNS
-    ? medianOf_(samples.slice(-IMPORT_ANOMALY_MIN_RUNS).map(h => h.rows))
-    : null;
+
+  // Sezonowość tygodniowa (#180, etap 2, 6A) — wyłącznie GA4 i wyłącznie profile
+  // jednodniowe: test kompletności z 19.09.2026 pokazał, że niski weekend jest
+  // prawdziwy (12 i 13.09 po ponownym imporcie — co do wiersza to samo), a mediana
+  // z kolejnych dni jest zawsze wartością z dnia roboczego, więc weekend leżał
+  // tuż przy progu. GSC takiego wzoru nie pokazało i zostaje przy jednej bazie.
+  // Próbki bez zakresu (wiersze sprzed v2.36.11) nie mają klasy i nie wchodzą
+  // do baz klasowych.
+  const cls = source === 'GA4' && (Number(run.days) || 0) === 1 ? importDataClass_(importRangeKey_(run)) : '';
+  const base = cls ? samples.filter(h => importDataClass_(h.rangeKey) === cls) : samples;
+  const size = cls ? IMPORT_ANOMALY_CLASS_WINDOW[cls] : IMPORT_ANOMALY_MIN_RUNS;
+  const median = base.length >= size ? medianOf_(base.slice(-size).map(h => h.rows)) : null;
+  const versus = rowsCount => 'mało danych: ' + rowsCount + ' wierszy vs mediana ' + median +
+    (cls ? ' (' + IMPORT_ANOMALY_CLASS_LABEL[cls] + ')' : '');
 
   if (rows === 0) {
-    if (median > 0) return 'mało danych: 0 wierszy vs mediana ' + median;
+    if (median > 0) return versus(0);
+    // Alarm zera bez zmian (punkt 3): cały profil, nie tylko klasa — zero po
+    // dniach roboczych z danymi jest alarmem także w pierwszą sobotę.
     const withData = samples.filter(h => h.rows > 0);
     if (withData.length) {
       return 'mało danych: 0 wierszy, a wcześniej ten profil zwracał dane (ostatnio ' +
@@ -573,9 +607,7 @@ function importAnomaly_(source, run, history, now) {
     }
     return '';
   }
-  if (median > 0 && rows < median / 2) {
-    return 'mało danych: ' + rows + ' wierszy vs mediana ' + median;
-  }
+  if (median > 0 && rows < median / 2) return versus(rows);
   return '';
 }
 
