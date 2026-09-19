@@ -259,7 +259,11 @@ function performanceUrls_() {
  */
 function psiErrorKind_(code, text) {
   const body = String(text || '');
-  const lighthouse = /Lighthouse returned error:\s*([A-Z_]+)/.exec(body);
+  // Kod Lighthouse to token z wielkich liter, cyfr i podkreślników (`FAILED_DOCUMENT_REQUEST`,
+  // `NO_FCP`). Przy 500 Lighthouse podaje zamiast kodu zdanie — „Something went wrong.” —
+  // i wzorzec bez granicy słowa wyciągał z niego samo „S”: na produkcji w logu stało
+  // `HTTP 500 S ×2`. Kod musi mieć co najmniej dwa znaki i kończyć się na granicy słowa.
+  const lighthouse = /Lighthouse returned error:\s*([A-Z][A-Z0-9_]*[A-Z0-9])\b/.exec(body);
   const transport = /(net::[A-Z_]+)/.exec(body);
   return 'HTTP ' + code +
     (lighthouse ? ' ' + lighthouse[1] : '') +

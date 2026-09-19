@@ -307,8 +307,8 @@ describe('#124: dane laboratoryjne z PSI', () => {
   });
 
   test('#124: awaria Lighthouse nie przerywa pomiaru i jest zgłoszona', () => {
-    // Realny błąd z produkcji: Lighthouse zwraca 500 dla pojedynczego przebiegu.
-    // To zdarza się losowo i nie może kasować wszystkiego, co już zmierzono.
+    // Realny błąd z produkcji: Lighthouse zwraca 500 dla pojedynczej próby.
+    // Nie może kasować wszystkiego, co już zmierzono.
     const lighthouse500 = { code: 500, text: '{"error":{"code":500,"message":"Lighthouse returned error: Something went wrong.","errors":[{"domain":"lighthouse","reason":"lighthouseError"}]}}' };
     let call = 0;
     const gas = project({
@@ -319,7 +319,9 @@ describe('#124: dane laboratoryjne z PSI', () => {
     });
     const out = plain(gas.runPsiMeasurement_());
     assert.equal(out.failures.length, 1, 'jedna strategia z niepełnym kompletem prób');
-    assert.match(out.failures[0], /\(mobile\): 2 z 3 prób/);
+    // Cały wiersz, nie fragment: dopasowanie samego „2 z 3 prób” przepuszczało
+    // `HTTP 500 S ×1`, bo urwana litera stała za nim.
+    assert.match(out.failures[0], /\(mobile\): 2 z 3 prób — HTTP 500 ×1$/);
     assert.ok(out.rows > 0, 'udane próby są zapisane, a nie tracone');
     assert.match(out.detail, /nieudane próby:/);
   });

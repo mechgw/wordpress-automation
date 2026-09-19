@@ -28,7 +28,13 @@ const TIMEOUT_400 = {
   code: 400,
   text: '{"error":{"code":400,"message":"Lighthouse returned error: FAILED_DOCUMENT_REQUEST. Lighthouse was unable to reliably load the page you requested. (Details: net::ERR_TIMED_OUT)"}}'
 };
-const LIGHTHOUSE_500 = { code: 500, text: '{"error":{"errors":[{"domain":"lighthouse"}]}}' };
+// Treść z produkcji. Zamiast kodu Lighthouse podaje tu zdanie, a wcześniejszy
+// fixture bez frazy „Lighthouse returned error” był łagodniejszy niż rzeczywistość:
+// z tym zdaniem regex rodzaju błędu wyciągał samo „S” i żaden test tego nie widział.
+const LIGHTHOUSE_500 = {
+  code: 500,
+  text: '{"error":{"code":500,"message":"Lighthouse returned error: Something went wrong.","errors":[{"domain":"lighthouse","reason":"lighthouseError"}]}}'
+};
 
 const psiBody = (lcp = 2500) => JSON.stringify({
   lighthouseResult: {
@@ -88,6 +94,20 @@ describe('#179: stan zakresu (URL × strategia)', () => {
     const scope = scopeOf(out, 'mobile');
     assert.equal(scope.state, 'OSTRZEŻENIE');
     assert.equal(scope.ok, 1);
+    assert.deepEqual(scope.kinds, ['HTTP 500', 'HTTP 500'], 'zdanie Lighthouse to nie kod — bez urwanej litery');
+  });
+
+  test('3b: rodzaj błędu bierze kod Lighthouse tylko wtedy, gdy to kod', () => {
+    const gas = project({ psi: OK_200 });
+    const przypadki = [
+      [400, TIMEOUT_400.text, 'HTTP 400 FAILED_DOCUMENT_REQUEST (net::ERR_TIMED_OUT)'],
+      [500, LIGHTHOUSE_500.text, 'HTTP 500'],
+      [500, '{"error":{"message":"Lighthouse returned error: NO_FCP. The page did not paint any content."}}', 'HTTP 500 NO_FCP'],
+      [500, '{"error":{"message":"Lighthouse returned error: Something went wrong. (Details: net::ERR_CONNECTION_RESET)"}}',
+        'HTTP 500 (net::ERR_CONNECTION_RESET)'],
+      [503, '', 'HTTP 503']
+    ];
+    przypadki.forEach(([code, text, rodzaj]) => assert.equal(gas.psiErrorKind_(code, text), rodzaj, text));
   });
 
   test('4: zero udanych w jednej strategii → NIEUDANY; druga strategia zapisana, diagnoza nietknięta', () => {
