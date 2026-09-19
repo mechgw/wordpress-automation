@@ -270,15 +270,31 @@ function psiErrorKind_(code, text) {
     (transport ? ' (' + transport[1] + ')' : '');
 }
 
-/** Rodzaj próby przerwanej wyjątkiem — np. gdy `UrlFetchApp.fetch` w ogóle nie odpowie. */
-function psiFailureKind_(error) {
+/**
+ * Treść błędu z kluczem API zamienionym na wielokropek.
+ *
+ * Klucz jedzie w adresie żądania (`?key=` w CrUX, `&key=` w PSI), a komunikat
+ * wyjątku `UrlFetchApp` potrafi ten adres zacytować. Rodzaj błędu trafia do
+ * `IMPORT LOG`, statusu zadania i maila, więc bez tego wyjątek transportowy
+ * wyniósłby klucz poza Script Properties (#187).
+ */
+function redactApiKey_(text) {
+  return String(text || '').replace(/([?&]key=)[^&\s#]+/gi, '$1…');
+}
+
+/**
+ * Rodzaj żądania przerwanego wyjątkiem — np. gdy `UrlFetchApp.fetch` w ogóle nie odpowie.
+ * Wspólny dla PSI i CrUX; klucz jest maskowany PRZED przycięciem, żeby przycięcie
+ * nie zostawiło jego początku w tekście.
+ */
+function requestFailureKind_(error) {
   if (error && error.kind) return String(error.kind);
-  const message = String((error && error.message) || error || '').replace(/\s+/g, ' ');
+  const message = redactApiKey_(String((error && error.message) || error || '')).replace(/\s+/g, ' ');
   return 'wyjątek: ' + message.slice(0, 120);
 }
 
-/** Rodzaje błędów zakresu z krotnością: `HTTP 400 … ×3`, w kolejności wystąpienia. */
-function psiKindsSummary_(kinds) {
+/** Rodzaje błędów z krotnością: `HTTP 400 … ×3`, w kolejności wystąpienia. Wspólne dla PSI i CrUX. */
+function failureKindsSummary_(kinds) {
   const order = [];
   const counts = {};
   (kinds || []).forEach(function (kind) {
@@ -296,7 +312,7 @@ function psiKindsSummary_(kinds) {
  * danych, więc komunikat jej nie zgaduje (#179).
  */
 function psiScopeLine_(scope) {
-  const kinds = psiKindsSummary_(scope.kinds);
+  const kinds = failureKindsSummary_(scope.kinds);
   const head = scope.state === PSI_SCOPE_FAILED
     ? scope.url + ' (' + scope.strategy + '): PSI nie zdołał zmierzyć adresu w żadnej z ' + PSI_ATTEMPTS + ' prób'
     : scope.url + ' (' + scope.strategy + '): ' + scope.ok + ' z ' + PSI_ATTEMPTS + ' prób';
@@ -337,7 +353,7 @@ function performanceApiRequest_(url) {
   if (code === 403) {
     const error = new Error(
       'Odmowa dostępu (403). Sprawdź, czy klucz z PAGESPEED_API_KEY ma włączone PageSpeed Insights API ' +
-      'i Chrome UX Report API oraz czy jego ograniczenia nie blokują wywołań z Apps Script.\n\n' + text.slice(0, 400)
+      'i Chrome UX Report API oraz czy jego ograniczenia nie blokują wywołań z Apps Script.\n\n' + redactApiKey_(text).slice(0, 400)
     );
     error.fatal = true;
     throw error;
@@ -364,19 +380,55 @@ function performanceApiRequest_(url) {
   }
 }
 
+/** Ile razy pytamy CrUX o jedną parę przy błędzie przejściowym (#187): próba i jedno ponowienie. */
+const CRUX_ATTEMPTS = 2;
+
+/**
+ * Błąd żądania CrUX z rodzajem i klasą (#187).
+ *
+ * - `hard` — 403 i 429: konfiguracja albo limit; kolejne żądania CrUX dałyby
+ *   to samo, więc kończą się żądania CrUX w tym przebiegu — ale nie przebieg;
+ * - `transient` — 5xx i wyjątek transportowy: usługa chwilowo niedostępna,
+ *   jedno ponowienie ma sens;
+ * - bez klasy — pozostałe 4xx i nieczytelna odpowiedź: błąd żądania, identyczne
+ *   ponowienie niczego nie zmieni.
+ */
+function cruxFailure_(message, kind, severity) {
+  const error = new Error(message);
+  error.kind = kind;
+  error.hard = severity === 'hard';
+  error.transient = severity === 'transient';
+  return error;
+}
+
 /**
  * Zapytanie CrUX o jeden form factor. Domyślnie pyta o konkretny adres;
  * z `byOrigin` o całą domenę, co jest jedynym sensownym wyjściem, gdy
  * pojedyncza podstrona ma za mało ruchu.
+ *
+ * Każde niepowodzenie rzuca `cruxFailure_` — nigdy nie przerywa pomiaru samo.
+ * Wcześniej każdy kod spoza 2xx rzucał zwykły wyjątek, który wywracał cały
+ * przebieg razem z PSI: 17.09.2026 jeden `503` zabił w ten sposób trzy przebiegi.
  */
 function cruxRequest_(target, formFactor, key, byOrigin) {
   const scope = byOrigin ? { origin: target } : { url: target };
-  const res = UrlFetchApp.fetch(CRUX_API + '?key=' + encodeURIComponent(key), {
+  // Adres i treść budujemy PRZED `try`: wyjątek z nich (np. klucz, którego nie da
+  // się zakodować) to nie awaria usługi i nie może udawać przejściowego błędu.
+  const endpoint = CRUX_API + '?key=' + encodeURIComponent(key);
+  const options = {
     method: 'post',
     contentType: 'application/json',
     muteHttpExceptions: true,
     payload: JSON.stringify(Object.assign({ formFactor: formFactor, metrics: CRUX_METRICS }, scope))
-  });
+  };
+  let res;
+  try {
+    res = UrlFetchApp.fetch(endpoint, options);
+  } catch (e) {
+    // Zerwane połączenie, DNS, przekroczony czas — z natury przejściowe.
+    // Komunikat bywa cytatem adresu żądania, a w nim jest klucz.
+    throw cruxFailure_('CrUX: ' + redactApiKey_(String((e && e.message) || e)), requestFailureKind_(e), 'transient');
+  }
   const code = res.getResponseCode();
   const text = res.getContentText() || '';
 
@@ -384,11 +436,64 @@ function cruxRequest_(target, formFactor, key, byOrigin) {
   // terenowych to informacja o ruchu, nie błąd strony.
   if (code === 404) return null;
   if (code === 403) {
-    throw new Error('CrUX odmówił dostępu (403). Włącz Chrome UX Report API dla klucza z PAGESPEED_API_KEY.\n\n' + text.slice(0, 400));
+    throw cruxFailure_('CrUX odmówił dostępu (403). Włącz Chrome UX Report API dla klucza z PAGESPEED_API_KEY.\n\n' +
+      redactApiKey_(text).slice(0, 400), 'HTTP 403', 'hard');
   }
-  if (code === 429) throw new Error('CrUX: przekroczony limit zapytań (429).');
-  if (code < 200 || code >= 300) throw new Error('CrUX HTTP ' + code + ':\n' + text.slice(0, 800));
-  return text ? JSON.parse(text) : null;
+  if (code === 429) throw cruxFailure_('CrUX: przekroczony limit zapytań (429).', 'HTTP 429', 'hard');
+  if (code < 200 || code >= 300) {
+    throw cruxFailure_('CrUX HTTP ' + code + ':\n' + text.slice(0, 800), 'HTTP ' + code, code >= 500 ? 'transient' : '');
+  }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw cruxFailure_('Nieczytelna odpowiedź CrUX (HTTP ' + code + '): ' + String(e.message || e), 'nieczytelna odpowiedź', '');
+  }
+}
+
+/**
+ * Zapytanie CrUX z jednym ponowieniem przy błędzie przejściowym (#187).
+ *
+ * Zwraca `{ record }` albo `{ error }`: nieudane żądanie jest WYNIKIEM pary,
+ * a nie wyjątkiem, który wywraca pomiar. `error.kinds` ma rodzaj każdej próby,
+ * także ponowionej.
+ *
+ * CrUX tylko odczytuje gotowy rekord i nie obciąża mierzonej strony, a `503`
+ * z definicji mija. Błąd żądania i błąd twardy nie są ponawiane. Wyjątek bez
+ * rodzaju pochodzi spoza żądania — z naszego kodu — i świadomie idzie dalej:
+ * udawałby nieudaną parę i ginąłby w statystyce, tak jak w #179.
+ */
+function cruxQuery_(target, formFactor, key, byOrigin) {
+  const kinds = [];
+  let error = null;
+  for (let attempt = 1; attempt <= CRUX_ATTEMPTS; attempt++) {
+    try {
+      return { record: cruxRequest_(target, formFactor, key, byOrigin) };
+    } catch (e) {
+      if (!e || !e.kind) throw e;
+      kinds.push(e.kind);
+      error = e;
+      if (!e.transient) break;
+    }
+  }
+  error.kinds = kinds;
+  return { error: error };
+}
+
+/** Jeden wiersz opisu pary CrUX, której żądanie się nie udało (#187). */
+function cruxFailureLine_(failure) {
+  return failure.url + ' (' + failure.formFactor + (failure.byOrigin ? ', dane domeny' : '') + '): ' +
+    failureKindsSummary_(failure.kinds);
+}
+
+/**
+ * `pary: OK 6 | bez danych 2 | nieudane 2` — licznik w kształcie znanym z #179.
+ * „Nieodpytane” pojawia się tylko po twardym błędzie, bo tylko wtedy są pary,
+ * o które w ogóle nie zapytano.
+ */
+function cruxPairsSummary_(field) {
+  return 'pary: OK ' + field.pairsOk + ' | bez danych ' + field.missing + ' | nieudane ' + field.failed +
+    (field.notQueried ? ' | nieodpytane ' + field.notQueried : '');
 }
 
 /** Domena adresu w postaci, której oczekuje CrUX: schemat i host, bez ścieżki. */
@@ -977,15 +1082,37 @@ function runCruxMeasurement_() {
   // Kształt wyniku jest ten sam niezależnie od tego, czy było co mierzyć:
   // wywołujący nie powinien sprawdzać obecności pól.
   if (!urls.length) {
-    return { rows: 0, urls: 0, missing: 0, fromOrigin: 0, detail: 'brak adresów w „' + PERF_URLS_SHEET + '”' };
+    return {
+      rows: 0,
+      urls: 0,
+      missing: 0,
+      fromOrigin: 0,
+      pairsOk: 0,
+      failed: 0,
+      notQueried: 0,
+      failures: [],
+      hardError: '',
+      detail: 'brak adresów w „' + PERF_URLS_SHEET + '”'
+    };
   }
 
   const now = new Date();
   const rows = [];
   let missing = 0;
   let fromOrigin = 0;
+  let pairsOk = 0;
+  let notQueried = 0;
+  // Pary, których żądanie się nie udało, z rodzajami błędów (#187). Nieudana para
+  // to NIE para bez danych: nie dostaje markera `INSUFFICIENT_DATA`, bo marker
+  // jest twierdzeniem o ruchu na stronie, a nieudane żądanie do niego nie uprawnia.
+  const failures = [];
+  // Twardy błąd (403, 429) kończy żądania CrUX w tym przebiegu — kolejne dałyby
+  // to samo — ale nie kończy przebiegu: PSI to osobne API.
+  let hardError = null;
   // Dane dla całej domeny są takie same dla każdego adresu, więc pytamy o nie
-  // raz na domenę i form factor, zamiast raz na adres.
+  // raz na domenę i form factor, zamiast raz na adres. Zapamiętujemy także
+  // niepowodzenie: domena, która nie odpowiedziała na próbę i ponowienie,
+  // nie jest odpytywana jeszcze raz dla kolejnego adresu w tym samym przebiegu.
   const originCache = {};
 
   // Pary, dla których CrUX coś zwrócił w tym przebiegu. Marker dostępności tych par
@@ -994,10 +1121,22 @@ function runCruxMeasurement_() {
 
   urls.forEach(function (entry) {
     ['PHONE', 'DESKTOP'].forEach(function (formFactor) {
-      const record = cruxRequest_(entry.url, formFactor, key);
-      if (record) {
+      if (hardError) {
+        notQueried++;
+        return;
+      }
+      const direct = cruxQuery_(entry.url, formFactor, key);
+      if (direct.error) {
+        // Nieudane żądanie o adres to nie „za mało danych dla adresu”, więc nie
+        // wolno sięgnąć po dane domeny — przypisalibyśmy je stronie bez podstaw.
+        failures.push({ url: entry.url, formFactor: formFactor, byOrigin: false, kinds: direct.error.kinds });
+        if (direct.error.hard) hardError = direct.error;
+        return;
+      }
+      if (direct.record) {
+        pairsOk++;
         resolved[cruxPairKey_(entry.url, formFactor)] = true;
-        parseCruxRecord_(record, entry.url, formFactor, now, 'CRUX').forEach(function (row) { rows.push(row); });
+        parseCruxRecord_(direct.record, entry.url, formFactor, now, 'CRUX').forEach(function (row) { rows.push(row); });
         return;
       }
 
@@ -1007,14 +1146,20 @@ function runCruxMeasurement_() {
       const origin = cruxOrigin_(entry.url);
       const cacheKey = origin + ' ' + formFactor;
       if (!Object.prototype.hasOwnProperty.call(originCache, cacheKey)) {
-        originCache[cacheKey] = origin ? cruxRequest_(origin, formFactor, key, true) : null;
+        originCache[cacheKey] = origin ? cruxQuery_(origin, formFactor, key, true) : { record: null };
       }
-      const originRecord = originCache[cacheKey];
+      const byOrigin = originCache[cacheKey];
 
-      if (originRecord) {
+      if (byOrigin.error) {
+        failures.push({ url: entry.url, formFactor: formFactor, byOrigin: true, kinds: byOrigin.error.kinds });
+        if (byOrigin.error.hard) hardError = byOrigin.error;
+        return;
+      }
+      if (byOrigin.record) {
+        pairsOk++;
         fromOrigin++;
         resolved[cruxPairKey_(entry.url, formFactor)] = true;
-        parseCruxRecord_(originRecord, entry.url, formFactor, now, 'CRUX (domena)').forEach(function (row) { rows.push(row); });
+        parseCruxRecord_(byOrigin.record, entry.url, formFactor, now, 'CRUX (domena)').forEach(function (row) { rows.push(row); });
         return;
       }
 
@@ -1023,18 +1168,30 @@ function runCruxMeasurement_() {
     });
   });
 
+  // Zapis także po nieudanych parach i po twardym błędzie: pary pobrane wcześniej
+  // są poprawne i już opłacone (#187). Wcześniej pierwszy wyjątek omijał ten zapis,
+  // więc przepadało wszystko, co przebieg zdążył pobrać.
   upsertPerformanceRows_(PERF_FIELD_SHEET, PERF_FIELD_HEADER, PERF_FIELD_KEY, rows, function (row) {
     return cruxIsAvailabilityMarker_(row) && resolved[cruxPairKey_(row[1], row[2])] === true;
   });
-  return {
+  const result = {
     rows: rows.length,
     urls: urls.length,
     missing: missing,
     fromOrigin: fromOrigin,
-    detail: rows.length + ' pomiarów terenowych dla ' + urls.length + ' adresów' +
-      (fromOrigin ? ', w tym ' + fromOrigin + ' z danych całej domeny zamiast pojedynczej strony' : '') +
-      (missing ? ', ' + missing + ' bez wystarczających danych' : '')
+    pairsOk: pairsOk,
+    failed: failures.length,
+    notQueried: notQueried,
+    failures: failures.map(cruxFailureLine_),
+    hardError: hardError ? hardError.message : ''
   };
+  // Licznik par zastępuje dawne „N bez wystarczających danych”: ta sama liczba
+  // w dwóch miejscach jednej linii to szum, którego #186 właśnie się pozbyło.
+  result.detail = rows.length + ' pomiarów terenowych dla ' + urls.length + ' adresów' +
+    (fromOrigin ? ', w tym ' + fromOrigin + ' z danych całej domeny zamiast pojedynczej strony' : '') +
+    '; ' + cruxPairsSummary_(result) +
+    (result.failures.length ? '; nieudane pary: ' + result.failures.join('; ') : '');
+  return result;
 }
 
 /** Budżet dzienny z konfiguracji; domyślny, gdy nieustawiony albo niepoprawny. */
@@ -1186,7 +1343,7 @@ function runPsiMeasurement_(trigger) {
           // to samo i tylko zużyją limit. Każdy inny to nieudana PRÓBA — o tym,
           // czy to szum, czy problem, decyduje wynik całego zakresu (#179).
           if (e.fatal) throw e;
-          kinds.push(psiFailureKind_(e));
+          kinds.push(requestFailureKind_(e));
           continue;
         }
         // Wyjątek spoza żądania (błąd w naszym kodzie) świadomie NIE jest łapany:
@@ -1370,8 +1527,36 @@ function przygotujPomiarWydajnosci() {
  */
 function runPerformanceMeasurement_(trigger) {
   return withScriptLock_('pomiar wydajności', function () {
+    // CrUX i PSI to dwa niezależne źródła i dwa osobne API Google (#187): awaria
+    // jednego — przejściowa albo konfiguracyjna — nie może zabrać danych drugiego.
+    // `runCruxMeasurement_()` nie rzuca przy nieudanych żądaniach, tylko je
+    // raportuje, więc PSI rusza zawsze. Wcześniej pierwszy `503` z CrUX kończył
+    // przebieg, zanim PSI wysłał choć jedno żądanie.
     const field = runCruxMeasurement_();
-    const lab = runPsiMeasurement_(trigger);
+    let lab;
+    try {
+      lab = runPsiMeasurement_(trigger);
+    } catch (e) {
+      // Awaria PSI jako źródła — 403, 429 albo wszystkie zakresy nieudane (#179).
+      // Wyjątek z naszego kodu idzie dalej bez zmian. Gdy CrUX był w porządku,
+      // błąd PSI mówi wszystko; gdy nie — jeden błąd opisuje OBA źródła, bo
+      // inaczej wyjątek PSI przykryłby informację o CrUX.
+      if (!e || !(e.fatal || e.psiAllScopesFailed) || !field.failed) throw e;
+      // Nagłówek z oboma źródłami na początku: rekord zadania przycina treść
+      // błędu do 300 znaków, a szczegóły PSI potrafią być długie.
+      throw new Error('PSI i CrUX zawiodły w tym samym przebiegu — CrUX: ' + cruxPairsSummary_(field) +
+        '. Szczegóły PSI: ' + e.message + ' | Szczegóły CrUX: nieudane pary: ' + field.failures.join('; ') +
+        (field.hardError ? ' | Przerwany: ' + field.hardError : ''), { cause: e });
+    }
+
+    if (field.hardError) {
+      // 403 i 429 nie miną same, więc zadanie kończy się błędem — ale PO zapisie
+      // PSI i par CrUX sprzed przerwania, a treść mówi, co mimo to zapisano.
+      throw new Error('CrUX przerwany; PSI wykonany mimo to (' + lab.rows + ' pomiarów, ' +
+        psiScopeSummary_(lab.scopeCounts) + '); CrUX: ' + cruxPairsSummary_(field) +
+        '. Przyczyna: ' + field.hardError);
+    }
+
     // `detail` i `warning` na NAJWYŻSZYM poziomie, bo tylko stamtąd czyta je
     // `recordJobRun_()` (#179). Wcześniej zwracany był sam `{ field, lab }`,
     // więc status zadania nie miał ani opisu, ani ostrzeżenia — nieudane
@@ -1381,7 +1566,10 @@ function runPerformanceMeasurement_(trigger) {
       lab: lab,
       rows: lab.rows,
       detail: 'CrUX: ' + field.detail + ' | PSI: ' + lab.detail,
-      warning: lab.warning || ''
+      // Nieudane pary CrUX to ostrzeżenie zadania, tak jak nieudane zakresy PSI:
+      // przebieg dowiózł dane, ale część wymaga uwagi (#187).
+      warning: [field.failed ? 'CrUX: nieudane pary: ' + field.failures.join('; ') : '', lab.warning || '']
+        .filter(Boolean).join(' | ')
     };
   });
 }
