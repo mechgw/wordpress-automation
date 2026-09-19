@@ -274,7 +274,10 @@ describe('#155: marker dostępności danych', () => {
     s.przebieg(brakDanych);
     const przed = s.gas.$sheet(FIELD).map(r => r.slice());
 
-    assert.throws(() => s.przebieg(awaria), /CrUX HTTP 500/);
+    // #187: nieudany odczyt jest wynikiem pary, a nie wyjątkiem, który wywraca
+    // pomiar. Kontrakt #155 zostaje bez zmian: zakładka nietknięta, marker żyje.
+    const wynik = s.przebieg(awaria);
+    assert.equal(wynik.failed, 2, 'obie pary nieudane, a nie „bez danych”');
 
     assert.deepEqual(s.gas.$sheet(FIELD), przed, 'zakładka bez zmian');
     assert.equal(s.markery().length, 2, 'ostatnia dobra diagnoza przetrwała');

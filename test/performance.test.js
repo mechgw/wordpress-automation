@@ -191,9 +191,13 @@ describe('#124: dane terenowe z CrUX', () => {
     assert.ok(periods.indexOf('2026-08-01') >= 0, 'starszy okres nie został skasowany');
   });
 
-  test('odmowa i limit mają osobne komunikaty', () => {
-    assert.throws(() => project({ fetch: () => ({ code: 403, text: '{}' }) }).runCruxMeasurement_(), /Włącz Chrome UX Report API/);
-    assert.throws(() => project({ fetch: () => ({ code: 429, text: '{}' }) }).runCruxMeasurement_(), /limit zapytań \(429\)/);
+  test('odmowa i limit mają osobne komunikaty — jako twardy błąd części CrUX (#187)', () => {
+    // Do #187 oba rzucały wyjątek i zabierały PSI. Teraz kończą tylko żądania CrUX;
+    // wynik zadania składa `runPerformanceMeasurement_()` (test/crux-resilience.test.js).
+    const odmowa = plain(project({ fetch: () => ({ code: 403, text: '{}' }) }).runCruxMeasurement_());
+    const limit = plain(project({ fetch: () => ({ code: 429, text: '{}' }) }).runCruxMeasurement_());
+    assert.match(odmowa.hardError, /Włącz Chrome UX Report API/);
+    assert.match(limit.hardError, /limit zapytań \(429\)/);
   });
 
   test('#124: wynik ma ten sam kształt także wtedy, gdy nie było co mierzyć', () => {
