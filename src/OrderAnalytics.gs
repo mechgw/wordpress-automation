@@ -243,7 +243,8 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\t\t\t$source_page = preg_match( '#^/[A-Za-z0-9/._~%-]{0,199}$#', $path ) ? $path : '';",
     "\t\t\t\t}",
     "",
-    "\t\t\t\t$created = isset( $entry->time_created ) ? (string) $entry->time_created : '';",
+    "\t\t\t\t// time_created is a display string ('M j, Y @ g:i A', localized); the raw DB value is date_created_sql.",
+    "\t\t\t\t$created = isset( $entry->date_created_sql ) ? (string) $entry->date_created_sql : '';",
     "\t\t\t\t$items[] = array(",
     "\t\t\t\t\t'entry_id' => absint( $entry->entry_id ),",
     "\t\t\t\t\t'date' => preg_match( '/^(\\d{4}-\\d{2}-\\d{2})/', $created, $date_match ) ? $date_match[1] : '',",
@@ -704,6 +705,11 @@ function importujZleceniaAnalityka() {
     'Zgłoszenia w WordPressie: ' + result.fetched + '\nW zakładce: ' + result.written +
     '\nPominięte jako starsze niż ' + ORDER_ANALYTICS_RETENTION_MONTHS + ' miesiące: ' + result.expired +
     '\nPominięte bez prawidłowej daty (brak, niemożliwa albo z przyszłości — retencja by ich nie objęła): ' + result.undated +
+    // Wszystkie bez daty to objaw mostu, nie danych: 26.09 PHP czytało pole do
+    // wyświetlania zamiast surowej daty i odrzuciło 334 z 334 zgłoszeń.
+    (result.fetched > 0 && result.undated === result.fetched
+      ? '\nUWAGA: żadne zgłoszenie nie ma prawidłowej daty — to wskazuje na błąd mostu, a nie na dane.'
+      : '') +
     '\n\nMapowanie pól (klucz, typ, etykieta):\n' + orderMappingText_(result.mapping) +
     '\n\nDo arkusza trafiają wyłącznie: data, usługa i jej wariant, miejscowości, regiony z dwóch cyfr kodu ' +
     'i ścieżka strony wysłania. Bez danych kontaktowych.'

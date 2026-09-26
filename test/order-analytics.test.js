@@ -148,6 +148,10 @@ describe('#195: kod mostu (test 8)', () => {
     assert.ok(php.includes("preg_match( '/^(\\d{2})-?\\d{3}$/', $zip, $zip_match ) ? $zip_match[1] : ''"), 'region = dwie pierwsze cyfry');
     assert.ok(php.includes("mb_strlen( $city ) > 40 || ! preg_match( '/^\\p{L}+(?:[ -]\\p{L}+)*$/u', $city )"), 'normalizacja miejscowości');
     assert.ok(php.includes("preg_match( '/^(\\d{4}-\\d{2}-\\d{2})/', $created, $date_match )"), 'sama data');
+    // Produkcja 26.09: `time_created` Forminatora to tekst do wyświetlania
+    // („maj 16, 2026 @ 1:58 AM”), więc wszystkie 334 zgłoszenia wyszły bez daty.
+    assert.ok(php.includes('$created = isset( $entry->date_created_sql ) ? (string) $entry->date_created_sql : \'\';'), 'surowa data z bazy');
+    assert.doesNotMatch(php, /\$entry->time_created/, 'pole do wyświetlania nie jest źródłem daty');
     assert.ok(php.includes('wp_parse_url( $src, PHP_URL_PATH )'), 'sama ścieżka adresu');
     assert.ok(php.includes("$source_page = preg_match( '#^/[A-Za-z0-9/._~%-]{0,199}$#', $path ) ? $path : '';"));
   });
@@ -513,6 +517,15 @@ describe('#195: import do zakładki', () => {
     assert.deepEqual(dataRows(gas).map(r => r[0]), [9]);
     assert.deepEqual([out.undated, out.expired, out.written], [2, 0, 1]);
     assert.match(gas.$alerts[0][0], /Pominięte bez prawidłowej daty .*: 2/);
+    assert.doesNotMatch(gas.$alerts[0][0], /błąd mostu/, 'część zgłoszeń z datą: to dane, nie most');
+  });
+
+  test('gdy żadne zgłoszenie nie ma daty, okno wskazuje na błąd mostu', () => {
+    const router = makeRouter({ pages: { 1: page([entry(7, { date: '' }), entry(8, { date: 'maj 16, 2026 @ 1:58 AM' })]) } });
+    const gas = project({ router });
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual([out.fetched, out.undated, out.written], [2, 2, 0]);
+    assert.match(gas.$alerts[0][0], /UWAGA: żadne zgłoszenie nie ma prawidłowej daty — to wskazuje na błąd mostu/);
   });
 
   test('data niemożliwa albo z przyszłości nie trafia do zakładki; jutro jest dopuszczone', () => {

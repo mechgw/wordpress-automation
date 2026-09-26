@@ -177,7 +177,7 @@ Kolumny to `Data`, `Skąd`, `Dokąd`, `Usługa`, `Wycena [zł]`, `Wynik`, `Skąd
 Zakładka `ZLECENIA ANALITYKA` mówi, **co** i **skąd dokąd** zlecają klienci. GA4 mówi tylko, jak do zlecenia trafili. Dane pochodzą z osobnego mostu tylko do odczytu w WordPressie (snippet Code Snippets), który dla każdego zgłoszenia formularza zleceń wydaje wyłącznie pola z allowlisty, zminimalizowane już w PHP:
 
 - `Nr` — identyfikator zgłoszenia;
-- `Data` — sama data;
+- `Data` — sama data, z surowego zapisu zgłoszenia (`date_created_sql`). Pole `time_created` Forminatora to tekst do wyświetlania, np. „maj 16, 2026 @ 1:58 AM”, i nie nadaje się do porównań;
 - `Usługa` — grupa: `miejska` / `podmiejska` / `krajowa` / `kurier dedykowany`, ten sam słownik co w rejestrze zapytań telefonicznych;
 - `Wariant usługi` — etykieta wybranej opcji ze schematu formularza, np. „Standard”, „Ekspres 12”;
 - `Skąd` i `Dokąd` — miejscowość: tylko litery, spacje i łącznik, najwyżej 40 znaków, inna wartość daje pustą komórkę;
