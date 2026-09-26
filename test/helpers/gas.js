@@ -31,7 +31,7 @@ const ROOT = path.resolve(__dirname, '..', '..', 'src');
 const SCRIPT_TIME_ZONE = 'Europe/Warsaw';
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs', 'PerformanceMigration.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs', 'PerformanceMigration.gs', 'PhoneInquiries.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -151,6 +151,12 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
   // Linki rich text, równolegle do wartości. Zwykły zapis wartości zastępuje
   // treść komórki razem z linkiem — tak jak w Arkuszach.
   const links = [];
+  // Walidacja danych, notatki komórek i zamrożone wiersze (#196) są stanem, a nie
+  // no-opem: kontrakt rejestru zapytań to właśnie reguły na kolumnach, notatka pod
+  // nagłówkiem i zamrożony nagłówek. Przesuwanie wierszy ich nie przenosi.
+  const validations = new Map();
+  const notes = new Map();
+  let frozenRows = 0;
   const clearLink = (row, col) => {
     if (links[row - 1] && links[row - 1].length >= col) links[row - 1][col - 1] = null;
   };
@@ -288,6 +294,25 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
       return out;
     },
     setFontWeight() { return this; },
+    setDataValidation(rule) {
+      for (let r = row; r < row + rows; r++) {
+        for (let c = col; c < col + cols; c++) {
+          if (rule) validations.set(r + ':' + c, rule); else validations.delete(r + ':' + c);
+        }
+      }
+      return this;
+    },
+    clearDataValidations() { return this.setDataValidation(null); },
+    getDataValidation: () => validations.get(row + ':' + col) || null,
+    setNote(text) {
+      for (let r = row; r < row + rows; r++) {
+        for (let c = col; c < col + cols; c++) {
+          if (text) notes.set(r + ':' + c, String(text)); else notes.delete(r + ':' + c);
+        }
+      }
+      return this;
+    },
+    getNote: () => notes.get(row + ':' + col) || '',
     setBackground() { return this; },
     setFontColor() { return this; },
     // Minimal TextFinder: exact (matchEntireCell) or substring search within the range.
@@ -344,7 +369,8 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
       maxRows = Math.max(1, maxRows - n);
       return this;
     },
-    setFrozenRows() { return this; },
+    setFrozenRows(n) { frozenRows = n; return this; },
+    getFrozenRows: () => frozenRows,
     setColumnWidth() { return this; },
     appendRow(row) {
       row.forEach((v, j) => checkCell(v, grid.length + 1, j + 1));
@@ -452,6 +478,25 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
           return builder;
         },
         build: () => makeRichTextValue(text, link)
+      };
+      return builder;
+    },
+    // Budowniczy reguł walidacji (#196): tylko kryteria używane w źródłach.
+    // Reguła jest zwykłym obiektem, żeby test mógł ją porównać wprost.
+    newDataValidation() {
+      const rule = { criteria: null, values: [], allowInvalid: true, helpText: '' };
+      const builder = {
+        requireValueInList(values, showDropdown) {
+          rule.criteria = 'VALUE_IN_LIST';
+          rule.values = values.slice();
+          rule.showDropdown = showDropdown !== false;
+          return builder;
+        },
+        requireDate() { rule.criteria = 'DATE_IS_VALID_DATE'; return builder; },
+        requireNumberGreaterThanOrEqualTo(n) { rule.criteria = 'NUMBER_GREATER_THAN_OR_EQUAL_TO'; rule.values = [n]; return builder; },
+        setAllowInvalid(flag) { rule.allowInvalid = Boolean(flag); return builder; },
+        setHelpText(text) { rule.helpText = String(text); return builder; },
+        build: () => Object.assign({}, rule, { values: rule.values.slice() })
       };
       return builder;
     },

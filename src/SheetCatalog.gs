@@ -82,7 +82,11 @@ function sheetCatalog_() {
     // Arkusz człowieka: skrypt nie zapisuje do niego danych, ale go czyta, wymienia
     // w spisie START i może przesunąć jego zakładkę. W katalogu jest po to, żeby
     // START mówił, że nagłówki jego kolumn są kontraktem kolejki recrawl.
-    { name: recrawlChangeLogSheetName_(), category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' }
+    { name: recrawlChangeLogSheetName_(), category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zmian SEO. Kolejka recrawl czyta stąd kolumnę z adresem i kolumnę z datą, więc ich nagłówki mają znaczenie.' },
+    // Rejestr człowieka (#196): skrypt zakłada tylko strukturę i nic tu nie zapisuje.
+    // „wlasne”, bo „Ukryj arkusze techniczne” chowa każdy wpis kategorii „dane”,
+    // a do tej zakładki człowiek wpisuje rozmowy na bieżąco.
+    { name: PHONE_INQUIRIES_SHEET, category: 'wlasne', owner: 'człowiek', description: 'Ręczny rejestr zapytań telefonicznych: trasa, usługa, wycena i wynik rozmowy. Bez danych kontaktowych; nie wpisuj ich też do Uwag.' }
   ];
 }
 
