@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * #123, etap pierwszy: wszystko poza samym dostępem do API.
+ * #123: import Google Business Profile.
  *
  * Kształt odpowiedzi jest odwzorowany według dokumentacji Business Profile
  * Performance API v1 i nie był sprawdzony na żywym ruchu, więc te testy pilnują
@@ -11,6 +11,8 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { loadProject, plain } = require('./helpers/gas');
 
 const PERF = 'GBP PERFORMANCE RAW';
@@ -73,8 +75,11 @@ describe('#123: budowa żądań', () => {
 describe('#123: odmowa API mówi, czego brakuje', () => {
   const failing = code => project({ fetch: () => ({ code: code, text: '{"error":{"message":"nope"}}' }) });
 
-  test('401 wskazuje brak zakresu OAuth i ponowną autoryzację', () => {
-    assert.throws(() => failing(401).gbpApiRequest_('https://x/'), /brak zakresu OAuth.*autoryzuj projekt ponownie/s);
+  test('401 wskazuje zakres w manifeście i ponowną autoryzację', () => {
+    assert.throws(
+      () => failing(401).gbpApiRequest_('https://x/'),
+      /appsscript\.json zawiera zakres business\.manage.*ponownie autoryzowany/s
+    );
   });
 
   test('403 tłumaczy, że włączenie API nie wystarcza bez przyznanego dostępu', () => {
@@ -206,7 +211,7 @@ describe('#123: menu', () => {
     const text = gas.$alerts[0][0];
     assert.match(text, /brak Script Property GBP_LOCATION/);
     assert.match(text, /Przyznany dostęp do Business Profile API/);
-    assert.match(text, /Zakres OAuth Business Profile w appsscript\.json/);
+    assert.match(text, /Zakres OAuth Business Profile jest już w appsscript\.json/);
   });
 
   test('przy ustawionej lokalizacji stan konfiguracji jest podany wprost', () => {
@@ -235,5 +240,14 @@ describe('#123: menu', () => {
     const fns = seo.items.map(i => i.fn);
     const at = fns.indexOf('przygotujBusinessProfile');
     assert.deepEqual(fns.slice(at, at + 2), ['przygotujBusinessProfile', 'importujBusinessProfile']);
+  });
+});
+
+describe('#123: manifest', () => {
+  test('appsscript.json zawiera zakres Business Profile', () => {
+    // Bez zakresu import pada dopiero na pierwszym żądaniu do API, więc
+    // usunięcie go z manifestu ma paść tutaj, a nie na produkcji.
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'appsscript.json'), 'utf8'));
+    assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/business.manage'));
   });
 });
