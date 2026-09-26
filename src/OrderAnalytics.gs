@@ -185,6 +185,11 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\t\t$mapping[] = array( 'field' => $key, 'type' => $type, 'label' => $labels[ $key ] );",
     "\t\t\t}",
     "",
+    "\t\t\t// Audit mode: the mapping only, returned before any submission is read.",
+    "\t\t\tif ( $request->get_param( 'mapping_only' ) ) {",
+    "\t\t\t\treturn rest_ensure_response( array( 'form_id' => $form_id, 'mapping' => $mapping ) );",
+    "\t\t\t}",
+    "",
     "\t\t\t$per_page = absint( $request->get_param( 'per_page' ) );",
     "\t\t\tif ( $per_page < 1 ) { $per_page = 100; }",
     "\t\t\t$per_page = min( 100, $per_page );",
@@ -376,7 +381,7 @@ function auditOrderAnalyticsBridge() {
   return withScriptLock_('audyt mostu zleceń', () => {
     const snippet = validateOrderAnalyticsSnippet_(getCodeSnippetRaw_(getOrderAnalyticsSnippetId_()), buildOrderAnalyticsBridgeCode_());
     const state = { snippetId: Number(snippet.id), active: Boolean(snippet.active), codeMatches: true, mapping: [] };
-    if (state.active) state.mapping = fetchOrderAnalyticsPage_(1, 1).mapping;
+    if (state.active) state.mapping = fetchOrderAnalyticsMapping_();
     showOrderAnalyticsMessage_(
       'Audyt mostu zleceń\n\nSnippet ID: ' + state.snippetId + '\nStan: ' + (state.active ? 'AKTYWNY' : 'nieaktywny') +
       '\nKod zgodny: TAK' +
@@ -464,6 +469,32 @@ function orderAnalyticsEntry_(entry) {
   };
 }
 
+function orderMappingFrom_(payload) {
+  return (Array.isArray(payload.mapping) ? payload.mapping : []).map(m => ({
+    field: String((m && m.field) || ''),
+    type: String((m && m.type) || ''),
+    label: String((m && m.label) || '').slice(0, 80)
+  }));
+}
+
+/**
+ * Samo mapowanie pól (klucz, typ, etykieta) w trybie `mapping_only`: PHP zwraca je
+ * przed odczytem jakiegokolwiek zgłoszenia, więc audyt nie przenosi wartości zgłoszeń
+ * i nie zależy od ich poprawności.
+ */
+function fetchOrderAnalyticsMapping_() {
+  const config = getOrderAnalyticsConfig_();
+  const response = wpFetch_(wpBridgePath_(ORDER_ANALYTICS_ENDPOINT) + '?mapping_only=1');
+  if (response.code < 200 || response.code >= 300) {
+    throw new Error('Zlecenia: endpoint HTTP ' + response.code + ': ' + String(response.text || '').slice(0, 500));
+  }
+  const payload = response.json || {};
+  if (Number(payload.form_id) !== config.formId || !Array.isArray(payload.mapping) || payload.entries !== undefined) {
+    throw new Error('Zlecenia: nieprawidłowa odpowiedź endpointu w trybie mapowania.');
+  }
+  return orderMappingFrom_(payload);
+}
+
 function fetchOrderAnalyticsPage_(page, perPage) {
   const config = getOrderAnalyticsConfig_();
   const pageNumber = Math.max(1, Number(page) || 1);
@@ -478,12 +509,7 @@ function fetchOrderAnalyticsPage_(page, perPage) {
   if (Number(payload.form_id) !== config.formId || !Number.isInteger(Number(payload.count)) || !Array.isArray(payload.entries)) {
     throw new Error('Zlecenia: nieprawidłowa odpowiedź endpointu.');
   }
-  const mapping = (Array.isArray(payload.mapping) ? payload.mapping : []).map(m => ({
-    field: String((m && m.field) || ''),
-    type: String((m && m.type) || ''),
-    label: String((m && m.label) || '').slice(0, 80)
-  }));
-  return { count: Number(payload.count), mapping: mapping, entries: payload.entries.map(orderAnalyticsEntry_) };
+  return { count: Number(payload.count), mapping: orderMappingFrom_(payload), entries: payload.entries.map(orderAnalyticsEntry_) };
 }
 
 /** Wszystkie zgłoszenia; liczba musi się zgadzać, inaczej pełna synchronizacja skasowałaby wiersze. */
@@ -524,9 +550,16 @@ function importOrderAnalytics_(now) {
   const read = readAllOrderAnalytics_();
   const cutoff = orderRetentionCutoff_(at);
   let expired = 0;
+  let undated = 0;
   const rows = [];
   read.entries.forEach(e => {
-    if (e.date && e.date < cutoff) {
+    // Bez daty nie da się ustalić wieku zgłoszenia, więc retencja by go nigdy nie
+    // usunęła: wiersz wracałby przy każdej synchronizacji. Zostaje poza zakładką.
+    if (!e.date) {
+      undated++;
+      return;
+    }
+    if (e.date < cutoff) {
       expired++;
       return;
     }
@@ -543,7 +576,7 @@ function importOrderAnalytics_(now) {
   });
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
   if (rows.length) sheet.getRange(2, 1, rows.length, width).setValues(rows);
-  return { fetched: read.entries.length, written: rows.length, expired: expired, mapping: read.mapping };
+  return { fetched: read.entries.length, written: rows.length, expired: expired, undated: undated, mapping: read.mapping };
 }
 
 /** Menu WordPress → Importuj zlecenia do analityki. */
@@ -553,6 +586,7 @@ function importujZleceniaAnalityka() {
     'Zlecenia pobrane do „' + ORDER_ANALYTICS_SHEET + '”.\n\n' +
     'Zgłoszenia w WordPressie: ' + result.fetched + '\nW zakładce: ' + result.written +
     '\nPominięte jako starsze niż ' + ORDER_ANALYTICS_RETENTION_MONTHS + ' miesiące: ' + result.expired +
+    '\nPominięte bez daty (wieku nie da się ustalić, więc retencja by ich nie objęła): ' + result.undated +
     '\n\nMapowanie pól (klucz, typ, etykieta):\n' + orderMappingText_(result.mapping) +
     '\n\nDo arkusza trafiają wyłącznie: data, usługa i jej wariant, miejscowości, regiony z dwóch cyfr kodu ' +
     'i ścieżka strony wysłania. Bez danych kontaktowych.'

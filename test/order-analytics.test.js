@@ -75,6 +75,9 @@ function makeRouter(options = {}) {
     }
     if (parsed.pathname === '/wp-json/example/v1/order-analytics' && method === 'get') {
       if (options.httpCode) return { code: options.httpCode, text: '{"code":"order_analytics_mapping"}', headers: {} };
+      if (parsed.searchParams.get('mapping_only')) {
+        return { code: 200, json: options.mappingPayload || { form_id: FORM_ID, mapping: MAPPING }, headers: {} };
+      }
       const page = Number(parsed.searchParams.get('page') || 1);
       const payload = Object.prototype.hasOwnProperty.call(state.pages, page)
         ? state.pages[page]
@@ -112,6 +115,9 @@ describe('#195: kod mostu (test 8)', () => {
     assert.match(php, /current_user_can\( 'manage_options' \)/);
     assert.ok(php.indexOf('order_analytics_mapping') > 0);
     assert.ok(php.indexOf('order_analytics_mapping') < php.indexOf('get_entries'), 'kontrola typów przed pobraniem zgłoszeń');
+    assert.ok(php.indexOf("get_param( 'mapping_only' )") > php.indexOf('order_analytics_mapping'), 'tryb audytu po kontroli typów');
+    assert.ok(php.indexOf("get_param( 'mapping_only' )") < php.indexOf('count_entries'), 'tryb audytu przed jakimkolwiek odczytem zgłoszeń');
+    assert.ok(php.includes("return rest_ensure_response( array( 'form_id' => $form_id, 'mapping' => $mapping ) );"), 'w trybie audytu bez zgłoszeń');
     assert.match(php, /'radio-11' => array\( 'radio', 'select' \),/);
     assert.match(php, /'address-7' => array\( 'address' \),/);
     assert.match(php, /'hidden-3' => array\( 'hidden' \),/);
@@ -284,6 +290,18 @@ describe('#195: instalacja snippetu (test 6)', () => {
     const text = gas.$alerts[gas.$alerts.length - 1][0];
     assert.match(text, /- radio-11 \(radio\): Serwis miejski/);
     assert.doesNotMatch(text, /Katowice|Zielona Góra/, 'bez wartości zgłoszeń');
+    // Uwaga Codexa w #205: audyt nie może pobierać zgłoszeń, nawet jednego.
+    const calls = router.state.calls.filter(c => c.url.includes('/order-analytics'));
+    assert.deepEqual(calls.map(c => new URL(c.url).search), ['?mapping_only=1']);
+  });
+
+  test('odpowiedź trybu mapowania ze zgłoszeniami albo z błędem HTTP jest odrzucana', () => {
+    const leaky = makeRouter({ mappingPayload: { form_id: FORM_ID, mapping: MAPPING, entries: [entry(7)] } });
+    const gas = project({ router: leaky });
+    gas.prepareOrderAnalyticsBridge();
+    gas.activateOrderAnalyticsBridge();
+    assert.throws(() => gas.auditOrderAnalyticsBridge(), /nieprawidłowa odpowiedź endpointu w trybie mapowania/);
+    assert.throws(() => project({ router: makeRouter({ httpCode: 409 }) }).fetchOrderAnalyticsMapping_(), /HTTP 409/);
   });
 
   test('audyt nieaktywnego mostu nie woła endpointu', () => {
@@ -358,15 +376,26 @@ describe('#195: import do zakładki', () => {
       pages: {
         1: page([entry(7, {
           from_city: 'Przykładowa 12', from_region: '123', to_city: 'Kraków, ul. Długa',
-          source_page: 'javascript:alert(1)', service: 'ekspres', date: '20.09.2026'
-        }), { entry_id: 8 }])
+          source_page: 'javascript:alert(1)', service: 'ekspres'
+        }), { entry_id: 8, date: '2026-09-21' }])
       }
     });
     const gas = project({ router });
     gas.importujZleceniaAnalityka();
     const rows = dataRows(gas);
-    assert.deepEqual(rows[0].slice(0, 9), [7, '', '', 'Ekspres 12', '', '', '', '65', '']);
-    assert.deepEqual(rows[1].slice(0, 9), [8, '', '', '', '', '', '', '', ''], 'brak pól to puste komórki, nie wyjątek');
+    assert.deepEqual(rows[0].slice(0, 9), [7, '2026-09-20', '', 'Ekspres 12', '', '', '', '65', '']);
+    assert.deepEqual(rows[1].slice(0, 9), [8, '2026-09-21', '', '', '', '', '', '', ''], 'brak pól to puste komórki, nie wyjątek');
+  });
+
+  test('zgłoszenie bez daty albo z uszkodzoną datą nie trafia do zakładki', () => {
+    // Uwaga Codexa w #205: bez daty retencja nie ustali wieku, więc wiersz
+    // wracałby przy każdej synchronizacji i omijał 24 miesiące.
+    const router = makeRouter({ pages: { 1: page([entry(7, { date: '20.09.2026' }), { entry_id: 8 }, entry(9)]) } });
+    const gas = project({ router });
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual(dataRows(gas).map(r => r[0]), [9]);
+    assert.deepEqual([out.undated, out.expired, out.written], [2, 0, 1]);
+    assert.match(gas.$alerts[0][0], /Pominięte bez daty .*: 2/);
   });
 
   test('za długa miejscowość i wariant są przycinane albo odrzucane', () => {
