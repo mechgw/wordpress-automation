@@ -395,7 +395,42 @@ describe('#195: import do zakładki', () => {
     const out = plain(gas.importujZleceniaAnalityka());
     assert.deepEqual(dataRows(gas).map(r => r[0]), [9]);
     assert.deepEqual([out.undated, out.expired, out.written], [2, 0, 1]);
-    assert.match(gas.$alerts[0][0], /Pominięte bez daty .*: 2/);
+    assert.match(gas.$alerts[0][0], /Pominięte bez prawidłowej daty .*: 2/);
+  });
+
+  test('data niemożliwa albo z przyszłości nie trafia do zakładki; jutro jest dopuszczone', () => {
+    // Uwaga Codexa w #205: `9999-12-31` ominęłoby retencję na zawsze.
+    const router = makeRouter({
+      pages: {
+        1: page([
+          entry(1, { date: '2026-02-31' }), entry(2, { date: '9999-12-31' }), entry(3, { date: '2026-09-28' }),
+          entry(4, { date: '2026-09-27' }), entry(5, { date: '2026-09-26' })
+        ])
+      }
+    });
+    const gas = freezeClock(project({ router }), 2026, 8, 26);
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual(dataRows(gas).map(r => r[0]), [4, 5], 'jutro zostaje: zapas na różnicę stref WordPressa i arkusza');
+    assert.equal(out.undated, 3);
+  });
+
+  test('granica retencji: miesiące liczone na dacie, z przycięciem do końca miesiąca', () => {
+    const gas = project();
+    assert.equal(gas.orderShiftMonths_('2028-02-29', -24), '2026-02-28');
+    assert.equal(gas.orderShiftMonths_('2026-03-31', -1), '2026-02-28');
+    assert.equal(gas.orderShiftMonths_('2026-01-31', -2), '2025-11-30');
+    assert.equal(gas.orderShiftMonths_('2026-09-26', -24), '2024-09-26');
+    assert.equal(gas.orderShiftDays_('2026-12-31', 1), '2027-01-01');
+    assert.equal(gas.orderCalendarDate_('2024-02-29'), '2024-02-29');
+    assert.equal(gas.orderCalendarDate_('2026-02-29'), '');
+  });
+
+  test('retencja liczona od 29 lutego zostawia 28 lutego sprzed dwóch lat', () => {
+    const router = makeRouter({ pages: { 1: page([entry(1, { date: '2026-02-27' }), entry(2, { date: '2026-02-28' }), entry(3, { date: '2028-02-29' })]) } });
+    const gas = freezeClock(project({ router }), 2028, 1, 29);
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual(dataRows(gas).map(r => r[0]), [2, 3]);
+    assert.equal(out.expired, 1);
   });
 
   test('za długa miejscowość i wariant są przycinane albo odrzucane', () => {

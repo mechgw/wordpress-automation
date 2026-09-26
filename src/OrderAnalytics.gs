@@ -436,6 +436,34 @@ function orderMappingText_(mapping) {
   return mapping.map(m => '- ' + m.field + ' (' + m.type + ')' + (m.label ? ': ' + m.label : '')).join('\n') || '- brak';
 }
 
+/** Data `RRRR-MM-DD`, która istnieje w kalendarzu; inaczej pusty tekst. */
+function orderCalendarDate_(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!m) return '';
+  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const real = day.getUTCFullYear() === Number(m[1]) && day.getUTCMonth() === Number(m[2]) - 1 && day.getUTCDate() === Number(m[3]);
+  return real ? text : '';
+}
+
+/** `RRRR-MM-DD` przesunięte o `months` miesięcy, z przycięciem dnia do długości miesiąca. */
+function orderShiftMonths_(day, months) {
+  const parts = day.split('-').map(Number);
+  const index = parts[0] * 12 + (parts[1] - 1) + months;
+  const year = Math.floor(index / 12);
+  const month = index - year * 12 + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const pad = n => (n < 10 ? '0' : '') + n;
+  return year + '-' + pad(month) + '-' + pad(Math.min(parts[2], last));
+}
+
+/** `RRRR-MM-DD` przesunięte o `days` dni. */
+function orderShiftDays_(day, days) {
+  const parts = day.split('-').map(Number);
+  const shifted = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
 function orderCity_(value) {
   const city = String(value === null || value === undefined ? '' : value).trim().replace(/\s+/g, ' ');
   return city.length <= 40 && ORDER_CITY_PATTERN.test(city) ? city : '';
@@ -458,7 +486,7 @@ function orderAnalyticsEntry_(entry) {
   const shaped = (v, re) => (re.test(text(v)) ? text(v) : '');
   return {
     entryId: Number(entry.entry_id),
-    date: shaped(entry.date, /^\d{4}-\d{2}-\d{2}$/),
+    date: orderCalendarDate_(entry.date),
     service: ORDER_SERVICE_GROUPS.indexOf(text(entry.service)) >= 0 ? text(entry.service) : '',
     serviceOption: text(entry.service_option).slice(0, 40),
     fromCity: orderCity_(entry.from_city),
@@ -536,8 +564,16 @@ function readAllOrderAnalytics_() {
 
 /** Pierwszy dzień poza retencją jako `RRRR-MM-DD`: wiersze wcześniejsze nie trafiają do zakładki. */
 function orderRetentionCutoff_(now) {
-  const cutoff = new Date(now.getFullYear(), now.getMonth() - ORDER_ANALYTICS_RETENTION_MONTHS, now.getDate());
-  return Utilities.formatDate(cutoff, performanceTimeZone_(), 'yyyy-MM-dd');
+  return orderShiftMonths_(orderToday_(now), -ORDER_ANALYTICS_RETENTION_MONTHS);
+}
+
+/**
+ * Dzień importu w strefie ARKUSZA, liczony jednym formatowaniem. Składowe daty
+ * z `new Date()` są w strefie skryptu, a ta bywa inna — granica retencji
+ * przesunęłaby się wtedy o dobę (uwaga Codexa w #205).
+ */
+function orderToday_(now) {
+  return Utilities.formatDate(now, performanceTimeZone_(), 'yyyy-MM-dd');
 }
 
 /**
@@ -549,13 +585,16 @@ function importOrderAnalytics_(now) {
   const at = now || new Date();
   const read = readAllOrderAnalytics_();
   const cutoff = orderRetentionCutoff_(at);
+  // Jeden dzień zapasu na różnicę strefy WordPressa i arkusza: zgłoszenie z dziś
+  // w Warszawie bywa „jutrem” dla arkusza w innej strefie.
+  const latest = orderShiftDays_(orderToday_(at), 1);
   let expired = 0;
   let undated = 0;
   const rows = [];
   read.entries.forEach(e => {
-    // Bez daty nie da się ustalić wieku zgłoszenia, więc retencja by go nigdy nie
-    // usunęła: wiersz wracałby przy każdej synchronizacji. Zostaje poza zakładką.
-    if (!e.date) {
+    // Bez prawdziwej daty nie da się ustalić wieku zgłoszenia, a data z przyszłości
+    // omijałaby retencję latami: wiersz wracałby przy każdej synchronizacji.
+    if (!e.date || e.date > latest) {
       undated++;
       return;
     }
@@ -586,7 +625,7 @@ function importujZleceniaAnalityka() {
     'Zlecenia pobrane do „' + ORDER_ANALYTICS_SHEET + '”.\n\n' +
     'Zgłoszenia w WordPressie: ' + result.fetched + '\nW zakładce: ' + result.written +
     '\nPominięte jako starsze niż ' + ORDER_ANALYTICS_RETENTION_MONTHS + ' miesiące: ' + result.expired +
-    '\nPominięte bez daty (wieku nie da się ustalić, więc retencja by ich nie objęła): ' + result.undated +
+    '\nPominięte bez prawidłowej daty (brak, niemożliwa albo z przyszłości — retencja by ich nie objęła): ' + result.undated +
     '\n\nMapowanie pól (klucz, typ, etykieta):\n' + orderMappingText_(result.mapping) +
     '\n\nDo arkusza trafiają wyłącznie: data, usługa i jej wariant, miejscowości, regiony z dwóch cyfr kodu ' +
     'i ścieżka strony wysłania. Bez danych kontaktowych.'
