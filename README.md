@@ -59,7 +59,7 @@ Dozwolone dyrektywy: `index`, `noindex`, `follow`, `nofollow`, `noarchive`, `noi
 
 ### Układ repozytorium
 
-Źródła Apps Script mieszkają w `src/`: dziewiętnaście plików `*.gs` plus `appsscript.json`. Katalog główny trzyma wyłącznie konfigurację narzędzi, dokumentację i licencję.
+Źródła Apps Script mieszkają w `src/`: pliki `*.gs` plus `appsscript.json`. Katalog główny trzyma wyłącznie konfigurację narzędzi, dokumentację i licencję.
 
 Apps Script nie ma katalogów, więc `clasp` dostaje `rootDir` wskazujący `src`. Dzięki temu nazwy plików po stronie Google są dokładnie takie jak wcześniej, bez prefiksu katalogu. Workflow deployu i drift check wykrywają układ same: wdrożenie taga sprzed tej zmiany, czyli rollback, nadal działa, bo wtedy `rootDir` wskazuje katalog główny.
 
@@ -163,6 +163,14 @@ Dostęp dostaje projekt Google Cloud, a import używa tokenu projektu Apps Scrip
 Lokalizacja pochodzi ze Script Property `GBP_LOCATION` w formacie `locations/<id>`, więc identyfikator instalacji nie trafia do repozytorium. Import jest idempotentny: ponowne uruchomienie tego samego zakresu podmienia wiersze zamiast je dublować, a backfill starszego okresu nie kasuje nowszych danych. Klucz porównuje dzień i miesiąc w postaci kanonicznej, bo arkusz zamienia zapisany tekst `RRRR-MM-DD` i `RRRR-MM` na daty. To ta sama pułapka co w #155; zanim ją obsłużono, każdy import dopisywał wszystko od nowa. Duplikaty, które zdążyły powstać, scala każdy kolejny import, a okno importu podaje ich liczbę.
 
 Trzy decyzje wpływające na dane. Punkt z datą, ale bez wartości, to zero, bo tak opisuje go dokumentacja API: `value` „nie występuje, gdy wartość wynosi zero”. Tak samo wyglądają jednak dni, których Google jeszcze nie przetworzył, więc zero trafia tylko do horyzontu, czyli ostatniego dnia, dla którego odpowiedź ma jakąkolwiek wartość. Późniejsze dni zostają puste do kolejnego importu, a okno importu mówi, do kiedy są dane. Frazy rozróżniają wartość dokładną od progu, poniżej którego Google nie podaje liczby; potraktowanie progu jak liczby zawyżałoby sumy. Frazy dotyczą ostatniego pełnego miesiąca i wiersz dostaje miesiąc zapytania, a nie miesiąc uruchomienia: API sumuje wyświetlenia z całego zakresu `monthlyRange`, więc każdy miesiąc to osobne zapytanie. Na początku miesiąca dane bywają niepełne; ponowny import podmienia je dzięki upsertowi.
+
+### Rejestr zapytań telefonicznych
+
+Zakładka `ZAPYTANIA TELEFONICZNE` zbiera to, co dotąd przepadało: klient dzwoni, pyta o trasę, dostaje wycenę i znika. Wypełnia ją człowiek w trakcie rozmowy albo tuż po niej, a skrypt zakłada wyłącznie strukturę. *Dane → Przygotuj rejestr zapytań telefonicznych* zakłada zakładkę albo przejmuje istniejącą z tym samym nagłówkiem i nie rusza wpisanych wierszy: odnawia walidacje, zamraża nagłówek i dodaje notatkę przy kolumnie `Uwagi`. Zakładki o tej nazwie z innym nagłówkiem nie nadpisuje, tylko wymienia w oknie różnice.
+
+Kolumny to `Data`, `Skąd`, `Dokąd`, `Usługa`, `Wycena [zł]`, `Wynik`, `Skąd o nas wie` i `Uwagi`. Listy wyboru mają `Usługa`, `Wynik` i `Skąd o nas wie`. Lista `Usługa` (`miejska` / `podmiejska` / `krajowa` / `kurier dedykowany` / `inne`) to ten sam słownik co w zleceniach z formularza (#195), więc oba źródła da się zestawić. `Data` wymaga daty, a `Wycena [zł]` liczby ≥ 0. Nietypowa wartość zostaje zapisana z ostrzeżeniem, a nie odrzucona, bo szybkość wpisywania w trakcie rozmowy jest ważniejsza niż wymuszanie. Poziom szybkości (Standard, Ekspres) trafia do `Uwag`. Walidacje obejmują wiersze istniejące w chwili uruchomienia; po dołożeniu wierszy do zakładki wystarczy uruchomić pozycję menu ponownie.
+
+**Brak dedykowanych pól kontaktowych; danych osobowych nie wpisujemy do `Uwag`.** To rejestr popytu do analityki, a nie CRM, i do liczenia tras, cen oraz wyników dane kontaktowe nie są potrzebne. Wolny tekst może je mimo to zawierać, więc zakładka podlega tym samym zasadom przechowywania co reszta arkusza. W katalogu zakładek jest arkuszem własnym (`wlasne`, właściciel człowiek), dlatego *Ukryj arkusze techniczne* jej nie chowa.
 
 ### Zmiany oczekujące na wykonanie
 

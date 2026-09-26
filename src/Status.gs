@@ -1001,6 +1001,8 @@ function addStatusMenu_() {
     .addItem('Przytnij puste wiersze', 'przytnijPusteWiersze')
     .addItem('Kanonizuj znaczniki Pomiar', 'kanonizujZnacznikiPomiaru')
     .addSeparator()
+    .addItem('Przygotuj rejestr zapytań telefonicznych', 'przygotujRejestrZapytanTelefonicznych')
+    .addSeparator()
     .addItem('Uporządkuj arkusze', 'uporzadkujArkuszeZMenu')
     .addItem('Ukryj arkusze techniczne', 'ukryjArkuszeTechniczne')
     .addItem('Pokaż arkusze techniczne', 'pokazArkuszeTechniczne')
