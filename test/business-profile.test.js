@@ -13,7 +13,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadProject, plain } = require('./helpers/gas');
+const { loadProject, plain, freezeClock } = require('./helpers/gas');
 
 const PERF = 'GBP PERFORMANCE RAW';
 const KEYS = 'GBP SEARCH KEYWORDS';
@@ -66,9 +66,13 @@ describe('#123: budowa żądań', () => {
     assert.equal((url.match(/dailyMetrics=/g) || []).length, 7, 'siedem metryk, bez cichych ubytków');
   });
 
-  test('adres fraz dokłada token strony tylko wtedy, gdy istnieje', () => {
-    assert.match(gas().gbpKeywordsUrl_(LOCATION, ''), /locations\/111\/searchkeywords\/impressions\/monthly$/);
-    assert.match(gas().gbpKeywordsUrl_(LOCATION, 'abc def'), /\?pageToken=abc%20def$/);
+  test('adres fraz ma wymagany zakres jednego miesiąca, a token strony tylko wtedy, gdy istnieje', () => {
+    const aug = { year: 2026, month: 8 };
+    assert.match(
+      gas().gbpKeywordsUrl_(LOCATION, aug, ''),
+      /locations\/111\/searchkeywords\/impressions\/monthly\?monthlyRange\.start_month\.year=2026&monthlyRange\.start_month\.month=8&monthlyRange\.end_month\.year=2026&monthlyRange\.end_month\.month=8$/
+    );
+    assert.match(gas().gbpKeywordsUrl_(LOCATION, aug, 'abc def'), /monthlyRange\.end_month\.month=8&pageToken=abc%20def$/);
   });
 });
 
@@ -184,21 +188,39 @@ describe('#123: idempotentny zapis', () => {
     assert.deepEqual(dates, ['2026-09-01', '2026-09-05']);
   });
 
-  test('import fraz stronicuje i zapisuje rodzaj wartości', () => {
+  test('import fraz pyta o ostatni pełny miesiąc, stronicuje i oznacza wiersze tym miesiącem', () => {
     const pages = [
       { searchKeywordsCounts: [{ searchKeyword: 'a', insightsValue: { value: '10' } }], nextPageToken: 'x' },
       { searchKeywordsCounts: [{ searchKeyword: 'b', insightsValue: { threshold: '5' } }] }
     ];
-    let call = 0;
-    const gas = project({
+    const urls = [];
+    const gas = freezeClock(project({
       sheets: { [KEYS]: [KEYS_HEADER] },
-      fetch: () => ({ code: 200, text: JSON.stringify(pages[Math.min(call++, 1)]) })
-    });
+      fetch: url => {
+        urls.push(url);
+        return { code: 200, text: JSON.stringify(pages[Math.min(urls.length - 1, 1)]) };
+      }
+    }), 2026, 8, 26);
     const out = plain(gas.runGbpKeywordsImport_());
     assert.equal(out.rows, 2, 'obie strony');
+    assert.equal(out.detail, '2 fraz za 2026-08', 'wrzesień jeszcze trwa, więc sierpień');
+    assert.equal(urls.length, 2);
+    urls.forEach(u => assert.match(u, /monthlyRange\.start_month\.year=2026&monthlyRange\.start_month\.month=8&monthlyRange\.end_month\.year=2026&monthlyRange\.end_month\.month=8/));
+    assert.match(urls[1], /&pageToken=x$/, 'druga strona: ten sam miesiąc i token');
     const rows = gas.$sheet(KEYS).slice(1);
+    assert.deepEqual(rows.map(r => r[0]), ['2026-08', '2026-08'], 'miesiąc zapytania, nie miesiąc uruchomienia');
     assert.deepEqual(rows.map(r => r[2]), ['a', 'b']);
     assert.deepEqual(rows.map(r => r[4]), ['dokładna', 'próg (co najmniej)']);
+  });
+
+  test('w styczniu ostatni pełny miesiąc to grudzień poprzedniego roku', () => {
+    const urls = [];
+    const gas = freezeClock(project({
+      sheets: { [KEYS]: [KEYS_HEADER] },
+      fetch: url => { urls.push(url); return { code: 200, text: '{}' }; }
+    }), 2027, 0, 15);
+    assert.equal(plain(gas.runGbpKeywordsImport_()).detail, '0 fraz za 2026-12');
+    assert.match(urls[0], /start_month\.year=2026&monthlyRange\.start_month\.month=12&monthlyRange\.end_month\.year=2026&monthlyRange\.end_month\.month=12/);
   });
 });
 

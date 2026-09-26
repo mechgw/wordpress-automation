@@ -79,10 +79,35 @@ function gbpDailyUrl_(location, start, end) {
     '&' + gbpDateParams_('dailyRange.end_date', end);
 }
 
-/** Adres żądania miesięcznych fraz wyszukiwania. */
-function gbpKeywordsUrl_(location, pageToken) {
+/** Miesiąc jako obiekt API: rok i miesiąc w osobnych polach. */
+function gbpMonthParams_(prefix, month) {
+  return prefix + '.year=' + month.year + '&' + prefix + '.month=' + month.month;
+}
+
+/**
+ * Ostatni pełny miesiąc przed `now`. Frazy są agregatem miesięcznym, a bieżący
+ * miesiąc nie jest zamknięty, więc jego liczby byłyby częściowe.
+ */
+function gbpLastFullMonth_(now) {
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return { year: first.getFullYear(), month: first.getMonth() + 1 };
+}
+
+/** Miesiąc jako klucz wiersza `RRRR-MM`. */
+function gbpMonthKey_(month) {
+  return month.year + '-' + (month.month < 10 ? '0' : '') + month.month;
+}
+
+/**
+ * Adres żądania miesięcznych fraz wyszukiwania dla jednego miesiąca.
+ * `monthlyRange` jest wymagane, a API sumuje wyświetlenia z całego zakresu,
+ * więc historia miesiąc po miesiącu wymaga osobnego zapytania o każdy miesiąc.
+ */
+function gbpKeywordsUrl_(location, month, pageToken) {
   return GBP_API_BASE + location + '/searchkeywords/impressions/monthly' +
-    (pageToken ? '?pageToken=' + encodeURIComponent(pageToken) : '');
+    '?' + gbpMonthParams_('monthlyRange.start_month', month) +
+    '&' + gbpMonthParams_('monthlyRange.end_month', month) +
+    (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
 }
 
 /**
@@ -226,17 +251,22 @@ function runGbpPerformanceImport_(startDate, endDate) {
   };
 }
 
-/** Import miesięcznych fraz wyszukiwania, ze stronicowaniem. */
+/**
+ * Import fraz za ostatni pełny miesiąc, ze stronicowaniem. Wiersze dostają
+ * miesiąc, o który pytaliśmy, a nie miesiąc uruchomienia. Na początku miesiąca
+ * dane bywają jeszcze niepełne; ponowny import podmienia je dzięki upsertowi.
+ */
 function runGbpKeywordsImport_() {
   const config = getGbpConfig_();
   const now = new Date();
-  const month = now.getFullYear() + '-' + ((now.getMonth() + 1) < 10 ? '0' : '') + (now.getMonth() + 1);
+  const target = gbpLastFullMonth_(now);
+  const month = gbpMonthKey_(target);
   let pageToken = '';
   const rows = [];
   let pages = 0;
 
   do {
-    const response = gbpApiRequest_(gbpKeywordsUrl_(config.location, pageToken));
+    const response = gbpApiRequest_(gbpKeywordsUrl_(config.location, target, pageToken));
     parseGbpKeywords_(response).forEach(function (r) {
       rows.push([month, config.location, r.keyword, r.value, r.kind, now]);
     });
