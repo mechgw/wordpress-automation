@@ -115,6 +115,13 @@ describe('#195: most PHP na danych w kształcie zapisu Forminatora', { skip: SKI
     assert.equal(e.service_option, 'Ekonomiczna');
   });
 
+  test('wysłana wartość nie jest czytana jak etykieta; rozstrzyga wtedy zapisana etykieta', () => {
+    // Uwaga Codexa w #207: wartość opcji zmieniona po zgłoszeniu, a stara wartość
+    // („Standard”) przypadkiem równa nazwie innego wariantu. Klient wybrał „Ekspres”.
+    const e = variantOf({ 'radio-11': 'Ekspres – do 2 godzin' }, { 'radio-11': 'Standard' });
+    assert.equal(e.service_option, 'Ekspres');
+  });
+
   test('wartość wygenerowana z etykiety (półpauza, dwukropek, nawias) trafia w opcję', () => {
     const e = variantOf(
       { 'radio-13': 'Ekspres 10 – do godziny 10:00 (następnego dnia)' },
