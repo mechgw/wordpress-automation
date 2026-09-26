@@ -176,13 +176,15 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\t\t\t}",
     "\t\t\t\t}",
     "\t\t\t}",
+    "\t\t\t$groups = array();",
+    "\t\t\tforeach ( $services as $pair ) { $groups[ $pair[0] ] = $pair[1]; }",
     "\t\t\t$mapping = array();",
     "\t\t\tforeach ( $allowed as $key => $accepted ) {",
     "\t\t\t\t$type = isset( $types[ $key ] ) ? $types[ $key ] : '';",
     "\t\t\t\tif ( ! in_array( $type, $accepted, true ) ) {",
     "\t\t\t\t\treturn new WP_Error( 'order_analytics_mapping', 'Mapped field ' . $key . ' has type \"' . $type . '\"; allowed: ' . implode( ', ', $accepted ) . '.', array( 'status' => 409 ) );",
     "\t\t\t\t}",
-    "\t\t\t\t$mapping[] = array( 'field' => $key, 'type' => $type, 'label' => $labels[ $key ] );",
+    "\t\t\t\t$mapping[] = array( 'field' => $key, 'group' => isset( $groups[ $key ] ) ? $groups[ $key ] : '', 'type' => $type, 'label' => $labels[ $key ] );",
     "\t\t\t}",
     "",
     "\t\t\t// Audit mode: the mapping only, returned before any submission is read.",
@@ -433,7 +435,7 @@ function rollbackOrderAnalyticsBridge() {
 // --- Odczyt i import ----------------------------------------------------------
 
 function orderMappingText_(mapping) {
-  return mapping.map(m => '- ' + m.field + ' (' + m.type + ')' + (m.label ? ': ' + m.label : '')).join('\n') || '- brak';
+  return mapping.map(m => '- ' + m.field + (m.group ? ' → ' + m.group : '') + ' (' + m.type + ')' + (m.label ? ': ' + m.label : '')).join('\n') || '- brak';
 }
 
 /** Data `RRRR-MM-DD`, która istnieje w kalendarzu; inaczej pusty tekst. */
@@ -488,7 +490,9 @@ function orderAnalyticsEntry_(entry) {
     entryId: Number(entry.entry_id),
     date: orderCalendarDate_(entry.date),
     service: ORDER_SERVICE_GROUPS.indexOf(text(entry.service)) >= 0 ? text(entry.service) : '',
-    serviceOption: text(entry.service_option).slice(0, 40),
+    // Etykieta opcji to jedyny wolny tekst spoza słownika i spoza wzorca: początek
+    // `=`, `+`, `-` albo `@` Arkusze wzięłyby za formułę (uwaga Codexa w #205).
+    serviceOption: /^[=+\-@]/.test(text(entry.service_option)) ? '' : text(entry.service_option).slice(0, 40),
     fromCity: orderCity_(entry.from_city),
     fromRegion: shaped(entry.from_region, /^\d{2}$/),
     toCity: orderCity_(entry.to_city),
@@ -497,9 +501,17 @@ function orderAnalyticsEntry_(entry) {
   };
 }
 
+/** Pola w kolejności, w jakiej wydaje je most: usługi (z grupą), adres nadania, adres doręczenia, strona. */
+function orderExpectedMapping_(config) {
+  return config.services.map(s => s.field + ':' + s.group)
+    .concat([config.from, config.to])
+    .concat(config.source ? [config.source] : []);
+}
+
 function orderMappingFrom_(payload) {
   return (Array.isArray(payload.mapping) ? payload.mapping : []).map(m => ({
     field: String((m && m.field) || ''),
+    group: String((m && m.group) || ''),
     type: String((m && m.type) || ''),
     label: String((m && m.label) || '').slice(0, 80)
   }));
@@ -537,7 +549,18 @@ function fetchOrderAnalyticsPage_(page, perPage) {
   if (Number(payload.form_id) !== config.formId || !Number.isInteger(Number(payload.count)) || !Array.isArray(payload.entries)) {
     throw new Error('Zlecenia: nieprawidłowa odpowiedź endpointu.');
   }
-  return { count: Number(payload.count), mapping: orderMappingFrom_(payload), entries: payload.entries.map(orderAnalyticsEntry_) };
+  const mapping = orderMappingFrom_(payload);
+  const expected = orderExpectedMapping_(config);
+  const actual = mapping.map(m => m.field + (m.group ? ':' + m.group : ''));
+  if (actual.join(', ') !== expected.join(', ')) {
+    // Snippet sprzed zmiany Script Properties czyta stare pola; pełna synchronizacja
+    // przepisałaby zakładkę po cichu źle zaklasyfikowanymi zleceniami.
+    throw new Error(
+      'Zlecenia: most w WordPressie czyta inne pola (' + actual.join(', ') + ') niż wskazują Script Properties (' +
+      expected.join(', ') + '). Przygotuj i aktywuj snippet ponownie. Zakładka bez zmian.'
+    );
+  }
+  return { count: Number(payload.count), mapping: mapping, entries: payload.entries.map(orderAnalyticsEntry_) };
 }
 
 /** Wszystkie zgłoszenia; liczba musi się zgadzać, inaczej pełna synchronizacja skasowałaby wiersze. */

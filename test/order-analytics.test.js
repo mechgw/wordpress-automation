@@ -33,8 +33,13 @@ const BASE_PROPS = {
   WP_ORDER_SOURCE_FIELD: 'hidden-3'
 };
 const MAPPING = [
-  { field: 'radio-11', type: 'radio', label: 'Serwis miejski' },
-  { field: 'address-7', type: 'address', label: 'Adres nadania' }
+  { field: 'radio-11', group: 'miejska', type: 'radio', label: 'Serwis miejski' },
+  { field: 'radio-12', group: 'podmiejska', type: 'radio', label: 'Serwis podmiejski' },
+  { field: 'radio-13', group: 'krajowa', type: 'radio', label: 'Serwis krajowy' },
+  { field: 'radio-14', group: 'kurier dedykowany', type: 'radio', label: 'Kurier dedykowany' },
+  { field: 'address-7', group: '', type: 'address', label: 'Adres nadania' },
+  { field: 'address-8', group: '', type: 'address', label: 'Adres doręczenia' },
+  { field: 'hidden-3', group: '', type: 'hidden', label: 'landing_page' }
 ];
 
 const entry = (id, overrides = {}) => Object.assign({
@@ -118,6 +123,7 @@ describe('#195: kod mostu (test 8)', () => {
     assert.ok(php.indexOf("get_param( 'mapping_only' )") > php.indexOf('order_analytics_mapping'), 'tryb audytu po kontroli typów');
     assert.ok(php.indexOf("get_param( 'mapping_only' )") < php.indexOf('count_entries'), 'tryb audytu przed jakimkolwiek odczytem zgłoszeń');
     assert.ok(php.includes("return rest_ensure_response( array( 'form_id' => $form_id, 'mapping' => $mapping ) );"), 'w trybie audytu bez zgłoszeń');
+    assert.ok(php.includes("$mapping[] = array( 'field' => $key, 'group' => isset( $groups[ $key ] ) ? $groups[ $key ] : '', 'type' => $type,"), 'mapowanie niesie grupę pola usług');
     assert.match(php, /'radio-11' => array\( 'radio', 'select' \),/);
     assert.match(php, /'address-7' => array\( 'address' \),/);
     assert.match(php, /'hidden-3' => array\( 'hidden' \),/);
@@ -288,7 +294,8 @@ describe('#195: instalacja snippetu (test 6)', () => {
     const state = plain(gas.auditOrderAnalyticsBridge());
     assert.deepEqual(state.mapping, MAPPING);
     const text = gas.$alerts[gas.$alerts.length - 1][0];
-    assert.match(text, /- radio-11 \(radio\): Serwis miejski/);
+    assert.match(text, /- radio-11 → miejska \(radio\): Serwis miejski/);
+    assert.match(text, /- address-7 \(address\): Adres nadania/);
     assert.doesNotMatch(text, /Katowice|Zielona Góra/, 'bez wartości zgłoszeń');
     // Uwaga Codexa w #205: audyt nie może pobierać zgłoszeń, nawet jednego.
     const calls = router.state.calls.filter(c => c.url.includes('/order-analytics'));
@@ -340,6 +347,30 @@ describe('#195: import do zakładki', () => {
     const gas = project({ router: makeRouter({ httpCode: 409 }), sheet: before.map(r => r.slice()) });
     assert.throws(() => gas.importujZleceniaAnalityka(), /HTTP 409/);
     assert.deepEqual(gas.$sheet(SHEET), before);
+  });
+
+  test('snippet z nieaktualnym mapowaniem przerywa import i nie rusza zakładki', () => {
+    // Uwaga Codexa w #205: Script Properties zmienione, snippet w WordPressie nie.
+    const before = [HEADER, [5, '2026-09-01', 'miejska', 'Standard', 'Łódź', '90', 'Łódź', '91', '/', 'x']];
+    const router = makeRouter({ pages: { 1: page([entry(7)]) } });
+    for (const properties of [
+      { WP_ORDER_SERVICE_FIELDS: 'radio-11:krajowa, radio-12:podmiejska, radio-13:miejska, radio-14:kurier dedykowany' },
+      { WP_ORDER_FROM_FIELD: 'address-9' },
+      { WP_ORDER_SOURCE_FIELD: '' }
+    ]) {
+      const gas = project({ router, properties, sheet: before.map(r => r.slice()) });
+      assert.throws(() => gas.importujZleceniaAnalityka(), /most w WordPressie czyta inne pola .* niż wskazują Script Properties/);
+      assert.deepEqual(gas.$sheet(SHEET), before);
+    }
+  });
+
+  test('etykieta opcji zaczynająca się od znaku formuły staje się pustą komórką', () => {
+    const router = makeRouter({
+      pages: { 1: page(['=IMPORTXML("x")', '+1', '-2', '@x', 'Ekspres'].map((o, i) => entry(i + 1, { service_option: o }))) }
+    });
+    const gas = project({ router });
+    gas.importujZleceniaAnalityka();
+    assert.deepEqual(dataRows(gas).map(r => r[3]), ['', '', '', '', 'Ekspres']);
   });
 
   test('ponowny import: ta sama liczba wierszy, wartości zaktualizowane (test 4)', () => {
