@@ -68,6 +68,12 @@ function makeRouter(options = {}) {
       return { code: 201, json: state.snippet, headers: {} };
     }
     const item = /^\/wp-json\/code-snippets\/v1\/snippets\/(\d+)$/.exec(parsed.pathname);
+    if (item && method === 'post') {
+      if (options.failUpdate) return { code: 500, text: 'update failed', headers: {} };
+      Object.assign(state.snippet, JSON.parse(params.payload));
+      state.updates = (state.updates || 0) + 1;
+      return { code: 200, json: state.snippet, headers: {} };
+    }
     if (item && method === 'get') {
       return state.snippet && Number(item[1]) === Number(state.snippet.id)
         ? { code: 200, json: state.snippet, headers: {} }
@@ -236,9 +242,47 @@ describe('#195: instalacja snippetu (test 6)', () => {
     assert.equal(plain(gas.prepareOrderAnalyticsBridge()).created, false);
     router.state.snippet.active = true;
     assert.throws(() => gas.prepareOrderAnalyticsBridge(), /już aktywny/);
-    router.state.snippet.active = false;
     router.state.snippet.code = 'inny kod';
-    assert.throws(() => gas.prepareOrderAnalyticsBridge(), /kod snippetu różni się/);
+    assert.throws(() => gas.prepareOrderAnalyticsBridge(), /aktywny snippet ma inny kod.*rollbackOrderAnalyticsBridge/);
+    assert.equal(router.state.updates || 0, 0, 'aktywnego snippetu nie aktualizujemy');
+  });
+
+  test('prepare aktualizuje kod nieaktywnego snippetu, z migawką poprzedniego', () => {
+    const router = makeRouter();
+    const gas = project({ router });
+    gas.prepareOrderAnalyticsBridge();
+    router.state.snippet.code = 'stary kod';
+    const out = plain(gas.prepareOrderAnalyticsBridge());
+    assert.deepEqual([out.created, out.active, router.state.updates], [false, false, 1]);
+    assert.equal(router.state.snippet.code, gas.buildOrderAnalyticsBridgeCode_());
+    assert.equal(router.state.snippet.active, false, 'po aktualizacji nadal nieaktywny');
+    const snapshots = gas.$sheet('WP SNAPSHOTS').slice(1);
+    assert.ok(snapshots.some(r => r[1] === 'ORDER-ANALYTICS-UPDATE'), 'migawka przed zmianą kodu');
+  });
+
+  test('nieudany zapis nowego kodu kończy prepare błędem', () => {
+    const router = makeRouter({ failUpdate: true });
+    const gas = project({ router });
+    gas.prepareOrderAnalyticsBridge();
+    router.state.snippet.code = 'stary kod';
+    assert.throws(() => gas.prepareOrderAnalyticsBridge());
+    assert.equal(router.state.snippet.code, 'stary kod');
+  });
+
+  test('po zmianie mapowania działa opisana ścieżka naprawy: rollback, prepare, activate', () => {
+    // Uwaga Codexa w #205: import każe przygotować snippet ponownie, więc ta
+    // ścieżka musi naprawdę istnieć, bez ręcznej edycji w WordPressie.
+    const router = makeRouter({ pages: { 1: page([entry(7)]) } });
+    const gas = project({ router });
+    gas.prepareOrderAnalyticsBridge();
+    gas.activateOrderAnalyticsBridge();
+    gas.$properties.WP_ORDER_SOURCE_FIELD = '';
+    assert.throws(() => gas.importujZleceniaAnalityka(), /rollbackOrderAnalyticsBridge\(\), prepareOrderAnalyticsBridge\(\)/);
+    gas.rollbackOrderAnalyticsBridge();
+    gas.prepareOrderAnalyticsBridge();
+    assert.equal(plain(gas.activateOrderAnalyticsBridge()).active, true);
+    assert.equal(router.state.snippet.code, gas.buildOrderAnalyticsBridgeCode_(), 'aktywny snippet z nowym mapowaniem');
+    assert.doesNotMatch(router.state.snippet.code, /hidden-3/);
   });
 
   test('zgoda uzbrojona w edytorze jest zużywana przez jedną operację', () => {

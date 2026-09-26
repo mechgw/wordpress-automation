@@ -321,6 +321,20 @@ function validateOrderAnalyticsSnippet_(snippet, expectedCode) {
   return snippet;
 }
 
+/**
+ * Nowy kod dla NIEAKTYWNEGO zarządzanego snippetu: migawka poprzedniego stanu,
+ * jedno żądanie zapisu, świeży odczyt. Snippet zostaje nieaktywny.
+ */
+function updateInactiveOrderSnippetCode_(snippet, code) {
+  saveCodeSnippetSnapshot_(snippet, 'ORDER-ANALYTICS-UPDATE');
+  const response = wpFetch_(
+    CODE_SNIPPETS_REST_BASE + '/' + encodeURIComponent(snippet.id),
+    { method: 'post', payload: { code: code, active: false } }
+  );
+  if (response.code < 200 || response.code >= 300) throw wpError_(response.code, response.text);
+  return getCodeSnippetRaw_(snippet.id);
+}
+
 function getOrderAnalyticsSnippetId_() {
   const id = PropertiesService.getScriptProperties().getProperty(ORDER_ANALYTICS_SNIPPET_ID_PROP);
   if (!/^\d+$/.test(String(id || ''))) {
@@ -349,7 +363,19 @@ function prepareOrderAnalyticsBridge() {
     let snippet;
     let created = false;
     if (candidates.length === 1) {
-      snippet = validateOrderAnalyticsSnippet_(getCodeSnippetRaw_(candidates[0].id), expectedCode);
+      snippet = getCodeSnippetRaw_(candidates[0].id);
+      // Po zmianie mapowania w Script Properties kod snippetu jest nieaktualny.
+      // Nieaktywny dostaje nowy kod (z migawką poprzedniego); aktywnego nie ruszamy.
+      if (String(snippet.code || '') !== expectedCode) {
+        if (snippet.active) {
+          throw new Error(
+            'Zlecenia: aktywny snippet ma inny kod niż wynika z Script Properties. ' +
+            'Najpierw rollbackOrderAnalyticsBridge(), potem prepareOrderAnalyticsBridge().'
+          );
+        }
+        snippet = updateInactiveOrderSnippetCode_(snippet, expectedCode);
+      }
+      snippet = validateOrderAnalyticsSnippet_(snippet, expectedCode);
     } else {
       snippet = createInactiveCodeSnippet_({
         name: ORDER_ANALYTICS_NAME,
@@ -557,7 +583,8 @@ function fetchOrderAnalyticsPage_(page, perPage) {
     // przepisałaby zakładkę po cichu źle zaklasyfikowanymi zleceniami.
     throw new Error(
       'Zlecenia: most w WordPressie czyta inne pola (' + actual.join(', ') + ') niż wskazują Script Properties (' +
-      expected.join(', ') + '). Przygotuj i aktywuj snippet ponownie. Zakładka bez zmian.'
+      expected.join(', ') + '). Kolejno: rollbackOrderAnalyticsBridge(), prepareOrderAnalyticsBridge() (zaktualizuje kod ' +
+      'nieaktywnego snippetu) i activateOrderAnalyticsBridge(). Zakładka bez zmian.'
     );
   }
   return { count: Number(payload.count), mapping: mapping, entries: payload.entries.map(orderAnalyticsEntry_) };
