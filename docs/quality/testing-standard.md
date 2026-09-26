@@ -15,12 +15,18 @@ Apps Script bez bazy danych, bez frameworka UI i bez przeglądarki.
 | Warstwa               | Co to jest                                                                                          | Gdzie działa                        | Szybkość |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- | -------- |
 | **Unit (VM)**         | `node --test` ładuje pliki `.gs` do VM z zastubowanymi usługami Google (`test/helpers/gas.js`)      | lokalnie, pre-commit, CI            | ms       |
+| **PHP mostu**         | `node --test` wykonuje wygenerowany kod snippetu w `php` z atrapami WordPressa i Forminatora (`test/helpers/forminator-harness.php`) | lokalnie (bez PHP pominięty), pre-commit, CI (bez PHP błąd) | ms |
 | **Test ręczny w arkuszu** | pozycje menu *Sprawdź połączenie*, *Test Rank Math bridge*, *Test biblioteki mediów* uruchamiane w arkuszu | człowiek, przed / po wdrożeniu | sekundy  |
 | **Bramka runtime**    | drift check (żywy projekt == `main`), workflow deployu (lint, push, niezmienna wersja)              | GitHub Actions                      | minuty   |
 
 Każda warstwa łapie coś, czego inne nie potrafią: warstwa VM dowodzi logiki i kontraktów, test w
 arkuszu dowodzi poświadczeń i endpointów, bramka runtime dowodzi tego, co faktycznie jest wdrożone.
 Żadna nie zastępuje innej.
+
+Warstwa PHP dowodzi logiki mostu tylko przy założeniach atrapy. Kształt danych w atrapie (co
+wtyczka zwraca i co zapisuje) musi być więc sprawdzony w źródle wtyczki albo na żywej instalacji,
+a nie wywnioskowany z nazw pól. 26.09 dwa błędy mostu zleceń przeszły testy, bo test zakładał to
+samo co kod.
 
 ## 2. Dziesięć zasad operacyjnych
 

@@ -179,7 +179,7 @@ Zakładka `ZLECENIA ANALITYKA` mówi, **co** i **skąd dokąd** zlecają klienci
 - `Nr` — identyfikator zgłoszenia;
 - `Data` — sama data, z surowego zapisu zgłoszenia (`date_created_sql`). Pole `time_created` Forminatora to tekst do wyświetlania, np. „maj 16, 2026 @ 1:58 AM”, i nie nadaje się do porównań;
 - `Usługa` — grupa: `miejska` / `podmiejska` / `krajowa` / `kurier dedykowany`, ten sam słownik co w rejestrze zapytań telefonicznych;
-- `Wariant usługi` — etykieta wybranej opcji ze schematu formularza, np. „Standard”, „Ekspres 12”;
+- `Wariant usługi` — początek etykiety wybranej opcji do pierwszej półpauzy, np. „Standard”, „Ekspres 12”. Zawsze jest to jedna z **bieżących** opcji pola, więc wartość spoza nich daje pustą komórkę, a nie wolny tekst. Forminator zapisuje pod kluczem pola wyboru **etykietę** opcji, a wysłaną wartość trzyma osobno w `_forminator_choice_values`. Most dopasowuje najpierw wysłaną wartość, a potem etykietę: to obsługuje starsze zgłoszenia i opcje, którym po zgłoszeniu zmieniono opis po półpauzie. Okno importu podaje, ile wierszy z usługą nie ma rozpoznanego wariantu. Gdy nie ma go żaden, okno ostrzega o błędzie mostu. Tak objawił się pierwszy import 26.09: wariant był pusty w 334 z 334 wierszy, bo most szukał etykiety po wartości;
 - `Skąd` i `Dokąd` — miejscowość: tylko litery, spacje i łącznik, najwyżej 40 znaków, inna wartość daje pustą komórkę;
 - `Skąd (region)` i `Dokąd (region)` — **dwie pierwsze cyfry** kodu pocztowego;
 - `Strona wysłania` — sama ścieżka adresu, bez parametrów.
