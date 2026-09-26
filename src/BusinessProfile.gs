@@ -235,7 +235,8 @@ function parseGbpKeywords_(response) {
  * Pole klucza to numer kolumny („porównuj tekst”) albo `{ column, dateFormat }`
  * („sprowadź datę z komórki do tej postaci w strefie arkusza”) — kontrakt
  * `performanceKeyPart_()` z #155. Duplikaty, które już są w zakładce, scalamy
- * do ostatniego wystąpienia, bo to ono niesie najnowszy odczyt.
+ * przy każdym zapisie, także poza zakresem bieżącego importu — inaczej dni,
+ * które wyszły z okna importu, zostałyby zdublowane na zawsze.
  */
 function upsertGbpRows_(sheetName, header, keySpec, rows) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
@@ -252,17 +253,27 @@ function upsertGbpRows_(sheetName, header, keySpec, rows) {
 
   const lastRow = sheet.getLastRow();
   const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, header.length).getValues() : [];
-  const latest = {};
-  const order = [];
-  let merged = 0;
-  existing.forEach(function (row) {
+  // Zostaje kopia z najnowszym `Pobrano`, a nie ta najniżej w arkuszu: pozycja
+  // wiersza nie jest chronologią, bo zakładkę wolno posortować. Przy równym albo
+  // nieczytelnym `Pobrano` rozstrzyga pozycja — ta sama reguła co w upsercie
+  // pomiaru wydajności.
+  const fetchedAt = header.indexOf('Pobrano');
+  const best = {};
+  let present = 0;
+  existing.forEach(function (row, index) {
     if (String(row[0] || '') === '') return;
+    present++;
     const key = keyOf(row);
-    if (Object.prototype.hasOwnProperty.call(latest, key)) merged++;
-    else order.push(key);
-    latest[key] = row;
+    const previous = best[key];
+    if (previous === undefined ||
+        performanceRowTime_(row[fetchedAt]) >= performanceRowTime_(existing[previous][fetchedAt])) {
+      best[key] = index;
+    }
   });
-  const kept = order.filter(function (key) { return !incoming[key]; }).map(function (key) { return latest[key]; });
+  const merged = present - Object.keys(best).length;
+  const chosen = {};
+  Object.keys(best).forEach(function (key) { if (!incoming[key]) chosen[best[key]] = true; });
+  const kept = existing.filter(function (row, index) { return chosen[index] === true; });
 
   const combined = kept.concat(rows);
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, header.length).clearContent();

@@ -255,7 +255,23 @@ describe('#123: idempotentny zapis', () => {
     assert.equal(out.kept, 0, 'wiersz podmieniony, a nie zachowany obok nowego');
   });
 
-  test('duplikaty, które już są w zakładce, scala do ostatniego wystąpienia', () => {
+  test('po posortowaniu zakładki zostaje kopia z najnowszym Pobrano, nie najniższa', () => {
+    const gas = project({
+      sheets: { [PERF]: { rows: [PERF_HEADER], parsesOnWrite: true } },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(2, '1')] }])) })
+    });
+    gas.SpreadsheetApp.getActive().getSheetByName(PERF).getRange(2, 1, 3, 5).setValues([
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 3, '2026-09-26 12:00:00'],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 4, '2026-09-26 13:00:00'],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 5, '2026-09-26 11:00:00']
+    ]);
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 2), new Date(2026, 8, 2)));
+    assert.equal(out.merged, 2);
+    const kept = gas.$sheet(PERF).slice(1).filter(r => r[2] === 'WEBSITE_CLICKS' && r[3] !== 1);
+    assert.deepEqual(kept.map(r => r[3]), [4], 'odczyt z 13:00, choć stał w środku');
+  });
+
+  test('przy równym Pobrano z duplikatów zostaje ostatnie wystąpienie', () => {
     const gas = project({
       sheets: { [PERF]: { rows: [PERF_HEADER], parsesOnWrite: true } },
       fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(2, '1')] }])) })
