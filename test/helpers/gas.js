@@ -31,7 +31,7 @@ const ROOT = path.resolve(__dirname, '..', '..', 'src');
 const SCRIPT_TIME_ZONE = 'Europe/Warsaw';
 /** Limit znaków w jednej komórce Arkuszy Google. */
 const CELL_CHAR_LIMIT = 50000;
-const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs', 'PerformanceMigration.gs', 'PhoneInquiries.gs'];
+const SOURCES = ['Version.gs', 'Lock.gs', 'Kod.gs', 'GA4.gs', 'WordPress.gs', 'CodeSnippets.gs', 'Status.gs', 'Alerts.gs', 'FormSourcePageContext.gs', 'GlobalFooterMigration.gs', 'UrlInspection.gs', 'ForminatorHistory.gs', 'SeoLive.gs', 'Sitemaps.gs', 'AdsCostExperiment.gs', 'Diagnostics.gs', 'SheetCatalog.gs', 'SitemapUrls.gs', 'RecrawlQueue.gs', 'SheetUsage.gs', 'Payloads.gs', 'SchemaChecks.gs', 'BusinessProfile.gs', 'PendingChanges.gs', 'Performance.gs', 'PerformanceMigration.gs', 'PhoneInquiries.gs', 'OrderAnalytics.gs'];
 
 function pad(n) {
   return String(n).padStart(2, '0');

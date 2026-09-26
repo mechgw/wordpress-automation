@@ -62,6 +62,7 @@ function sheetCatalog_() {
     { name: WP_SNAPSHOTS_SHEET, category: 'sterowanie', owner: 'skrypt', description: 'Stan stron sprzed zapisu; źródło dla RESTORE_SNAPSHOT.' },
     { name: WP_PAYLOADS_SHEET, category: 'sterowanie', owner: 'człowiek + skrypt', description: 'Duże treści stron pocięte na części po jednej komórce; „WP COMMANDS” trzyma wtedy samą referencję payload:<id>, nie HTML.' },
     { name: FORMINATOR_HISTORY_SHEET, category: 'sterowanie', owner: 'skrypt', description: 'Historia zgłoszeń Forminatora pobrana z WordPressa.' },
+    { name: ORDER_ANALYTICS_SHEET, category: 'dane', owner: 'skrypt', description: 'Zlecenia z formularza bez bezpośrednich danych kontaktowych (#195): data, usługa, miejscowości, regiony z dwóch cyfr kodu, strona wysłania. Dane osobowe pseudonimizowane, retencja 24 miesiące. Nie edytuj ręcznie.' },
     { name: ADS_EXPERIMENT_SHEET, category: 'sterowanie', owner: 'skrypt', description: 'Wynik eksperymentu zgodności kosztów Ads w GA4 Data API (#46).' },
     { name: CONFIG_SHEET, category: 'konfiguracja', owner: 'człowiek', description: 'Konfiguracja Search Console; B8 pokazuje status importu.' },
     { name: GA4_CONFIG_SHEET, category: 'konfiguracja', owner: 'człowiek', description: 'Konfiguracja GA4; B9 pokazuje status importu.' },
