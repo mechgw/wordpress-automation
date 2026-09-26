@@ -242,9 +242,23 @@ describe('#195: instalacja snippetu (test 6)', () => {
     assert.equal(plain(gas.prepareOrderAnalyticsBridge()).created, false);
     router.state.snippet.active = true;
     assert.throws(() => gas.prepareOrderAnalyticsBridge(), /już aktywny/);
-    router.state.snippet.code = 'inny kod';
+    // Nasz aktywny kod po zmianie mapowania: rollback, potem prepare ma sens.
+    gas.$properties.WP_ORDER_SOURCE_FIELD = '';
     assert.throws(() => gas.prepareOrderAnalyticsBridge(), /aktywny snippet ma inny kod.*rollbackOrderAnalyticsBridge/);
     assert.equal(router.state.updates || 0, 0, 'aktywnego snippetu nie aktualizujemy');
+  });
+
+  test('aktywny snippet poprawiony ręcznie: bez rady o rollbacku, który zostawiłby endpoint wyłączony', () => {
+    // Uwaga Codexa w #205: po rollbacku prepare i tak odmówiłby nadpisania ręcznego kodu.
+    const router = makeRouter();
+    const gas = project({ router });
+    gas.prepareOrderAnalyticsBridge();
+    router.state.snippet.active = true;
+    router.state.snippet.code = 'ręczna poprawka administratora';
+    let message = '';
+    assert.throws(() => gas.prepareOrderAnalyticsBridge(), e => { message = e.message; return /kod zmieniony poza skryptem/.test(message); });
+    assert.doesNotMatch(message, /rollbackOrderAnalyticsBridge/);
+    assert.equal(router.state.snippet.active, true, 'endpoint nietknięty');
   });
 
   test('prepare aktualizuje kod nieaktywnego snippetu po zmianie mapowania, z migawką poprzedniego', () => {

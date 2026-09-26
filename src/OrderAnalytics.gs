@@ -357,13 +357,16 @@ function prepareOrderAnalyticsBridge() {
     if (candidates.length > 1) throw new Error('Zlecenia: znaleziono więcej niż jeden zarządzany snippet.');
     const existing = candidates.length === 1 ? getCodeSnippetRaw_(candidates[0].id) : null;
     const replace = Boolean(existing) && String(existing.code || '') !== expectedCode;
+    // Najpierw własność: rada „rollback, potem prepare” ma sens tylko dla naszego
+    // kodu. Przy kodzie zmienionym ręcznie rollback wyłączyłby endpoint, a prepare
+    // i tak odmówiłby nadpisania — bez drogi naprawy (uwaga Codexa w #205).
+    if (replace) requireOwnOrderSnippet_(existing);
     if (existing && existing.active) {
       throw new Error(replace
         ? 'Zlecenia: aktywny snippet ma inny kod niż wynika z Script Properties. ' +
           'Najpierw rollbackOrderAnalyticsBridge(), potem prepareOrderAnalyticsBridge().'
         : 'Zlecenia: snippet jest już aktywny. Użyj audytu.');
     }
-    if (replace) requireOwnOrderSnippet_(existing);
 
     if (!requireOrderAnalyticsWriteApproval_(
       'Przygotować most zleceń do analityki?',
