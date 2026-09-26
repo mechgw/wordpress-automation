@@ -26,6 +26,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Przygotuj Business Profile', 'przygotujBusinessProfile')
     .addItem('Importuj Business Profile', 'importujBusinessProfile')
+    .addItem('Włącz codzienny import Business Profile', 'ustawCodziennyImportBusinessProfile')
     .addItem('Przygotuj pomiar wydajności', 'przygotujPomiarWydajnosci')
     .addItem('Zmierz wydajność (CrUX + PSI)', 'zmierzWydajnosc')
     .addItem('Włącz cykliczny pomiar wydajności', 'ustawCyklicznyPomiarWydajnosci')
