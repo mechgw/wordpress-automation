@@ -7,6 +7,10 @@
  * Business Profile API: dopisanie zakresu wymusza ponowną autoryzację całego
  * projektu, więc wcześniej nie było powodu tego robić.
  *
+ * Codzienny import idzie przez rejestr zadań cyklicznych (`scheduledJobs_()`,
+ * klucz `GBP`), więc strażnik aktualności, diagnostyka i `IMPORT LOG` widzą go
+ * tak samo jak każde inne zadanie.
+ *
  * Czego tu świadomie NIE ma: automatycznej edycji profilu. Czytamy
  * i porównujemy, nie zmieniamy.
  *
@@ -35,6 +39,13 @@ const GBP_PERFORMANCE_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2];
 const GBP_KEYWORDS_KEY = [{ column: 0, dateFormat: 'yyyy-MM' }, 1, 2];
 
 const GBP_API_BASE = 'https://businessprofileperformance.googleapis.com/v1/';
+
+/**
+ * Codzienny import (#123). Godzina po importach GSC (05:00) i GA4 (06:00),
+ * a przed strażnikiem aktualności (08:00), żeby strażnik widział dzisiejszy przebieg.
+ */
+const GBP_TRIGGER_HANDLER = 'importBusinessProfileTrigger';
+const GBP_TRIGGER_HOUR = 7;
 
 /**
  * Metryki dzienne o wartości marketingowej. Lista jest jawna, bo API zwraca
@@ -343,17 +354,81 @@ function gbpMergedNote_(result) {
   return result.merged ? ', scalono ' + result.merged + ' zdublowanych' : '';
 }
 
-/** Menu: import z ręki, z podsumowaniem w oknie. */
-function importujBusinessProfile() {
+/**
+ * Obie części importu w kontrakcie `recordJobRun_()`: { rows, detail, warning }.
+ *
+ * Ostrzeżenie tylko wtedy, gdy w całym oknie 7 dni nie ma żadnego pomiaru.
+ * Zwykłe opóźnienie Google to 2–3 dni i horyzont danych opisuje je w `detail`;
+ * pusty tydzień to już coś innego niż opóźnienie, ale nie błąd — import się udał.
+ * Brak fraz za ostatni miesiąc nie ostrzega, bo w pierwszych dniach miesiąca
+ * Google jeszcze ich nie podaje.
+ */
+function runGbpImport_() {
   const performance = runGbpPerformanceImport_();
   const keywords = runGbpKeywordsImport_();
+  return {
+    performance: performance,
+    keywords: keywords,
+    rows: performance.rows + keywords.rows,
+    detail: 'wydajność: ' + performance.detail + ' | frazy: ' + keywords.detail,
+    warning: performance.rows ? '' : 'Google nie podał żadnych pomiarów wydajności z ostatnich 7 dni'
+  };
+}
+
+/** Handler codziennego triggera; przebieg trafia do rekordu zadania i `IMPORT LOG`. */
+function importBusinessProfileTrigger() {
+  return recordJobRun_('GBP', true, () => withScriptLock_('import Business Profile', runGbpImport_));
+}
+
+/**
+ * Menu: import z ręki, z podsumowaniem w oknie. Pod blokadą skryptu, bo upsert
+ * przepisuje całą zakładkę, a równoległy przebieg z triggera zgubiłby zapis.
+ * Bez rekordu zadania, jak ręczny live check SEO: ręczny przebieg bez triggera
+ * wyglądałby po dobie dla strażnika jak zadanie, które przestało działać.
+ */
+function importujBusinessProfile() {
+  const result = withScriptLock_('import Business Profile', runGbpImport_);
+  const performance = result.performance;
+  const keywords = result.keywords;
   SpreadsheetApp.getUi().alert([
     'Business Profile: import zakończony.',
     '',
     'Wydajność: ' + performance.detail + ', zachowano ' + performance.kept + ' wcześniejszych wierszy' + gbpMergedNote_(performance) + '.',
     'Frazy: ' + keywords.detail + ', zachowano ' + keywords.kept + ' wcześniejszych wierszy' + gbpMergedNote_(keywords) + '.'
   ].join('\n'));
-  return { performance: performance, keywords: keywords };
+  return result;
+}
+
+/**
+ * Menu: instaluje codzienny import (ok. 07:00), zastępując poprzedni. Bez
+ * `GBP_LOCATION` odmawia, bo trigger kończyłby się co dzień błędem konfiguracji.
+ */
+function ustawCodziennyImportBusinessProfile() {
+  const ui = SpreadsheetApp.getUi();
+  if (!isGbpConfigured_()) {
+    ui.alert(
+      'Codzienny import Business Profile NIE został włączony: brak poprawnej Script Property GBP_LOCATION ' +
+      '(format locations/<id>). Ustaw ją i uruchom tę pozycję ponownie.'
+    );
+    return false;
+  }
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === GBP_TRIGGER_HANDLER)
+    .forEach(t => ScriptApp.deleteTrigger(t));
+
+  ScriptApp.newTrigger(GBP_TRIGGER_HANDLER)
+    .timeBased()
+    .everyDays(1)
+    .atHour(GBP_TRIGGER_HOUR)
+    .create();
+
+  ui.alert(
+    'Codzienny import Business Profile został ustawiony (ok. ' + GBP_TRIGGER_HOUR + ':00): wydajność z ostatnich 7 dni ' +
+    'i frazy za ostatni pełny miesiąc.\n' +
+    'Brak udanego przebiegu dłużej niż ' + IMPORT_STALE_AFTER_HOURS + ' h zgłosi strażnik aktualności; e-mail na adres: ' +
+    alertRecipientText_()
+  );
+  return true;
 }
 
 /** Menu: zakłada obie zakładki i tłumaczy, czego jeszcze brakuje do działania. */

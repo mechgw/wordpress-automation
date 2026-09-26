@@ -29,10 +29,11 @@ const dailyResponse = series => ({
   }]
 });
 
-function project({ location = LOCATION, fetch, sheets = {} } = {}) {
+function project({ location = LOCATION, fetch, sheets = {}, props = {}, lockHeld = false } = {}) {
   return loadProject({
-    properties: location ? { GBP_LOCATION: location } : {},
+    properties: Object.assign(location ? { GBP_LOCATION: location } : {}, props),
     sheets: sheets,
+    lockHeld: lockHeld,
     fetch: fetch || (() => ({ code: 200, text: '{}' }))
   });
 }
@@ -400,7 +401,85 @@ describe('#123: menu', () => {
     // się na parze, a nie na końcu menu.
     const fns = seo.items.map(i => i.fn);
     const at = fns.indexOf('przygotujBusinessProfile');
-    assert.deepEqual(fns.slice(at, at + 2), ['przygotujBusinessProfile', 'importujBusinessProfile']);
+    assert.deepEqual(fns.slice(at, at + 3), ['przygotujBusinessProfile', 'importujBusinessProfile', 'ustawCodziennyImportBusinessProfile']);
+  });
+});
+
+describe('#123: codzienny import', () => {
+  const sheets = () => ({ [PERF]: [PERF_HEADER], [KEYS]: [KEYS_HEADER] });
+  const ok = () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(1, '5')] }])) });
+  const record = gas => JSON.parse(gas.$properties.LAST_RUN_GBP || '{}');
+  const lastLog = gas => { const log = gas.$sheet('IMPORT LOG'); return log[log.length - 1]; };
+
+  test('przebieg z triggera trafia do rekordu zadania i do IMPORT LOG', () => {
+    const gas = project({ sheets: sheets(), fetch: ok });
+    gas.importBusinessProfileTrigger();
+    const run = record(gas).lastRun;
+    assert.equal(run.ok, true);
+    assert.equal(run.trigger, true);
+    assert.match(run.detail, /^wydajność: 1 pomiarów .* \| frazy: 0 fraz za \d{4}-\d{2}$/);
+    assert.equal(run.warning, '');
+    assert.deepEqual([lastLog(gas)[1], lastLog(gas)[2], lastLog(gas)[4]], ['GBP', 'trigger', 'OK']);
+  });
+
+  test('tydzień bez żadnego pomiaru kończy przebieg ostrzeżeniem z mailem, a nie błędem', () => {
+    const gas = project({
+      sheets: sheets(),
+      props: { ALERT_EMAIL: 'alerty@example.com' },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [bare(1)] }])) })
+    });
+    gas.importBusinessProfileTrigger();
+    const rec = record(gas);
+    assert.equal(rec.lastRun.ok, true, 'import się udał');
+    assert.equal(rec.lastRun.warning, 'Google nie podał żadnych pomiarów wydajności z ostatnich 7 dni');
+    assert.equal(rec.incident.reason, 'warning');
+    assert.equal(gas.$mails.length, 1);
+    assert.match(gas.$mails[0].subject, /UWAGA: Business Profile \(GBP\)/);
+    assert.equal(lastLog(gas)[4], 'UWAGA');
+  });
+
+  test('odmowa API zapisuje błąd w rekordzie i w IMPORT LOG, a wyjątek idzie dalej', () => {
+    const gas = project({ sheets: sheets(), fetch: () => ({ code: 403, text: '{"error":{"message":"nope"}}' }) });
+    assert.throws(() => gas.importBusinessProfileTrigger(), /403/);
+    assert.equal(record(gas).lastRun.ok, false);
+    assert.equal(lastLog(gas)[4], 'BŁĄD');
+  });
+
+  test('import z menu nie zakłada rekordu zadania', () => {
+    // Ręczny przebieg bez triggera wyglądałby po dobie dla strażnika jak awaria.
+    const gas = project({ sheets: sheets(), fetch: ok });
+    gas.importujBusinessProfile();
+    assert.equal(gas.$properties.LAST_RUN_GBP, undefined);
+  });
+
+  test('import z menu i trigger nie ruszają API, gdy blokadę trzyma inne wykonanie', () => {
+    const gas = project({ sheets: sheets(), lockHeld: true, fetch: () => { throw new Error('bez blokady nie wolno pytać API'); } });
+    assert.throws(() => gas.importujBusinessProfile(), /Inne uruchomienie jeszcze trwa \(import Business Profile\)/);
+    assert.throws(() => gas.importBusinessProfileTrigger(), /Inne uruchomienie jeszcze trwa \(import Business Profile\)/);
+  });
+
+  test('włączenie bez GBP_LOCATION odmawia i nie zakłada triggera', () => {
+    const gas = project({ location: '' });
+    assert.equal(gas.ustawCodziennyImportBusinessProfile(), false);
+    assert.equal(gas.$triggers.length, 0);
+    assert.match(gas.$alerts[0][0], /NIE został włączony.*GBP_LOCATION/s);
+  });
+
+  test('ponowne włączenie zostawia jeden codzienny trigger o 7:00', () => {
+    const gas = project();
+    assert.equal(gas.ustawCodziennyImportBusinessProfile(), true);
+    gas.ustawCodziennyImportBusinessProfile();
+    const mine = gas.$triggers.filter(t => t.getHandlerFunction() === 'importBusinessProfileTrigger');
+    assert.equal(mine.length, 1);
+    assert.deepEqual([mine[0].$spec.everyDays, mine[0].$spec.atHour], [1, 7]);
+    assert.match(gas.$alerts[1][0], /ok\. 7:00/);
+  });
+
+  test('zadanie jest w rejestrze jako opcjonalne, z wpisem w IMPORT LOG', () => {
+    const job = plain(project().scheduledJob_('GBP'));
+    assert.equal(job.handler, 'importBusinessProfileTrigger');
+    assert.equal(job.optional, true);
+    assert.equal(job.log, true);
   });
 });
 

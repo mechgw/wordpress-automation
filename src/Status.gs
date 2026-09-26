@@ -78,7 +78,10 @@ function scheduledJobs_() {
     { key: 'URL_INSPECTION', handler: URL_INSPECTION_TRIGGER_HANDLER, label: 'inspekcja URL', schedule: 'poniedziałek ok. 07:00', prop: 'LAST_RUN_URL_INSPECTION', staleAfterHours: WEEKLY_STALE_AFTER_HOURS, optional: true },
     { key: 'SEO_LIVE', handler: SEO_LIVE_TRIGGER_HANDLER, label: 'live check SEO', schedule: 'codziennie ok. 09:00', prop: 'LAST_RUN_SEO_LIVE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true },
     { key: 'RECRAWL', handler: RECRAWL_TRIGGER_HANDLER, label: 'kolejka recrawl', schedule: 'codziennie ok. 10:00', prop: 'LAST_RUN_RECRAWL', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true },
-    { key: 'PERFORMANCE', handler: PSI_TRIGGER_HANDLER, label: 'pomiar wydajności', schedule: 'co 6 godz. (interwał konfigurowalny)', prop: 'LAST_RUN_PERFORMANCE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true }
+    { key: 'PERFORMANCE', handler: PSI_TRIGGER_HANDLER, label: 'pomiar wydajności', schedule: 'co 6 godz. (interwał konfigurowalny)', prop: 'LAST_RUN_PERFORMANCE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true },
+    // Opcjonalne, bo nie każda instalacja ma profil firmy; `log`, bo przy otwartym
+    // incydencie kolejne awarie milkną i bez wiersza w IMPORT LOG nie zostałby ślad.
+    { key: 'GBP', handler: GBP_TRIGGER_HANDLER, label: 'Business Profile (GBP)', schedule: 'codziennie ok. 07:00', prop: 'LAST_RUN_GBP', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true }
   ];
 }
 
