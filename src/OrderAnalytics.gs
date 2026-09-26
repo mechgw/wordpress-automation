@@ -149,9 +149,20 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "",
     "\t\t\t$schema = Forminator_API::get_form_fields( $form_id );",
     "\t\t\tif ( is_wp_error( $schema ) ) { return $schema; }",
+    "\t\t\t// Choices are compared after the normalization Forminator applies to them (entities, tags, whitespace).",
+    "\t\t\t$normalize = function ( $text ) {",
+    "\t\t\t\t$text = wp_strip_all_tags( html_entity_decode( (string) $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );",
+    "\t\t\t\treturn trim( (string) preg_replace( '/[\\s\\x{00A0}]+/u', ' ', $text ) );",
+    "\t\t\t};",
+    "\t\t\t// Variant = option label up to the first dash: 'Ekspres – do 90 min' -> 'Ekspres'.",
+    "\t\t\t$variant_of = function ( $label ) use ( $normalize ) {",
+    "\t\t\t\t$parts = preg_split( '/\\s+[–-]\\s+/u', $normalize( $label ), 2 );",
+    "\t\t\t\treturn is_array( $parts ) ? mb_substr( trim( $parts[0] ), 0, 40 ) : '';",
+    "\t\t\t};",
     "\t\t\t$types = array();",
     "\t\t\t$labels = array();",
-    "\t\t\t$options = array();",
+    "\t\t\t$by_value = array();",
+    "\t\t\t$variants = array();",
     "\t\t\tforeach ( (array) $schema as $field ) {",
     "\t\t\t\t$data = array();",
     "\t\t\t\tif ( is_object( $field ) && method_exists( $field, 'to_array' ) ) {",
@@ -167,13 +178,16 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\t\tif ( '' === $key ) { continue; }",
     "\t\t\t\t$types[ $key ] = isset( $data['type'] ) ? (string) $data['type'] : '';",
     "\t\t\t\t$labels[ $key ] = isset( $data['field_label'] ) ? sanitize_text_field( (string) $data['field_label'] ) : '';",
-    "\t\t\t\t$options[ $key ] = array();",
+    "\t\t\t\t$by_value[ $key ] = array();",
+    "\t\t\t\t$variants[ $key ] = array();",
     "\t\t\t\tif ( isset( $data['options'] ) && is_array( $data['options'] ) ) {",
     "\t\t\t\t\tforeach ( $data['options'] as $option ) {",
-    "\t\t\t\t\t\tif ( ! is_array( $option ) || ! isset( $option['value'] ) ) { continue; }",
-    "\t\t\t\t\t\t$label = isset( $option['label'] ) ? wp_strip_all_tags( (string) $option['label'] ) : '';",
-    "\t\t\t\t\t\t$parts = preg_split( '/\\s+[–-]\\s+/u', $label, 2 );",
-    "\t\t\t\t\t\t$options[ $key ][ (string) $option['value'] ] = mb_substr( trim( $parts[0] ), 0, 40 );",
+    "\t\t\t\t\t\tif ( ! is_array( $option ) ) { continue; }",
+    "\t\t\t\t\t\t$variant = $variant_of( isset( $option['label'] ) ? $option['label'] : '' );",
+    "\t\t\t\t\t\tif ( '' === $variant ) { continue; }",
+    "\t\t\t\t\t\t$variants[ $key ][ $variant ] = $variant;",
+    "\t\t\t\t\t\t$option_value = isset( $option['value'] ) && is_scalar( $option['value'] ) ? $normalize( $option['value'] ) : '';",
+    "\t\t\t\t\t\tif ( '' !== $option_value ) { $by_value[ $key ][ $option_value ] = $variant; }",
     "\t\t\t\t\t}",
     "\t\t\t\t}",
     "\t\t\t}",
@@ -208,6 +222,8 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\tforeach ( $entries as $entry ) {",
     "\t\t\t\tif ( ! is_object( $entry ) || empty( $entry->entry_id ) ) { continue; }",
     "\t\t\t\t$meta = isset( $entry->meta_data ) && is_array( $entry->meta_data ) ? $entry->meta_data : array();",
+    "\t\t\t\t// Forminator saves the option LABEL under the field key and the submitted value in _forminator_choice_values.",
+    "\t\t\t\t$choices = isset( $meta['_forminator_choice_values']['value'] ) && is_array( $meta['_forminator_choice_values']['value'] ) ? $meta['_forminator_choice_values']['value'] : array();",
     "",
     "\t\t\t\t$service = '';",
     "\t\t\t\t$service_option = '';",
@@ -217,7 +233,15 @@ function buildOrderAnalyticsBridgeCode_(config) {
     "\t\t\t\t\t$raw = is_scalar( $raw ) ? trim( (string) $raw ) : '';",
     "\t\t\t\t\tif ( '' === $raw ) { continue; }",
     "\t\t\t\t\t$service = $pair[1];",
-    "\t\t\t\t\t$service_option = isset( $options[ $pair[0] ][ $raw ] ) ? $options[ $pair[0] ][ $raw ] : '';",
+    "\t\t\t\t\t// The variant is always one of the current options: by submitted value, then by label (older entries, renamed option details).",
+    "\t\t\t\t\t$candidates = array( $raw );",
+    "\t\t\t\t\tif ( isset( $choices[ $pair[0] ] ) && is_scalar( $choices[ $pair[0] ] ) ) { array_unshift( $candidates, (string) $choices[ $pair[0] ] ); }",
+    "\t\t\t\t\tforeach ( $candidates as $candidate ) {",
+    "\t\t\t\t\t\t$candidate = $normalize( $candidate );",
+    "\t\t\t\t\t\tif ( isset( $by_value[ $pair[0] ][ $candidate ] ) ) { $service_option = $by_value[ $pair[0] ][ $candidate ]; break; }",
+    "\t\t\t\t\t\t$variant = $variant_of( $candidate );",
+    "\t\t\t\t\t\tif ( isset( $variants[ $pair[0] ][ $variant ] ) ) { $service_option = $variant; break; }",
+    "\t\t\t\t\t}",
     "\t\t\t\t\tbreak;",
     "\t\t\t\t}",
     "",
@@ -669,6 +693,8 @@ function importOrderAnalytics_(now) {
   const latest = orderShiftDays_(orderToday_(at), 1);
   let expired = 0;
   let undated = 0;
+  let withService = 0;
+  let withoutVariant = 0;
   const rows = [];
   read.entries.forEach(e => {
     // Bez prawdziwej daty nie da się ustalić wieku zgłoszenia, a data z przyszłości
@@ -680,6 +706,10 @@ function importOrderAnalytics_(now) {
     if (e.date < cutoff) {
       expired++;
       return;
+    }
+    if (e.service) {
+      withService++;
+      if (!e.serviceOption) withoutVariant++;
     }
     rows.push([e.entryId, e.date, e.service, e.serviceOption, e.fromCity, e.fromRegion, e.toCity, e.toRegion, e.sourcePage, at]);
   });
@@ -694,7 +724,10 @@ function importOrderAnalytics_(now) {
   });
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
   if (rows.length) sheet.getRange(2, 1, rows.length, width).setValues(rows);
-  return { fetched: read.entries.length, written: rows.length, expired: expired, undated: undated, mapping: read.mapping };
+  return {
+    fetched: read.entries.length, written: rows.length, expired: expired, undated: undated,
+    withService: withService, withoutVariant: withoutVariant, mapping: read.mapping
+  };
 }
 
 /** Menu WordPress → Importuj zlecenia do analityki. */
@@ -709,6 +742,12 @@ function importujZleceniaAnalityka() {
     // wyświetlania zamiast surowej daty i odrzuciło 334 z 334 zgłoszeń.
     (result.fetched > 0 && result.undated === result.fetched
       ? '\nUWAGA: żadne zgłoszenie nie ma prawidłowej daty — to wskazuje na błąd mostu, a nie na dane.'
+      : '') +
+    '\nWiersze z usługą bez rozpoznanego wariantu: ' + result.withoutVariant + ' z ' + result.withService +
+    // Ten sam objaw mostu co brak dat: 26.09 PHP szukało etykiety po wartości opcji,
+    // a Forminator zapisuje pod kluczem pola etykietę, więc wariant był pusty w 334 z 334.
+    (result.withService > 0 && result.withoutVariant === result.withService
+      ? '\nUWAGA: żaden wiersz z usługą nie ma rozpoznanego wariantu — to wskazuje na błąd mostu, a nie na dane.'
       : '') +
     '\n\nMapowanie pól (klucz, typ, etykieta):\n' + orderMappingText_(result.mapping) +
     '\n\nDo arkusza trafiają wyłącznie: data, usługa i jej wariant, miejscowości, regiony z dwóch cyfr kodu ' +

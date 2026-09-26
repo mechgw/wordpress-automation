@@ -528,6 +528,36 @@ describe('#195: import do zakładki', () => {
     assert.match(gas.$alerts[0][0], /UWAGA: żadne zgłoszenie nie ma prawidłowej daty — to wskazuje na błąd mostu/);
   });
 
+  test('gdy żaden wiersz z usługą nie ma wariantu, okno wskazuje na błąd mostu', () => {
+    // Produkcja 26.09: wariant pusty w 334 z 334 wierszy, a okno milczało.
+    const router = makeRouter({
+      pages: { 1: page([entry(7, { service_option: '' }), entry(8, { service_option: '' }), entry(9, { service: '', service_option: '' })]) }
+    });
+    const gas = project({ router });
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual([out.written, out.withService, out.withoutVariant], [3, 2, 2], 'wiersz bez usługi nie liczy się do wariantów');
+    assert.match(gas.$alerts[0][0], /Wiersze z usługą bez rozpoznanego wariantu: 2 z 2/);
+    assert.match(gas.$alerts[0][0], /UWAGA: żaden wiersz z usługą nie ma rozpoznanego wariantu — to wskazuje na błąd mostu/);
+  });
+
+  test('pojedynczy wiersz bez wariantu to dane, nie błąd mostu', () => {
+    const router = makeRouter({ pages: { 1: page([entry(7, { service_option: '' }), entry(8), entry(9, { date: '', service_option: '' })]) } });
+    const gas = project({ router });
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual([out.withService, out.withoutVariant], [2, 1], 'zgłoszenie pominięte bez daty nie liczy się do wariantów');
+    assert.match(gas.$alerts[0][0], /Wiersze z usługą bez rozpoznanego wariantu: 1 z 2/);
+    assert.doesNotMatch(gas.$alerts[0][0], /żaden wiersz z usługą/);
+  });
+
+  test('bez wierszy z usługą nie ma ostrzeżenia o wariantach', () => {
+    const router = makeRouter({ pages: { 1: page([entry(7, { service: '', service_option: '' })]) } });
+    const gas = project({ router });
+    const out = plain(gas.importujZleceniaAnalityka());
+    assert.deepEqual([out.withService, out.withoutVariant], [0, 0]);
+    assert.match(gas.$alerts[0][0], /Wiersze z usługą bez rozpoznanego wariantu: 0 z 0/);
+    assert.doesNotMatch(gas.$alerts[0][0], /żaden wiersz z usługą/);
+  });
+
   test('data niemożliwa albo z przyszłości nie trafia do zakładki; jutro jest dopuszczone', () => {
     // Uwaga Codexa w #205: `9999-12-31` ominęłoby retencję na zawsze.
     const router = makeRouter({

@@ -118,7 +118,8 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
   `test/`, `scripts/`; w tym `eol-last` (znak nowej linii na końcu pliku, Apps Script go wymaga).
 - `npm test` — testy jednostkowe Node; pliki `.gs` działają w VM z zastubowanymi usługami Google
   (`test/helpers/gas.js`). Stub `Utilities.formatDate` formatuje w strefie maszyny: przed pushem
-  uruchom też `TZ=UTC npm test`.
+  uruchom też `TZ=UTC npm test`. `test/order-analytics-php.test.js` wykonuje wygenerowany most
+  w prawdziwym PHP: lokalnie bez `php` w PATH jest pomijany, w CI brak PHP to błąd.
 - `npm run quality:gate -- --changed=base:origin/main` — progi per plik
   (`.quality/coverage-policy.json`) i **100 % pokrycia zmienionych linii `src/*.gs`**; wyjątki
   z uzasadnieniem w `.quality/changed-lines-ignore.json`.
