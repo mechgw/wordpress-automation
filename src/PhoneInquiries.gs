@@ -23,6 +23,12 @@ const PHONE_INQUIRY_SERVICES = ['miejska', 'podmiejska', 'krajowa', 'kurier dedy
 const PHONE_INQUIRY_RESULTS = ['zlecenie', 'za drogo', 'bez odpowiedzi', 'nie obsługujemy', 'inne'];
 const PHONE_INQUIRY_SOURCES = ['Google', 'polecenie', 'stały klient', 'inne', 'nie wiem'];
 
+/**
+ * Wiersze na wpisy, gdy zakładkę przycięto do samego nagłówka (*Dane → Przytnij
+ * puste wiersze*). Walidacja zakresu spoza siatki kończy się wyjątkiem Arkuszy.
+ */
+const PHONE_INQUIRIES_MIN_ROWS = 100;
+
 const PHONE_INQUIRIES_NOTE =
   'Bez danych osobowych: nie wpisuj tu imion, nazwisk, telefonów, e-maili ani nazw firm. ' +
   'Rejestr służy do liczenia tras, cen i wyników rozmów. Poziom szybkości (np. Standard, Ekspres) wpisuj tutaj.';
@@ -60,8 +66,10 @@ function preparePhoneInquiriesSheet_() {
   }
 
   const width = PHONE_INQUIRIES_HEADER.length;
+  // Odczyt tylko w granicach siatki: zakładka węższa niż nagłówek to realny
+  // przypadek, a zakres spoza siatki kończy się wyjątkiem zamiast odpowiedzią.
   const seen = sheet.getLastRow() >= 1
-    ? sheet.getRange(1, 1, 1, Math.max(width, sheet.getLastColumn())).getValues()[0].map(v => String(v).trim())
+    ? sheet.getRange(1, 1, 1, Math.min(Math.max(width, sheet.getLastColumn()), sheet.getMaxColumns())).getValues()[0].map(v => String(v).trim())
     : [];
   if (seen.some(v => v !== '')) {
     const diff = phoneInquiriesHeaderDiff_(seen);
@@ -74,9 +82,11 @@ function preparePhoneInquiriesSheet_() {
       };
     }
   } else {
+    ensureSheetColumns_(sheet, width);
     sheet.getRange(1, 1, 1, width).setValues([PHONE_INQUIRIES_HEADER]);
   }
 
+  ensureSheetRows_(sheet, PHONE_INQUIRIES_MIN_ROWS + 1);
   sheet.getRange(1, 1, 1, width).setFontWeight('bold');
   sheet.setFrozenRows(1);
   applyPhoneInquiryValidation_(sheet);

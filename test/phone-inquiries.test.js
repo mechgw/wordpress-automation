@@ -105,6 +105,33 @@ describe('#196: przejęcie istniejącej zakładki', () => {
     assert.doesNotMatch(text, /kolumna A:/, 'zgodna kolumna nie jest wymieniana');
   });
 
+  test('zakładka przycięta do samego nagłówka dostaje wiersze na wpisy i walidacje', () => {
+    // Dane → Przytnij puste wiersze zostawia pustą zakładkę z jednym wierszem;
+    // walidacja od wiersza 2 byłaby wtedy zakresem spoza siatki (uwaga Codexa w #203).
+    const gas = project({ [SHEET]: { rows: [HEADER], maxRows: 1 } });
+    const out = plain(gas.przygotujRejestrZapytanTelefonicznych());
+    assert.equal(out.ok, true);
+    assert.equal(sheetOf(gas).getMaxRows(), 101, 'nagłówek i sto wierszy na wpisy');
+    assert.deepEqual(rule(gas, 'Usługa').values, SERVICES);
+  });
+
+  test('węższa zakładka z innym nagłówkiem: odmowa bez wyjątku i bez dokładania kolumn', () => {
+    const gas = project({ [SHEET]: { rows: [['Data', 'Uwagi']], maxColumns: 2 } });
+    const out = plain(gas.przygotujRejestrZapytanTelefonicznych());
+    assert.equal(out.ok, false);
+    assert.equal(sheetOf(gas).getMaxColumns(), 2, 'struktura nietknięta');
+    assert.match(gas.$alerts[0][0], /kolumna B: jest „Uwagi”, oczekiwano „Skąd”/);
+    assert.match(gas.$alerts[0][0], /kolumna H: jest „”, oczekiwano „Uwagi”/);
+  });
+
+  test('węższa pusta zakładka dostaje kolumny i nagłówek', () => {
+    const gas = project({ [SHEET]: { rows: [], maxColumns: 3 } });
+    const out = plain(gas.przygotujRejestrZapytanTelefonicznych());
+    assert.equal(out.ok, true);
+    assert.deepEqual(gas.$sheet(SHEET)[0], HEADER);
+    assert.ok(sheetOf(gas).getMaxColumns() >= 8);
+  });
+
   test('równoległe założenie zakładki: duplikat przy insertSheet kończy się użyciem istniejącej', () => {
     const gas = project({ [SHEET]: [HEADER] });
     const active = gas.SpreadsheetApp.getActive();
