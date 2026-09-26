@@ -172,6 +172,24 @@ Kolumny to `Data`, `Skąd`, `Dokąd`, `Usługa`, `Wycena [zł]`, `Wynik`, `Skąd
 
 **Brak dedykowanych pól kontaktowych; danych osobowych nie wpisujemy do `Uwag`.** To rejestr popytu do analityki, a nie CRM, i do liczenia tras, cen oraz wyników dane kontaktowe nie są potrzebne. Wolny tekst może je mimo to zawierać, więc zakładka podlega tym samym zasadom przechowywania co reszta arkusza. W katalogu zakładek jest arkuszem własnym (`wlasne`, właściciel człowiek), dlatego *Ukryj arkusze techniczne* jej nie chowa.
 
+### Zlecenia z formularza do analityki
+
+Zakładka `ZLECENIA ANALITYKA` mówi, **co** i **skąd dokąd** zlecają klienci. GA4 mówi tylko, jak do zlecenia trafili. Dane pochodzą z osobnego mostu tylko do odczytu w WordPressie (snippet Code Snippets), który dla każdego zgłoszenia formularza zleceń wydaje wyłącznie pola z allowlisty, zminimalizowane już w PHP:
+
+- `Nr` — identyfikator zgłoszenia;
+- `Data` — sama data;
+- `Usługa` — grupa: `miejska` / `podmiejska` / `krajowa` / `kurier dedykowany`, ten sam słownik co w rejestrze zapytań telefonicznych;
+- `Wariant usługi` — etykieta wybranej opcji ze schematu formularza, np. „Standard”, „Ekspres 12”;
+- `Skąd` i `Dokąd` — miejscowość: tylko litery, spacje i łącznik, najwyżej 40 znaków, inna wartość daje pustą komórkę;
+- `Skąd (region)` i `Dokąd (region)` — **dwie pierwsze cyfry** kodu pocztowego;
+- `Strona wysłania` — sama ścieżka adresu, bez parametrów.
+
+**Czego świadomie nie ma:** imienia i nazwiska, telefonu, e-maila, firmy, ulicy, pełnego kodu pocztowego ani uwag. Żaden klucz wyjściowy nie dopuszcza ich typu pola ani podpola. Mapowanie działa fail-closed. Script Properties wskazują tylko, które pole zasila który klucz (`WP_ORDER_FORM_ID`, `WP_ORDER_SERVICE_FIELDS` w postaci `radio-1:miejska, radio-5:podmiejska…`, `WP_ORDER_FROM_FIELD`, `WP_ORDER_TO_FIELD`, opcjonalnie `WP_ORDER_SOURCE_FIELD`). Przedrostek klucza pola jest sprawdzany przy przygotowaniu snippetu, a typ pola w schemacie formularza — w PHP przy każdym wywołaniu. Pole innego typu albo nieobecne w formularzu daje błąd bez wierszy. Import ma drugą, niezależną warstwę tej samej kontroli: klucz spoza allowlisty w odpowiedzi przerywa import bez zmiany zakładki, a wartość o złym kształcie staje się pustą komórką.
+
+**To dane osobowe pseudonimizowane, a nie anonimowe.** `Nr` łączy wiersz ze zgłoszeniem w WordPressie (niesie idempotencję), a miejscowość jest wolnym tekstem, więc słowo bez cyfr, np. sama nazwa ulicy, przejdzie normalizację. Dlatego obowiązuje **retencja 24 miesiące** w kodzie, a cel analityczny musi być w polityce prywatności **przed** pierwszym importem na produkcji. Import jest pełną synchronizacją: zakładka odzwierciedla bieżące zgłoszenia w granicach retencji. Zgłoszenie usunięte w WordPressie, np. na żądanie klienta, znika z zakładki przy następnym imporcie, a ponowny import niczego nie dubluje. Regiony są zapisywane jako tekst, żeby „05” nie stało się liczbą 5.
+
+**Instalacja** idzie tą samą ścieżką zatwierdzania zapisu co most historii B2B. Wymaga `WP_ALLOW_WRITES=TRUE` i jednorazowego uzbrojenia przed każdą operacją zapisu, gdy uruchamiasz z edytora. Kolejne kroki: `armOrderAnalyticsWrite()`, `prepareOrderAnalyticsBridge()` (tworzy nieaktywny snippet), ponownie `armOrderAnalyticsWrite()`, `activateOrderAnalyticsBridge()`, a na koniec `auditOrderAnalyticsBridge()`. Audyt pokazuje mapowanie pól: klucz, typ i etykietę, bez wartości zgłoszeń. Wycofanie: `rollbackOrderAnalyticsBridge()`. Import uruchamia *WordPress → Importuj zlecenia do analityki (ZLECENIA ANALITYKA)*; codzienny trigger jest poza pierwszą wersją.
+
 ### Zmiany oczekujące na wykonanie
 
 `SEO LIVE` i kolejka `WP COMMANDS` działały niezależnie, co dawało wyścig: polecenie przygotowane wieczorem, poranny live check widzi jeszcze stary stan i wysyła alert o regresji, a polecenie wykonuje się później tego samego dnia. Alert jest wtedy prawdziwy, ale bezużyteczny, bo system zna już zamierzony stan.

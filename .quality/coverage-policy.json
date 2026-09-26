@@ -118,6 +118,11 @@
       "rationale": "Nowy w #123 z pełnym pokryciem: konfiguracja, budowa żądań, parsowanie odpowiedzi, upsert i rozróżnione powody odmowy API."
     },
     {
+      "pattern": "src/OrderAnalytics.gs",
+      "threshold": 100,
+      "rationale": "Nowy w #195 z pełnym pokryciem: konfiguracja fail-closed, generator PHP, zatwierdzanie zapisu snippetu, kontrola allowlisty odpowiedzi, pełna synchronizacja i retencja."
+    },
+    {
       "pattern": "src/PhoneInquiries.gs",
       "threshold": 100,
       "rationale": "Nowy w #196 z pełnym pokryciem: założenie i przejęcie zakładki, odmowa przy innym nagłówku, walidacje, notatka i zamrożenie."

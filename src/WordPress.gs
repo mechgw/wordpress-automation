@@ -18,6 +18,8 @@ function addWpMenu_() {
     .addItem('Wykonaj polecenia', 'processWpCommands')
     .addItem('Wykonaj wiersze DRY_RUN naprawdę', 'executeDryRunCommands')
     .addItem('Przygotuj zakładkę payloadów', 'przygotujZakladkePayloadow')
+    .addSeparator()
+    .addItem('Importuj zlecenia do analityki (ZLECENIA ANALITYKA)', 'importujZleceniaAnalityka')
     .addToUi();
 }
 
