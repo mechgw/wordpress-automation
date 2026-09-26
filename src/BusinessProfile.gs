@@ -1,18 +1,14 @@
 /**
  * Google Business Profile: import wydajności i fraz wyszukiwania (#123).
  *
- * Etap pierwszy: wszystko poza samym dostępem do API. Konfiguracja, zakładki,
- * budowa żądań, parsowanie odpowiedzi, idempotentny zapis i czytelne błędy.
- * Dzięki temu włączenie funkcji sprowadza się później do dwóch kroków po
- * stronie Google, bez pisania kodu.
+ * Konfiguracja, zakładki, budowa żądań, parsowanie odpowiedzi, idempotentny
+ * zapis i czytelne błędy. Zakres OAuth `business.manage` trafił do
+ * appsscript.json dopiero po tym, jak Google przyznał projektowi dostęp do
+ * Business Profile API: dopisanie zakresu wymusza ponowną autoryzację całego
+ * projektu, więc wcześniej nie było powodu tego robić.
  *
- * Czego tu świadomie NIE ma:
- *
- *   1. Zakresu OAuth w appsscript.json. Dopisanie go wymusza ponowną
- *      autoryzację całego projektu, a nie ma powodu robić tego, zanim Google
- *      przyzna dostęp do Business Profile API. Do tego czasu import kończy się
- *      komunikatem mówiącym wprost, czego brakuje.
- *   2. Automatycznej edycji profilu. Czytamy i porównujemy, nie zmieniamy.
+ * Czego tu świadomie NIE ma: automatycznej edycji profilu. Czytamy
+ * i porównujemy, nie zmieniamy.
  *
  * Kształt odpowiedzi jest odwzorowany według dokumentacji Business Profile
  * Performance API v1, nie sprawdzony na żywym ruchu. Pierwszy prawdziwy przebieg
@@ -83,10 +79,35 @@ function gbpDailyUrl_(location, start, end) {
     '&' + gbpDateParams_('dailyRange.end_date', end);
 }
 
-/** Adres żądania miesięcznych fraz wyszukiwania. */
-function gbpKeywordsUrl_(location, pageToken) {
+/** Miesiąc jako obiekt API: rok i miesiąc w osobnych polach. */
+function gbpMonthParams_(prefix, month) {
+  return prefix + '.year=' + month.year + '&' + prefix + '.month=' + month.month;
+}
+
+/**
+ * Ostatni pełny miesiąc przed `now`. Frazy są agregatem miesięcznym, a bieżący
+ * miesiąc nie jest zamknięty, więc jego liczby byłyby częściowe.
+ */
+function gbpLastFullMonth_(now) {
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return { year: first.getFullYear(), month: first.getMonth() + 1 };
+}
+
+/** Miesiąc jako klucz wiersza `RRRR-MM`. */
+function gbpMonthKey_(month) {
+  return month.year + '-' + (month.month < 10 ? '0' : '') + month.month;
+}
+
+/**
+ * Adres żądania miesięcznych fraz wyszukiwania dla jednego miesiąca.
+ * `monthlyRange` jest wymagane, a API sumuje wyświetlenia z całego zakresu,
+ * więc historia miesiąc po miesiącu wymaga osobnego zapytania o każdy miesiąc.
+ */
+function gbpKeywordsUrl_(location, month, pageToken) {
   return GBP_API_BASE + location + '/searchkeywords/impressions/monthly' +
-    (pageToken ? '?pageToken=' + encodeURIComponent(pageToken) : '');
+    '?' + gbpMonthParams_('monthlyRange.start_month', month) +
+    '&' + gbpMonthParams_('monthlyRange.end_month', month) +
+    (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
 }
 
 /**
@@ -105,8 +126,8 @@ function gbpApiRequest_(url) {
 
   if (code === 401) {
     throw new Error(
-      'Business Profile API odmówiło uwierzytelnienia (401). Najczęstsza przyczyna to brak zakresu ' +
-      'OAuth w appsscript.json: dopisz zakres Business Profile i autoryzuj projekt ponownie.'
+      'Business Profile API odmówiło uwierzytelnienia (401). Sprawdź, czy appsscript.json zawiera zakres ' +
+      'business.manage i czy projekt został po jego dodaniu ponownie autoryzowany.'
     );
   }
   if (code === 403) {
@@ -230,17 +251,22 @@ function runGbpPerformanceImport_(startDate, endDate) {
   };
 }
 
-/** Import miesięcznych fraz wyszukiwania, ze stronicowaniem. */
+/**
+ * Import fraz za ostatni pełny miesiąc, ze stronicowaniem. Wiersze dostają
+ * miesiąc, o który pytaliśmy, a nie miesiąc uruchomienia. Na początku miesiąca
+ * dane bywają jeszcze niepełne; ponowny import podmienia je dzięki upsertowi.
+ */
 function runGbpKeywordsImport_() {
   const config = getGbpConfig_();
   const now = new Date();
-  const month = now.getFullYear() + '-' + ((now.getMonth() + 1) < 10 ? '0' : '') + (now.getMonth() + 1);
+  const target = gbpLastFullMonth_(now);
+  const month = gbpMonthKey_(target);
   let pageToken = '';
   const rows = [];
   let pages = 0;
 
   do {
-    const response = gbpApiRequest_(gbpKeywordsUrl_(config.location, pageToken));
+    const response = gbpApiRequest_(gbpKeywordsUrl_(config.location, target, pageToken));
     parseGbpKeywords_(response).forEach(function (r) {
       rows.push([month, config.location, r.keyword, r.value, r.kind, now]);
     });
@@ -275,11 +301,11 @@ function przygotujBusinessProfile() {
     '',
     'Stan konfiguracji: ' + (configured ? 'GBP_LOCATION ustawione.' : 'brak Script Property GBP_LOCATION.'),
     '',
-    'Do uruchomienia importu potrzebne są jeszcze trzy rzeczy po stronie Google:',
+    'Po stronie Google import wymaga dwóch rzeczy, których nie da się załatwić kodem:',
     '1. Włączone Business Profile Performance API w projekcie Google Cloud.',
     '2. Przyznany dostęp do Business Profile API; samo włączenie nie wystarcza,',
     '   bez wniosku limit wynosi zero.',
-    '3. Zakres OAuth Business Profile w appsscript.json i ponowna autoryzacja.',
+    'Zakres OAuth Business Profile jest już w appsscript.json.',
     '',
     'GBP_LOCATION ma format locations/<id>. Import jest idempotentny:',
     'ponowne uruchomienie tego samego zakresu nie tworzy duplikatów.'
