@@ -20,6 +20,20 @@ const GBP_KEYWORDS_SHEET = 'GBP SEARCH KEYWORDS';
 const GBP_PERFORMANCE_HEADER = ['Data', 'Lokalizacja', 'Metryka', 'Wartość', 'Pobrano'];
 const GBP_KEYWORDS_HEADER = ['Miesiąc', 'Lokalizacja', 'Fraza', 'Wyświetlenia', 'Rodzaj wartości', 'Pobrano'];
 
+/**
+ * Klucze zapisu. Arkusz zamienia zapisany tekst `RRRR-MM-DD` i `RRRR-MM` na datę
+ * i przy odczycie oddaje obiekt `Date`, więc pierwsza kolumna wymaga postaci
+ * kanonicznej po obu stronach porównania — ta sama pułapka co #155. Bez tego
+ * każdy import dopisywał wszystko od nowa: 26.09.2026 po trzech importach obie
+ * zakładki miały po trzy kopie każdego wiersza.
+ *
+ * Formaty są literałami, a nie stałymi z Performance.gs: ten plik ładuje się
+ * wcześniej, a stała z innego pliku na najwyższym poziomie nie jest jeszcze
+ * zdefiniowana.
+ */
+const GBP_PERFORMANCE_KEY = [{ column: 0, dateFormat: 'yyyy-MM-dd' }, 1, 2];
+const GBP_KEYWORDS_KEY = [{ column: 0, dateFormat: 'yyyy-MM' }, 1, 2];
+
 const GBP_API_BASE = 'https://businessprofileperformance.googleapis.com/v1/';
 
 /**
@@ -217,18 +231,49 @@ function parseGbpKeywords_(response) {
  * Zapis idempotentny: wiersze o tym samym kluczu są podmieniane, reszta
  * zostaje. Ponowny import tego samego zakresu nie tworzy duplikatów, a backfill
  * starszego okresu nie kasuje nowszych danych.
+ *
+ * Pole klucza to numer kolumny („porównuj tekst”) albo `{ column, dateFormat }`
+ * („sprowadź datę z komórki do tej postaci w strefie arkusza”) — kontrakt
+ * `performanceKeyPart_()` z #155. Duplikaty, które już są w zakładce, scalamy
+ * przy każdym zapisie, także poza zakresem bieżącego importu — inaczej dni,
+ * które wyszły z okna importu, zostałyby zdublowane na zawsze.
  */
-function upsertGbpRows_(sheetName, header, keyColumns, rows) {
+function upsertGbpRows_(sheetName, header, keySpec, rows) {
   const sheet = ensureSheetWithHeader_(sheetName, header);
-  const keyOf = function (row) { return keyColumns.map(function (i) { return String(row[i]); }).join('\u0000'); };
+  const timeZone = performanceTimeZone_();
+  const keyOf = function (row) {
+    return keySpec.map(function (part) {
+      return typeof part === 'number'
+        ? String(row[part])
+        : performanceKeyPart_(row[part.column], part.dateFormat, timeZone);
+    }).join('\u0000');
+  };
   const incoming = {};
   rows.forEach(function (row) { incoming[keyOf(row)] = true; });
 
   const lastRow = sheet.getLastRow();
   const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, header.length).getValues() : [];
-  const kept = existing.filter(function (row) {
-    return String(row[0] || '') !== '' && !incoming[keyOf(row)];
+  // Zostaje kopia z najnowszym `Pobrano`, a nie ta najniżej w arkuszu: pozycja
+  // wiersza nie jest chronologią, bo zakładkę wolno posortować. Przy równym albo
+  // nieczytelnym `Pobrano` rozstrzyga pozycja — ta sama reguła co w upsercie
+  // pomiaru wydajności.
+  const fetchedAt = header.indexOf('Pobrano');
+  const best = {};
+  let present = 0;
+  existing.forEach(function (row, index) {
+    if (String(row[0] || '') === '') return;
+    present++;
+    const key = keyOf(row);
+    const previous = best[key];
+    if (previous === undefined ||
+        performanceRowTime_(row[fetchedAt]) >= performanceRowTime_(existing[previous][fetchedAt])) {
+      best[key] = index;
+    }
   });
+  const merged = present - Object.keys(best).length;
+  const chosen = {};
+  Object.keys(best).forEach(function (key) { if (!incoming[key]) chosen[best[key]] = true; });
+  const kept = existing.filter(function (row, index) { return chosen[index] === true; });
 
   const combined = kept.concat(rows);
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, header.length).clearContent();
@@ -236,7 +281,7 @@ function upsertGbpRows_(sheetName, header, keyColumns, rows) {
     ensureSheetRows_(sheet, combined.length + 1);
     sheet.getRange(2, 1, combined.length, header.length).setValues(combined);
   }
-  return { written: rows.length, kept: kept.length };
+  return { written: rows.length, kept: kept.length, merged: merged };
 }
 
 /** Import metryk dziennych za podany zakres; domyślnie ostatnie 7 dni do wczoraj. */
@@ -251,7 +296,7 @@ function runGbpPerformanceImport_(startDate, endDate) {
     return [r.date, config.location, r.metric, r.value, now];
   });
 
-  const out = upsertGbpRows_(GBP_PERFORMANCE_SHEET, GBP_PERFORMANCE_HEADER, [0, 1, 2], rows);
+  const out = upsertGbpRows_(GBP_PERFORMANCE_SHEET, GBP_PERFORMANCE_HEADER, GBP_PERFORMANCE_KEY, rows);
   const from = gbpDateKey_({ year: start.getFullYear(), month: start.getMonth() + 1, day: start.getDate() });
   const to = gbpDateKey_({ year: end.getFullYear(), month: end.getMonth() + 1, day: end.getDate() });
   // Ostatnie dni zakresu bywają jeszcze nieprzetworzone; mówimy, do kiedy są dane,
@@ -261,6 +306,7 @@ function runGbpPerformanceImport_(startDate, endDate) {
   return {
     rows: rows.length,
     kept: out.kept,
+    merged: out.merged,
     detail: rows.length + ' pomiarów (' + from + ' – ' + to + horizon + ')'
   };
 }
@@ -288,8 +334,13 @@ function runGbpKeywordsImport_() {
     pages++;
   } while (pageToken && pages < 20);
 
-  const out = upsertGbpRows_(GBP_KEYWORDS_SHEET, GBP_KEYWORDS_HEADER, [0, 1, 2], rows);
-  return { rows: rows.length, kept: out.kept, detail: rows.length + ' fraz za ' + month };
+  const out = upsertGbpRows_(GBP_KEYWORDS_SHEET, GBP_KEYWORDS_HEADER, GBP_KEYWORDS_KEY, rows);
+  return { rows: rows.length, kept: out.kept, merged: out.merged, detail: rows.length + ' fraz za ' + month };
+}
+
+/** Dopisek o scalonych duplikatach; pusty, gdy zakładka ich nie miała. */
+function gbpMergedNote_(result) {
+  return result.merged ? ', scalono ' + result.merged + ' zdublowanych' : '';
 }
 
 /** Menu: import z ręki, z podsumowaniem w oknie. */
@@ -299,8 +350,8 @@ function importujBusinessProfile() {
   SpreadsheetApp.getUi().alert([
     'Business Profile: import zakończony.',
     '',
-    'Wydajność: ' + performance.detail + ', zachowano ' + performance.kept + ' wcześniejszych wierszy.',
-    'Frazy: ' + keywords.detail + ', zachowano ' + keywords.kept + ' wcześniejszych wierszy.'
+    'Wydajność: ' + performance.detail + ', zachowano ' + performance.kept + ' wcześniejszych wierszy' + gbpMergedNote_(performance) + '.',
+    'Frazy: ' + keywords.detail + ', zachowano ' + keywords.kept + ' wcześniejszych wierszy' + gbpMergedNote_(keywords) + '.'
   ].join('\n'));
   return { performance: performance, keywords: keywords };
 }

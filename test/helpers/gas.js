@@ -105,7 +105,10 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
    * włączenie globalne zmieniłoby znaczenie fixture'ów w całej istniejącej suite.
    */
   const parsesOnWrite = Boolean(limits && limits.parsesOnWrite);
-  const DATE_LIKE = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+  // Także sam rok i miesiąc: '2026-08' wraca jako data 1 sierpnia. Dowód
+  // z produkcji: 26.09.2026 trzy importy GBP dały po trzy kopie każdego wiersza
+  // fraz, a jedyną kolumną klucza, która mogła się zmienić, był miesiąc.
+  const DATE_LIKE = /^(\d{4})-(\d{2})(?:-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?)?$/;
   const parseCell = (value, row, col) => {
     if (!parsesOnWrite || typeof value !== 'string') return value;
     if (String((numberFormats[row - 1] || [])[col - 1] || '') === '@') return value;
@@ -114,7 +117,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     // Data MUSI powstać w realm-ie VM: `value instanceof Date` w źródłach jest
     // fałszem dla daty z realm-u testu.
     const D = (realm && realm.Date) || Date;
-    return new D(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+    return new D(+m[1], +m[2] - 1, +(m[3] || 1), +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
   };
   // Arkusz Google ma skończoną siatkę: nowy ma 1000 wierszy i 26 kolumn, a zapis
   // poza nią rzuca wyjątkiem zamiast ją powiększyć. Stub to odwzorowuje, bo

@@ -223,6 +223,74 @@ describe('#123: idempotentny zapis', () => {
     assert.deepEqual(calls, [0, 0], 'zera zapisane jako liczby, nie puste komórki');
   });
 
+  test('ponowny import rozpoznaje dzień, który arkusz zamienił na datę (#155)', () => {
+    // Arkusz zapisuje '2026-09-01' jako datę i oddaje ją jako Date; klucz ze
+    // `String()` nie rozpoznawał wtedy własnego wiersza i każdy import dopisywał wszystko.
+    const responses = [
+      dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(1, '5')] }]),
+      dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(1, '9')] }])
+    ];
+    let call = 0;
+    const gas = project({
+      sheets: { [PERF]: { rows: [PERF_HEADER], parsesOnWrite: true } },
+      fetch: () => ({ code: 200, text: JSON.stringify(responses[Math.min(call++, 1)]) })
+    });
+    gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1));
+    assert.ok(gas.$sheet(PERF)[1][0] instanceof gas.$Date, 'arkusz trzyma datę, nie tekst');
+    gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1));
+    const rows = gas.$sheet(PERF).slice(1);
+    assert.equal(rows.length, 1, 'jeden wiersz, nie dwa');
+    assert.equal(rows[0][3], 9, 'z nowszą wartością');
+  });
+
+  test('ponowny import fraz rozpoznaje miesiąc, który arkusz zamienił na datę', () => {
+    const gas = freezeClock(project({
+      sheets: { [KEYS]: { rows: [KEYS_HEADER], parsesOnWrite: true } },
+      fetch: () => ({ code: 200, text: JSON.stringify({ searchKeywordsCounts: [{ searchKeyword: 'a', insightsValue: { value: '10' } }] }) })
+    }), 2026, 8, 26);
+    gas.runGbpKeywordsImport_();
+    assert.ok(gas.$sheet(KEYS)[1][0] instanceof gas.$Date, 'miesiąc zapisany jako data');
+    const out = plain(gas.runGbpKeywordsImport_());
+    assert.equal(gas.$sheet(KEYS).length - 1, 1, 'jeden wiersz, nie dwa');
+    assert.equal(out.kept, 0, 'wiersz podmieniony, a nie zachowany obok nowego');
+  });
+
+  test('po posortowaniu zakładki zostaje kopia z najnowszym Pobrano, nie najniższa', () => {
+    const gas = project({
+      sheets: { [PERF]: { rows: [PERF_HEADER], parsesOnWrite: true } },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(2, '1')] }])) })
+    });
+    gas.SpreadsheetApp.getActive().getSheetByName(PERF).getRange(2, 1, 3, 5).setValues([
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 3, '2026-09-26 12:00:00'],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 4, '2026-09-26 13:00:00'],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 5, '2026-09-26 11:00:00']
+    ]);
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 2), new Date(2026, 8, 2)));
+    assert.equal(out.merged, 2);
+    const kept = gas.$sheet(PERF).slice(1).filter(r => r[2] === 'WEBSITE_CLICKS' && r[3] !== 1);
+    assert.deepEqual(kept.map(r => r[3]), [4], 'odczyt z 13:00, choć stał w środku');
+  });
+
+  test('przy równym Pobrano z duplikatów zostaje ostatnie wystąpienie', () => {
+    const gas = project({
+      sheets: { [PERF]: { rows: [PERF_HEADER], parsesOnWrite: true } },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(2, '1')] }])) })
+    });
+    // Stan z produkcji 26.09: ten sam dzień zapisany trzy razy, jako data.
+    gas.SpreadsheetApp.getActive().getSheetByName(PERF).getRange(2, 1, 3, 5).setValues([
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 3, ''],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 4, ''],
+      ['2026-09-01', LOCATION, 'WEBSITE_CLICKS', 5, '']
+    ]);
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 2), new Date(2026, 8, 2)));
+    assert.equal(out.merged, 2, 'dwie nadmiarowe kopie');
+    assert.equal(out.kept, 1, 'dzień spoza importu zostaje w jednej kopii');
+    // clearContent zostawia w atrapie puste wiersze; getLastRow() arkusza ich nie liczy.
+    const rows = gas.$sheet(PERF).slice(1).filter(r => r.some(v => v !== '' && v !== null && v !== undefined));
+    assert.equal(rows.length, 2, 'jedna kopia 01.09 i nowy wiersz 02.09');
+    assert.equal(rows[0][3], 5, 'ostatnie wystąpienie, czyli najnowszy odczyt');
+  });
+
   test('bez żadnych danych w zakresie wynik importu mówi to wprost', () => {
     const gas = project({
       sheets: { [PERF]: [PERF_HEADER] },
@@ -307,6 +375,21 @@ describe('#123: menu', () => {
     const text = gas.$alerts[0][0];
     assert.match(text, /Wydajność: 1 pomiarów/);
     assert.match(text, /Frazy: 0 fraz za \d{4}-\d{2}/);
+    assert.doesNotMatch(text, /scalono/, 'bez duplikatów bez dopisku');
+  });
+
+  test('okno importu mówi, ile zdublowanych wierszy scalono', () => {
+    const gas = project({
+      sheets: { [PERF]: [PERF_HEADER], [KEYS]: [KEYS_HEADER] },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'WEBSITE_CLICKS', values: [dated(1, '5')] }])) })
+    });
+    gas.SpreadsheetApp.getActive().getSheetByName(PERF).getRange(2, 1, 3, 5).setValues([
+      ['2026-08-01', LOCATION, 'CALL_CLICKS', 1, ''],
+      ['2026-08-01', LOCATION, 'CALL_CLICKS', 1, ''],
+      ['2026-08-01', LOCATION, 'CALL_CLICKS', 1, '']
+    ]);
+    gas.importujBusinessProfile();
+    assert.match(gas.$alerts[0][0], /Wydajność: .*zachowano 1 wcześniejszych wierszy, scalono 2 zdublowanych\./);
   });
 
   test('pozycje są w menu SEO / GSC', () => {
