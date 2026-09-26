@@ -41,11 +41,15 @@ const GBP_KEYWORDS_KEY = [{ column: 0, dateFormat: 'yyyy-MM' }, 1, 2];
 const GBP_API_BASE = 'https://businessprofileperformance.googleapis.com/v1/';
 
 /**
- * Codzienny import (#123). Godzina po importach GSC (05:00) i GA4 (06:00),
- * a przed strażnikiem aktualności (08:00), żeby strażnik widział dzisiejszy przebieg.
+ * Codzienny import (#123) w godzinie, w której nie startuje żadne inne zadanie:
+ * blokada skryptu czeka tylko 5 s, a trigger odpala w losowej minucie swojej
+ * godziny. Zajęte są 05 (GSC), 06 (GA4, w poniedziałek sitemapy), 07 (w poniedziałek
+ * inspekcja URL, do 150 zapytań), 08 (strażnik), 09 (live check), 10 (recrawl),
+ * a pomiar wydajności w tej instalacji startuje co 6 h o :25 (06:25, 12:25).
+ * Strażnik ocenia świeżość progiem 36 h, więc wystarcza mu wczorajszy przebieg.
  */
 const GBP_TRIGGER_HANDLER = 'importBusinessProfileTrigger';
-const GBP_TRIGGER_HOUR = 7;
+const GBP_TRIGGER_HOUR = 11;
 
 /**
  * Metryki dzienne o wartości marketingowej. Lista jest jawna, bo API zwraca

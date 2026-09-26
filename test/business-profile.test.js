@@ -465,14 +465,37 @@ describe('#123: codzienny import', () => {
     assert.match(gas.$alerts[0][0], /NIE został włączony.*GBP_LOCATION/s);
   });
 
-  test('ponowne włączenie zostawia jeden codzienny trigger o 7:00', () => {
+  test('ponowne włączenie zostawia jeden codzienny trigger o 11:00', () => {
     const gas = project();
     assert.equal(gas.ustawCodziennyImportBusinessProfile(), true);
     gas.ustawCodziennyImportBusinessProfile();
     const mine = gas.$triggers.filter(t => t.getHandlerFunction() === 'importBusinessProfileTrigger');
     assert.equal(mine.length, 1);
-    assert.deepEqual([mine[0].$spec.everyDays, mine[0].$spec.atHour], [1, 7]);
-    assert.match(gas.$alerts[1][0], /ok\. 7:00/);
+    assert.deepEqual([mine[0].$spec.everyDays, mine[0].$spec.atHour], [1, 11]);
+    assert.match(gas.$alerts[1][0], /ok\. 11:00/);
+  });
+
+  test('godzina importu nie pokrywa się z żadnym innym triggerem o stałej godzinie', () => {
+    // Blokada skryptu czeka 5 s, a trigger startuje w losowej minucie swojej
+    // godziny, więc wspólna godzina z innym zadaniem to przebieg odrzucony
+    // blokadą i incydent (uwaga Codexa w #202: poniedziałkowa inspekcja URL o 07:00).
+    const dir = path.join(__dirname, '..', 'src');
+    const hours = [];
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.gs'))) {
+      const code = fs.readFileSync(path.join(dir, file), 'utf8');
+      for (const m of code.matchAll(/\.atHour\(\s*([A-Z0-9_]+)\s*\)/g)) {
+        const decl = /^\d+$/.test(m[1]) ? null : new RegExp('const ' + m[1] + ' = (\\d+);').exec(code);
+        hours.push({ file, hour: Number(decl ? decl[1] : m[1]) });
+      }
+    }
+    assert.ok(hours.length >= 7, 'skan znalazł triggery o stałej godzinie');
+    const gbp = hours.filter(h => h.file === 'BusinessProfile.gs');
+    assert.equal(gbp.length, 1);
+    const clash = hours.filter(h => h.file !== 'BusinessProfile.gs' && h.hour === gbp[0].hour);
+    assert.deepEqual(clash, [], 'inne zadanie w tej samej godzinie');
+    // Pomiar wydajności (everyHours) nie ma stałej godziny; w tej instalacji startuje
+    // co 6 h o 00:25, 06:25, 12:25 i 18:25, więc tych godzin też unikamy.
+    assert.ok(![0, 6, 12, 18].includes(gbp[0].hour), 'godzina pomiaru wydajności');
   });
 
   test('zadanie jest w rejestrze jako opcjonalne, z wpisem w IMPORT LOG', () => {
