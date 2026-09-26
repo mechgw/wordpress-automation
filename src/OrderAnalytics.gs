@@ -24,6 +24,7 @@ const ORDER_ANALYTICS_NAME = 'Order Analytics Bridge';
 const ORDER_ANALYTICS_ENDPOINT = 'order-analytics';
 const ORDER_ANALYTICS_SNIPPET_ID_PROP = 'WP_ORDER_ANALYTICS_SNIPPET_ID';
 const ORDER_ANALYTICS_WRITE_APPROVAL_PROP = 'WP_ORDER_ANALYTICS_WRITE_APPROVAL';
+const ORDER_ANALYTICS_CODE_DIGEST_PROP = 'WP_ORDER_ANALYTICS_CODE_DIGEST';
 const ORDER_FORM_ID_PROP = 'WP_ORDER_FORM_ID';
 const ORDER_SERVICE_FIELDS_PROP = 'WP_ORDER_SERVICE_FIELDS';
 const ORDER_FROM_FIELD_PROP = 'WP_ORDER_FROM_FIELD';
@@ -343,39 +344,42 @@ function getOrderAnalyticsSnippetId_() {
   return Number(id);
 }
 
-/** Tworzy wyłącznie NIEAKTYWNY snippet; konfiguracja spoza allowlisty typów kończy się odmową. */
+/**
+ * Tworzy NIEAKTYWNY snippet albo aktualizuje kod nieaktywnego, który skrypt sam
+ * przygotował. Konfiguracja spoza allowlisty typów, obcy snippet o tej nazwie,
+ * kod zmieniony poza skryptem i aktywny snippet z innym kodem to odmowa — zanim
+ * ktokolwiek zostanie poproszony o zgodę i zanim cokolwiek trafi do WordPressa.
+ */
 function prepareOrderAnalyticsBridge() {
   return withScriptLock_('przygotowanie mostu zleceń', () => {
-    // Najpierw konfiguracja: pole niedozwolonego typu albo grupa spoza słownika
-    // to odmowa, zanim cokolwiek trafi do WordPressa.
     const expectedCode = buildOrderAnalyticsBridgeCode_();
+    const candidates = getOrderAnalyticsCandidates_(getCodeSnippetsList_());
+    if (candidates.length > 1) throw new Error('Zlecenia: znaleziono więcej niż jeden zarządzany snippet.');
+    const existing = candidates.length === 1 ? getCodeSnippetRaw_(candidates[0].id) : null;
+    const replace = Boolean(existing) && String(existing.code || '') !== expectedCode;
+    if (existing && existing.active) {
+      throw new Error(replace
+        ? 'Zlecenia: aktywny snippet ma inny kod niż wynika z Script Properties. ' +
+          'Najpierw rollbackOrderAnalyticsBridge(), potem prepareOrderAnalyticsBridge().'
+        : 'Zlecenia: snippet jest już aktywny. Użyj audytu.');
+    }
+    if (replace) requireOwnOrderSnippet_(existing);
+
     if (!requireOrderAnalyticsWriteApproval_(
       'Przygotować most zleceń do analityki?',
-      'Zostanie utworzony wyłącznie NIEAKTYWNY, uwierzytelniony endpoint tylko do odczytu, który wydaje datę, usługę, ' +
-      'miejscowości, regiony z dwóch cyfr kodu i ścieżkę strony wysłania. Bez danych kontaktowych.'
+      (replace
+        ? 'Kod NIEAKTYWNEGO snippetu #' + existing.id + ' zostanie zastąpiony kodem z bieżącego mapowania ' +
+          '(migawka poprzedniego trafi do WP SNAPSHOTS). '
+        : 'Zostanie utworzony wyłącznie NIEAKTYWNY, uwierzytelniony endpoint tylko do odczytu. ') +
+      'Endpoint wydaje datę, usługę, miejscowości, regiony z dwóch cyfr kodu i ścieżkę strony wysłania. Bez danych kontaktowych.'
     )) {
       return { cancelled: true };
     }
 
-    const candidates = getOrderAnalyticsCandidates_(getCodeSnippetsList_());
-    if (candidates.length > 1) throw new Error('Zlecenia: znaleziono więcej niż jeden zarządzany snippet.');
-
     let snippet;
     let created = false;
-    if (candidates.length === 1) {
-      snippet = getCodeSnippetRaw_(candidates[0].id);
-      // Po zmianie mapowania w Script Properties kod snippetu jest nieaktualny.
-      // Nieaktywny dostaje nowy kod (z migawką poprzedniego); aktywnego nie ruszamy.
-      if (String(snippet.code || '') !== expectedCode) {
-        if (snippet.active) {
-          throw new Error(
-            'Zlecenia: aktywny snippet ma inny kod niż wynika z Script Properties. ' +
-            'Najpierw rollbackOrderAnalyticsBridge(), potem prepareOrderAnalyticsBridge().'
-          );
-        }
-        snippet = updateInactiveOrderSnippetCode_(snippet, expectedCode);
-      }
-      snippet = validateOrderAnalyticsSnippet_(snippet, expectedCode);
+    if (existing) {
+      snippet = replace ? updateInactiveOrderSnippetCode_(existing, expectedCode) : existing;
     } else {
       snippet = createInactiveCodeSnippet_({
         name: ORDER_ANALYTICS_NAME,
@@ -387,18 +391,39 @@ function prepareOrderAnalyticsBridge() {
       });
       created = true;
       if (!/^\d+$/.test(String(snippet.id || ''))) throw new Error('Zlecenia: Code Snippets nie zwrócił ID nowego snippetu.');
-      snippet = validateOrderAnalyticsSnippet_(getCodeSnippetRaw_(snippet.id), expectedCode);
+      snippet = getCodeSnippetRaw_(snippet.id);
     }
+    snippet = validateOrderAnalyticsSnippet_(snippet, expectedCode);
     if (snippet.active) throw new Error('Zlecenia: snippet jest już aktywny. Użyj audytu.');
 
-    PropertiesService.getScriptProperties().setProperty(ORDER_ANALYTICS_SNIPPET_ID_PROP, String(snippet.id));
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty(ORDER_ANALYTICS_SNIPPET_ID_PROP, String(snippet.id));
+    // Skrót wdrożonego kodu: tylko snippet z dokładnie tym kodem wolno później nadpisać.
+    props.setProperty(ORDER_ANALYTICS_CODE_DIGEST_PROP, contentDigest_(expectedCode));
     const saved = saveCodeSnippetResult_(snippet, 'ORDER-ANALYTICS-PREPARE');
     showOrderAnalyticsMessage_(
-      'Most zleceń przygotowany.\n\nSnippet ID: ' + snippet.id + '\nStan: NIEAKTYWNY\n\n' +
-      'Następny krok: activateOrderAnalyticsBridge(), potem auditOrderAnalyticsBridge().'
+      'Most zleceń przygotowany' + (replace ? ' (kod zaktualizowany)' : '') + '.\n\nSnippet ID: ' + snippet.id +
+      '\nStan: NIEAKTYWNY\n\nNastępny krok: activateOrderAnalyticsBridge(), potem auditOrderAnalyticsBridge().'
     );
-    return { snippetId: Number(snippet.id), created: created, active: false, resultRef: saved.resultRef };
+    return { snippetId: Number(snippet.id), created: created, replaced: replace, active: false, resultRef: saved.resultRef };
   });
+}
+
+/**
+ * Nadpisać wolno wyłącznie snippet przygotowany przez skrypt: o zapisanym ID
+ * i z kodem dokładnie takim, jaki skrypt ostatnio wdrożył (skrót). Snippet o tej
+ * samej nazwie albo kod poprawiony ręcznie w WordPressie zostają nietknięte.
+ */
+function requireOwnOrderSnippet_(snippet) {
+  const props = PropertiesService.getScriptProperties();
+  const recordedId = String(props.getProperty(ORDER_ANALYTICS_SNIPPET_ID_PROP) || '');
+  const recordedDigest = String(props.getProperty(ORDER_ANALYTICS_CODE_DIGEST_PROP) || '');
+  if (recordedId !== String(snippet.id) || !recordedDigest || recordedDigest !== contentDigest_(String(snippet.code || ''))) {
+    throw new Error(
+      'Zlecenia: snippet #' + snippet.id + ' ma inny kod i nie jest ostatnią wersją przygotowaną przez skrypt ' +
+      '(inne ID albo kod zmieniony poza skryptem). Nie nadpisuję go; sprawdź go w WordPressie.'
+    );
+  }
 }
 
 /**

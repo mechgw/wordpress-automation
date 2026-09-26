@@ -247,26 +247,54 @@ describe('#195: instalacja snippetu (test 6)', () => {
     assert.equal(router.state.updates || 0, 0, 'aktywnego snippetu nie aktualizujemy');
   });
 
-  test('prepare aktualizuje kod nieaktywnego snippetu, z migawką poprzedniego', () => {
+  test('prepare aktualizuje kod nieaktywnego snippetu po zmianie mapowania, z migawką poprzedniego', () => {
     const router = makeRouter();
     const gas = project({ router });
     gas.prepareOrderAnalyticsBridge();
-    router.state.snippet.code = 'stary kod';
+    gas.$properties.WP_ORDER_SOURCE_FIELD = '';
     const out = plain(gas.prepareOrderAnalyticsBridge());
-    assert.deepEqual([out.created, out.active, router.state.updates], [false, false, 1]);
+    assert.deepEqual([out.created, out.replaced, out.active, router.state.updates], [false, true, false, 1]);
     assert.equal(router.state.snippet.code, gas.buildOrderAnalyticsBridgeCode_());
     assert.equal(router.state.snippet.active, false, 'po aktualizacji nadal nieaktywny');
     const snapshots = gas.$sheet('WP SNAPSHOTS').slice(1);
     assert.ok(snapshots.some(r => r[1] === 'ORDER-ANALYTICS-UPDATE'), 'migawka przed zmianą kodu');
+    const prompt = gas.$alerts.map(a => String(a[1] || '')).find(t => /zostanie zastąpiony/.test(t));
+    assert.match(prompt, /Kod NIEAKTYWNEGO snippetu #401 zostanie zastąpiony/, 'zgoda mówi wprost o zastąpieniu kodu');
   });
 
-  test('nieudany zapis nowego kodu kończy prepare błędem', () => {
+  test('obcy snippet o tej nazwie nie jest nadpisywany, a o zgodę nikt nie pyta', () => {
+    // Uwaga Codexa w #205: kandydat rozpoznany po samej nazwie nie jest nasz.
+    const router = makeRouter({
+      snippet: { id: 401, name: 'Order Analytics Bridge', code: 'cudzy kod', scope: 'global', active: false, tags: [], code_error: null }
+    });
+    const gas = project({ router });
+    assert.throws(() => gas.prepareOrderAnalyticsBridge(), /nie jest ostatnią wersją przygotowaną przez skrypt/);
+    assert.equal(router.state.updates || 0, 0);
+    assert.equal(gas.$alerts.length, 0);
+    assert.equal(router.state.snippet.code, 'cudzy kod');
+  });
+
+  test('kod zmieniony ręcznie w WordPressie nie jest nadpisywany', () => {
+    const router = makeRouter();
+    const gas = project({ router });
+    gas.prepareOrderAnalyticsBridge();
+    router.state.snippet.code = 'ręczna poprawka administratora';
+    gas.$properties.WP_ORDER_SOURCE_FIELD = '';
+    assert.throws(() => gas.prepareOrderAnalyticsBridge(), /kod zmieniony poza skryptem/);
+    assert.equal(router.state.updates || 0, 0);
+    assert.equal(router.state.snippet.code, 'ręczna poprawka administratora');
+  });
+
+  test('nieudany zapis nowego kodu kończy prepare błędem i nie zmienia zapisanego skrótu', () => {
     const router = makeRouter({ failUpdate: true });
     const gas = project({ router });
     gas.prepareOrderAnalyticsBridge();
-    router.state.snippet.code = 'stary kod';
+    const oldCode = router.state.snippet.code;
+    const oldDigest = gas.$properties.WP_ORDER_ANALYTICS_CODE_DIGEST;
+    gas.$properties.WP_ORDER_SOURCE_FIELD = '';
     assert.throws(() => gas.prepareOrderAnalyticsBridge());
-    assert.equal(router.state.snippet.code, 'stary kod');
+    assert.equal(router.state.snippet.code, oldCode);
+    assert.equal(gas.$properties.WP_ORDER_ANALYTICS_CODE_DIGEST, oldDigest);
   });
 
   test('po zmianie mapowania działa opisana ścieżka naprawy: rollback, prepare, activate', () => {
