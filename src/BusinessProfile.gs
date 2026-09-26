@@ -160,12 +160,16 @@ function gbpDateKey_(date) {
 /**
  * Spłaszcza odpowiedź metryk dziennych do wierszy { date, metric, value }.
  *
- * Brak wartości NIE jest zamieniany na zero: API pomija dni bez danych, a to
- * nie to samo co dzień z zerem. Zapisujemy tylko to, co odpowiedź naprawdę
- * zawiera, żeby wykres nie mylił braku pomiaru z pomiarem równym zeru.
+ * Punkt z datą, ale bez `value`, to zero: dokumentacja DatedValue mówi, że
+ * wartość „nie występuje, gdy wynosi zero”. Tak samo wyglądają jednak dni,
+ * których Google jeszcze nie przetworzył. W pierwszym imporcie ostatnie dwa
+ * dni zakresu nie miały wartości w żadnej metryce, także w tej, która
+ * wcześniej miała ją codziennie. Zero wpisujemy więc tylko do horyzontu:
+ * ostatniego dnia, dla którego odpowiedź zawiera jakąkolwiek wartość.
+ * Późniejsze dni pomijamy, a kolejny import je uzupełni.
  */
 function parseGbpDailySeries_(response) {
-  const rows = [];
+  const points = [];
   const multi = (response && response.multiDailyMetricTimeSeries) || [];
   multi.forEach(function (group) {
     ((group && group.dailyMetricTimeSeries) || []).forEach(function (series) {
@@ -174,12 +178,17 @@ function parseGbpDailySeries_(response) {
       dated.forEach(function (entry) {
         const key = gbpDateKey_(entry && entry.date);
         if (!key || !metric) return;
-        if (entry.value === undefined || entry.value === null || entry.value === '') return;
-        rows.push({ date: key, metric: metric, value: Number(entry.value) });
+        const present = entry.value !== undefined && entry.value !== null && entry.value !== '';
+        points.push({ date: key, metric: metric, value: present ? Number(entry.value) : null });
       });
     });
   });
-  return rows;
+  const horizon = points.reduce(function (max, p) {
+    return p.value !== null && p.date > max ? p.date : max;
+  }, '');
+  return points
+    .filter(function (p) { return p.value !== null || p.date <= horizon; })
+    .map(function (p) { return { date: p.date, metric: p.metric, value: p.value === null ? 0 : p.value }; });
 }
 
 /**
@@ -243,11 +252,16 @@ function runGbpPerformanceImport_(startDate, endDate) {
   });
 
   const out = upsertGbpRows_(GBP_PERFORMANCE_SHEET, GBP_PERFORMANCE_HEADER, [0, 1, 2], rows);
+  const from = gbpDateKey_({ year: start.getFullYear(), month: start.getMonth() + 1, day: start.getDate() });
+  const to = gbpDateKey_({ year: end.getFullYear(), month: end.getMonth() + 1, day: end.getDate() });
+  // Ostatnie dni zakresu bywają jeszcze nieprzetworzone; mówimy, do kiedy są dane,
+  // żeby brak wierszy za te dni nie wyglądał na błąd importu.
+  const last = rows.reduce(function (max, r) { return r[0] > max ? r[0] : max; }, '');
+  const horizon = !last ? '; Google nie podał jeszcze danych z tego zakresu' : (last < to ? '; dane Google do ' + last : '');
   return {
     rows: rows.length,
     kept: out.kept,
-    detail: rows.length + ' pomiarów (' + gbpDateKey_({ year: start.getFullYear(), month: start.getMonth() + 1, day: start.getDate() }) +
-      ' – ' + gbpDateKey_({ year: end.getFullYear(), month: end.getMonth() + 1, day: end.getDate() }) + ')'
+    detail: rows.length + ' pomiarów (' + from + ' – ' + to + horizon + ')'
   };
 }
 

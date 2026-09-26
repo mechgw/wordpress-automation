@@ -22,6 +22,7 @@ const KEYS_HEADER = ['Miesiąc', 'Lokalizacja', 'Fraza', 'Wyświetlenia', 'Rodza
 const LOCATION = 'locations/111';
 
 const dated = (day, value) => ({ date: { year: 2026, month: 9, day: day }, value: value });
+const bare = day => ({ date: { year: 2026, month: 9, day: day } });
 const dailyResponse = series => ({
   multiDailyMetricTimeSeries: [{
     dailyMetricTimeSeries: series.map(s => ({ dailyMetric: s.metric, timeSeries: { datedValues: s.values } }))
@@ -121,14 +122,43 @@ describe('#123: parsowanie odpowiedzi', () => {
     ]);
   });
 
-  test('brak wartości nie staje się zerem', () => {
-    // API pomija dni bez danych, a to nie to samo co dzień z zerem. Zamiana
-    // jednego na drugie zamieniłaby brak pomiaru w pomiar.
+  test('punkt bez wartości przed horyzontem danych to zero', () => {
+    // Dokumentacja DatedValue: `value` nie występuje, gdy wartość wynosi zero.
     const out = plain(gas().parseGbpDailySeries_(dailyResponse([
-      { metric: 'WEBSITE_CLICKS', values: [dated(1, '5'), { date: { year: 2026, month: 9, day: 2 } }] }
+      { metric: 'WEBSITE_CLICKS', values: [dated(1, '5'), bare(2), dated(3, '7')] }
     ])));
-    assert.equal(out.length, 1);
-    assert.equal(out[0].date, '2026-09-01');
+    assert.deepEqual(out.map(r => [r.date, r.value]), [['2026-09-01', 5], ['2026-09-02', 0], ['2026-09-03', 7]]);
+  });
+
+  test('horyzont jest wspólny dla wszystkich metryk', () => {
+    // Metryka bez żadnej wartości też dostaje zera do dnia, w którym inna metryka
+    // ma już dane; dzień za horyzontem nie powstaje w żadnej metryce.
+    const out = plain(gas().parseGbpDailySeries_(dailyResponse([
+      { metric: 'CALL_CLICKS', values: [bare(1), bare(2), bare(3)] },
+      { metric: 'WEBSITE_CLICKS', values: [dated(1, '1'), dated(2, '2'), bare(3)] }
+    ])));
+    assert.deepEqual(out.map(r => [r.metric, r.date, r.value]), [
+      ['CALL_CLICKS', '2026-09-01', 0],
+      ['CALL_CLICKS', '2026-09-02', 0],
+      ['WEBSITE_CLICKS', '2026-09-01', 1],
+      ['WEBSITE_CLICKS', '2026-09-02', 2]
+    ]);
+  });
+
+  test('dni za horyzontem danych są pomijane, a nie zerowane', () => {
+    // Tak wyglądają dni, których Google jeszcze nie przetworzył: zero byłoby
+    // fałszywym pomiarem, a kolejny import i tak je uzupełni.
+    const out = plain(gas().parseGbpDailySeries_(dailyResponse([
+      { metric: 'WEBSITE_CLICKS', values: [dated(1, '5'), bare(2)] }
+    ])));
+    assert.deepEqual(out.map(r => [r.date, r.value]), [['2026-09-01', 5]]);
+  });
+
+  test('odpowiedź bez żadnej wartości nie tworzy zer', () => {
+    const out = plain(gas().parseGbpDailySeries_(dailyResponse([
+      { metric: 'WEBSITE_CLICKS', values: [bare(1), bare(2)] }
+    ])));
+    assert.deepEqual(out, []);
   });
 
   test('zero podane wprost jest zapisywane, bo to prawdziwy pomiar', () => {
@@ -171,10 +201,36 @@ describe('#123: idempotentny zapis', () => {
       fetch: () => ({ code: 200, text: JSON.stringify(responses[Math.min(call++, 1)]) })
     });
     gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1));
-    gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1));
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1)));
     const rows = gas.$sheet(PERF).slice(1);
     assert.equal(rows.length, 1, 'jeden wiersz, nie dwa');
     assert.equal(rows[0][3], 9, 'z nowszą wartością');
+    assert.equal(out.detail, '1 pomiarów (2026-09-01 – 2026-09-01)', 'dane do końca zakresu: bez dopisku o horyzoncie');
+  });
+
+  test('wynik importu mówi, do kiedy są dane, gdy ostatnie dni zakresu są jeszcze puste', () => {
+    const gas = project({
+      sheets: { [PERF]: [PERF_HEADER] },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([
+        { metric: 'BUSINESS_IMPRESSIONS_MOBILE_MAPS', values: [dated(1, '4'), dated(2, '6'), bare(3)] },
+        { metric: 'CALL_CLICKS', values: [bare(1), bare(2), bare(3)] }
+      ])) })
+    });
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 3)));
+    assert.equal(out.rows, 4, 'dwa dni po dwie metryki, trzeci dzień za horyzontem');
+    assert.equal(out.detail, '4 pomiarów (2026-09-01 – 2026-09-03; dane Google do 2026-09-02)');
+    const calls = gas.$sheet(PERF).slice(1).filter(r => r[2] === 'CALL_CLICKS').map(r => r[3]);
+    assert.deepEqual(calls, [0, 0], 'zera zapisane jako liczby, nie puste komórki');
+  });
+
+  test('bez żadnych danych w zakresie wynik importu mówi to wprost', () => {
+    const gas = project({
+      sheets: { [PERF]: [PERF_HEADER] },
+      fetch: () => ({ code: 200, text: JSON.stringify(dailyResponse([{ metric: 'CALL_CLICKS', values: [bare(1)] }])) })
+    });
+    const out = plain(gas.runGbpPerformanceImport_(new Date(2026, 8, 1), new Date(2026, 8, 1)));
+    assert.equal(out.rows, 0);
+    assert.equal(out.detail, '0 pomiarów (2026-09-01 – 2026-09-01; Google nie podał jeszcze danych z tego zakresu)');
   });
 
   test('backfill starszego okresu nie kasuje nowszych danych', () => {
