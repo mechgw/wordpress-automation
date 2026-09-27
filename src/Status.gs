@@ -882,6 +882,8 @@ function pendingRuns_() {
  * są aktualizowane jak przy nieudanym przebiegu. Wyjątek: późniejszy udany
  * przebieg TEGO SAMEGO zadania w tej samej obsłudze. Wtedy odmowa zostaje tylko
  * w logu, bo para maili „BŁĄD” i „ponownie działa” w odstępie sekund nic nie mówi.
+ * Wiersz odmowy powstaje także dla zadań bez `log: true`: przy tym wyjątku jest
+ * jedynym śladem odrzuconego triggera (uwaga Codexa w #210).
  *
  * Wpis znika dopiero po zapisie skutków. Ubicie pomiędzy zostawia go następnemu
  * posiadaczowi: najwyżej zduplikowany wiersz, ale nie utracony ślad. Błąd jednego
@@ -898,7 +900,7 @@ function takeOverPendingRuns_(own) {
       // co odmowa i tak dowodzi, że zadanie działa.
       const superseded = Boolean(own && own.key === entry.job && own.run && own.run.ok &&
         Date.parse(own.run.finishedAt) >= Date.parse(entry.at));
-      if (isImport || scheduledJob_(entry.job).log) appendImportLog_(entry.job, run);
+      appendImportLog_(entry.job, run);
       if (!superseded) {
         const record = readJobRecord_(entry.job);
         record.lastRun = run;

@@ -124,7 +124,7 @@ describe('#204: przejęcie wpisów oczekujących', () => {
     assert.deepEqual(pendingKeys(gas), []);
   });
 
-  test('3b: wpis zadania bez log:true — rekord i incydent, ale bez wiersza w IMPORT LOG', () => {
+  test('3b: wpis zadania bez log:true — wiersz odmowy, rekord i incydent', () => {
     const opts = options({ lockHeld: true });
     const gas = loadProject(opts);
     assert.throws(() => gas.recordJobRun_('SEO_LIVE', true, udany), /Inne uruchomienie jeszcze trwa \(live check SEO\)/);
@@ -132,9 +132,26 @@ describe('#204: przejęcie wpisów oczekujących', () => {
 
     gas.recordJobRun_('PERFORMANCE', true, udany);
 
-    assert.deepEqual(logKinds(gas), ['PERFORMANCE OK']);
+    assert.deepEqual(logKinds(gas), ['SEO_LIVE BŁĄD', 'PERFORMANCE OK']);
     assert.equal(record(gas, 'LAST_RUN_SEO_LIVE').lastRun.ok, false);
     assert.equal(record(gas, 'LAST_RUN_SEO_LIVE').incident.open, true);
+    assert.deepEqual(pendingKeys(gas), []);
+  });
+
+  test('4c: zadanie bez log:true i jego udany przebieg — wiersz odmowy zostaje jedynym śladem', () => {
+    // Uwaga Codexa w #210: bez wiersza odrzucony trigger znikał bez śladu, bo
+    // wyjątek pomija rekord i incydent, a zadanie nie pisze własnych wierszy.
+    const opts = options({ lockHeld: true });
+    const gas = loadProject(opts);
+    assert.throws(() => gas.recordJobRun_('SEO_LIVE', true, udany), /Inne uruchomienie jeszcze trwa \(live check SEO\)/);
+    opts.lockHeld = false;
+
+    gas.recordJobRun_('SEO_LIVE', true, udany);
+
+    assert.deepEqual(logKinds(gas), ['SEO_LIVE BŁĄD']);
+    assert.equal(record(gas, 'LAST_RUN_SEO_LIVE').lastRun.ok, true);
+    assert.equal(record(gas, 'LAST_RUN_SEO_LIVE').incident, undefined);
+    assert.deepEqual(gas.$mails, []);
     assert.deepEqual(pendingKeys(gas), []);
   });
 
