@@ -155,6 +155,29 @@ describe('#204: przejęcie wpisów oczekujących', () => {
     assert.deepEqual(pendingKeys(gas), []);
   });
 
+  test('odmowa późniejsza niż przebieg przejmującego czeka na następnego posiadacza blokady', () => {
+    // Uwaga Codexa w #210: wpis mógł powstać już po zakończeniu pracy przejmującego.
+    // Przejęty od razu, dawałby stan nowszy niż przebieg, który zapisuje się po nim.
+    const gas = loadProject(options());
+    const key = 'PENDING_RUN_GSC_pozniejszy';
+    const later = new Date(gas.$Date.now() + 60 * 1000).toISOString();
+    gas.$properties[key] = JSON.stringify({ job: 'GSC', id: 'pozniejszy', at: later, trigger: true, error: 'Inne uruchomienie jeszcze trwa (import GSC).' });
+
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+
+    assert.deepEqual(pendingKeys(gas), [key], 'wpis czeka');
+    assert.deepEqual(logKinds(gas), ['PERFORMANCE OK']);
+    assert.equal(gas.$properties.LAST_IMPORT_GSC, undefined);
+    assert.deepEqual(gas.$mails, []);
+
+    // Następny posiadacz blokady, już po chwili odmowy, zapisuje ją normalnie.
+    gas.$properties[key] = JSON.stringify({ job: 'GSC', id: 'pozniejszy', at: new Date(gas.$Date.now() - 1000).toISOString(), trigger: true, error: 'Inne uruchomienie jeszcze trwa (import GSC).' });
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+
+    assert.deepEqual(pendingKeys(gas), []);
+    assert.deepEqual(logKinds(gas), ['PERFORMANCE OK', 'GSC BŁĄD', 'PERFORMANCE OK']);
+  });
+
   test('wpis nieczytelny, nieznanego zadania albo bez prawidłowej daty zostaje nietknięty', () => {
     const gas = loadProject(options());
     gas.$properties.PENDING_RUN_GSC_zepsuty = 'to nie jest JSON';

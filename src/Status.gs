@@ -885,6 +885,11 @@ function pendingRuns_() {
  * Wiersz odmowy powstaje także dla zadań bez `log: true`: przy tym wyjątku jest
  * jedynym śladem odrzuconego triggera (uwaga Codexa w #210).
  *
+ * Odmowa późniejsza niż przebieg przejmującego czeka na następnego posiadacza
+ * blokady. Taki wpis powstaje, gdy inne wykonanie kończy 5-sekundowe czekanie
+ * na blokadę już po pracy przejmującego. Przejęty od razu, zapisałby stan
+ * nowszy niż przebieg, który zapisuje się po nim (uwaga Codexa w #210).
+ *
  * Wpis znika dopiero po zapisie skutków. Ubicie pomiędzy zostawia go następnemu
  * posiadaczowi: najwyżej zduplikowany wiersz, ale nie utracony ślad. Błąd jednego
  * wpisu nie przerywa obsługi przebiegu, a wpis czeka na kolejną.
@@ -893,6 +898,7 @@ function takeOverPendingRuns_(own) {
   const props = PropertiesService.getScriptProperties();
   pendingRuns_().forEach(function (found) {
     const entry = found.entry;
+    if (own && own.run && Date.parse(entry.at) > Date.parse(own.run.finishedAt)) return;
     try {
       const run = { finishedAt: entry.at, ok: false, trigger: true, error: String(entry.error || '').slice(0, 300) };
       const isImport = Boolean(importSources_()[entry.job]);
