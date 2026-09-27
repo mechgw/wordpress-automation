@@ -324,6 +324,21 @@ describe('#204: kolejność przy zwolnieniu blokady', () => {
     assert.deepEqual(logKinds(gas), ['PERFORMANCE OK']);
   });
 
+  test('nieznany klucz zadania albo źródła importu odmawia przed pracą', () => {
+    // Uwaga Codexa w #210: rekord czytany po pracy nie może być jedyną walidacją
+    // klucza, bo literówka w nowym wywołaniu wykonałaby zapisy, zanim padnie błąd.
+    const gas = loadProject(options());
+    let ran = 0;
+    const work = () => { ran++; return udany(); };
+
+    assert.throws(() => gas.recordImportRun_('ADS', false, work), /Nieznane zadanie cykliczne: ADS/);
+    assert.throws(() => gas.recordImportRun_('PERFORMANCE', true, work), /Nieznane źródło importu: PERFORMANCE/);
+    assert.throws(() => gas.recordJobRun_('NIEZNANE', true, work), /Nieznane zadanie cykliczne: NIEZNANE/);
+
+    assert.equal(ran, 0, 'praca nie ruszyła');
+    assert.deepEqual(plain(gas.$lock), [], 'blokada nie była nawet brana');
+  });
+
   test('odmowa z triggera Business Profile zachowuje dotychczasową nazwę w komunikacie', () => {
     const gas = loadProject(options({ lockHeld: true }));
     assert.throws(() => gas.recordJobRun_('GBP', true, udany), /Inne uruchomienie jeszcze trwa \(import Business Profile\)/);

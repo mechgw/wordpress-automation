@@ -135,6 +135,10 @@ function writeJobRecord_(key, record) {
  * przed pracą i zapisując na końcu, nadpisał incydent otwarty w międzyczasie.
  */
 function recordImportRun_(source, trigger, fn) {
+  // Przed pracą: najpierw rejestr zadań, potem źródło importu. Zadanie spoza
+  // `importSources_()` padłoby dopiero przy zapisie komórki statusu, po pracy.
+  scheduledJob_(source);
+  importSource_(source);
   return withRunLock_(source, trigger, () => recordImportRunLocked_(source, trigger, fn));
 }
 

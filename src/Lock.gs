@@ -59,6 +59,9 @@ function withScriptLock_(label, fn) {
  * przejmie następny posiadacz blokady (`takeOverPendingRuns_`).
  */
 function withRunLock_(key, trigger, fn) {
+  // Walidacja klucza przed blokadą i przed pracą: rekord jest czytany dopiero po
+  // pracy, więc nie może być jedyną kontrolą (uwaga Codexa w #210).
+  const job = scheduledJob_(key);
   const lock = LockService.getScriptLock();
 
   if (lock.hasLock()) {
@@ -66,7 +69,6 @@ function withRunLock_(key, trigger, fn) {
   }
 
   if (!lock.tryLock(SCRIPT_LOCK_TIMEOUT_MS)) {
-    const job = scheduledJob_(key);
     const message = scriptLockBusyMessage_(job.lockLabel || job.label);
     if (trigger) recordPendingRun_(key, message);
     throw new Error(message);
