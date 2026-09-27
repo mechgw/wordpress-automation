@@ -13,6 +13,12 @@
 
 const SCRIPT_LOCK_TIMEOUT_MS = 5000;
 
+/** Treść odmowy blokady; ta sama dla pracy pod blokadą i dla rejestratorów przebiegów. */
+function scriptLockBusyMessage_(label) {
+  return 'Inne uruchomienie jeszcze trwa (' + label + '). Importy i komendy WordPress ' +
+    'współdzielą jedną blokadę; spróbuj ponownie za chwilę.';
+}
+
 /**
  * Wykonuje `fn` pod blokadą projektu albo rzuca błąd, gdy inne uruchomienie
  * jeszcze trwa. Blokada jest zwalniana także po błędzie.
@@ -29,15 +35,50 @@ function withScriptLock_(label, fn) {
   }
 
   if (!lock.tryLock(SCRIPT_LOCK_TIMEOUT_MS)) {
-    throw new Error(
-      'Inne uruchomienie jeszcze trwa (' + label + '). Importy i komendy WordPress ' +
-      'współdzielą jedną blokadę; spróbuj ponownie za chwilę.'
-    );
+    throw new Error(scriptLockBusyMessage_(label));
   }
 
   try {
     return fn();
   } finally {
     lock.releaseLock();
+  }
+}
+
+/**
+ * Blokada rejestratora przebiegu (#204): jeden pisarz wspólnego stanu.
+ *
+ * Rejestrator przejmuje blokadę PRZED odczytem rekordu i trzyma ją do końca
+ * obsługi wyniku, a praca (`withScriptLock_` w środku) przechodzi gałęzią
+ * wywołania zagnieżdżonego. Przed zwolnieniem `flush()`, żeby następny
+ * posiadacz blokady widział wszystkie zapisy.
+ *
+ * Odmowa blokady nie jest przebiegiem: wykonanie bez blokady nie czyta ani nie
+ * zapisuje wspólnego stanu. Z menu zostaje sam wyjątek (okno z tą samą treścią
+ * co dotąd). Z triggera dodatkowo wpis oczekujący pod unikalnym kluczem, który
+ * przejmie następny posiadacz blokady (`takeOverPendingRuns_`).
+ */
+function withRunLock_(key, trigger, fn) {
+  const lock = LockService.getScriptLock();
+
+  if (lock.hasLock()) {
+    return fn();
+  }
+
+  if (!lock.tryLock(SCRIPT_LOCK_TIMEOUT_MS)) {
+    const job = scheduledJob_(key);
+    const message = scriptLockBusyMessage_(job.lockLabel || job.label);
+    if (trigger) recordPendingRun_(key, message);
+    throw new Error(message);
+  }
+
+  try {
+    return fn();
+  } finally {
+    try {
+      SpreadsheetApp.flush();
+    } finally {
+      lock.releaseLock();
+    }
   }
 }

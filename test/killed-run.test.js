@@ -14,7 +14,7 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadProject } = require('./helpers/gas');
+const { loadProject, plain } = require('./helpers/gas');
 
 const LOG = 'IMPORT LOG';
 const MIN = 60 * 1000;
@@ -67,7 +67,8 @@ describe('#189: znacznik wykonania', () => {
     assert.ok('RUNNING_PERFORMANCE_mlody' in gas.$properties, 'nietknięty');
     assert.equal(rekord(gas, 'LAST_RUN_PERFORMANCE').lastRun.warning, '');
     assert.deepEqual(tematy(gas), []);
-    assert.deepEqual(gas.$lock, [], 'nie ma czego odzyskać — bez blokady, którą współdzielą wszystkie zadania');
+    // Od #204 blokadę trzyma cały rejestrator; odzysk nie dokłada własnej (3000 ms).
+    assert.deepEqual(plain(gas.$lock), [['tryLock', 5000], ['releaseLock']], 'jedna blokada rejestratora, bez osobnej blokady odzysku');
   });
 });
 
@@ -118,14 +119,21 @@ describe('#189: odzysk porzuconego wykonania', () => {
   test('9: dwa starty w tej samej chwili — odzysk pod blokadą raportuje dokładnie raz', () => {
     const gas = projekt();
     gas.$properties.RUNNING_PERFORMANCE_stary = znacznik('PERFORMANCE', 'stary', minutTemu(gas, 8));
-    // Drugie wykonanie startuje, zanim pierwsze skończyło pracę.
+    // Drugie wykonanie startuje, zanim pierwsze skończyło pracę. Od #204 nie
+    // dostaje blokady, więc nie odbiera znacznika i zostawia wpis oczekujący.
+    let odrzucony = null;
     gas.recordJobRun_('PERFORMANCE', true, () => {
-      gas.recordJobRun_('PERFORMANCE', true, udany);
+      try {
+        gas.$asOtherExecution(() => gas.recordJobRun_('PERFORMANCE', true, udany));
+      } catch (e) {
+        odrzucony = e;
+      }
       return udany();
     });
 
+    assert.match(String(odrzucony && odrzucony.message), /Inne uruchomienie jeszcze trwa \(pomiar wydajności\)/);
     assert.equal(raportyPorzuconych(gas).length, 1, 'jeden wiersz za porzucony');
-    assert.deepEqual(gas.$lock.slice(0, 2), [['tryLock', 3000], ['releaseLock']], 'odbiór pod krótką blokadą');
+    assert.deepEqual(plain(gas.$lock)[0], ['tryLock', 5000], 'odbiór pod blokadą rejestratora');
   });
 
   test('9b: odbiór usuwa znacznik przed zwolnieniem blokady — drugi odczyt niczego nie znajduje', () => {
@@ -137,14 +145,18 @@ describe('#189: odzysk porzuconego wykonania', () => {
     assert.equal(gas.reclaimAbandonedRuns_('PERFORMANCE', teraz).length, 0);
   });
 
-  test('10: blokada zajęta → odzysk pominięty bez błędu, porzucony czeka na kolejny przebieg', () => {
+  test('10: blokada zajęta → przebieg odmówiony bez zapisu stanu, porzucony czeka na kolejny przebieg', () => {
     const gas = projekt({ lockHeld: true });
     gas.$properties.RUNNING_PERFORMANCE_stary = znacznik('PERFORMANCE', 'stary', minutTemu(gas, 8));
-    gas.recordJobRun_('PERFORMANCE', true, udany);
 
-    assert.deepEqual(znaczniki(gas), ['RUNNING_PERFORMANCE_stary'], 'porzucony został, własny usunięty');
-    assert.equal(rekord(gas, 'LAST_RUN_PERFORMANCE').lastRun.ok, true, 'diagnostyka nie blokuje zadania');
-    assert.equal(rekord(gas, 'LAST_RUN_PERFORMANCE').lastRun.warning, '');
+    // Od #204 odmowa blokady nie jest przebiegiem: bez rekordu, bez własnego
+    // znacznika, a porzucony znacznik zostaje dla przebiegu z blokadą.
+    assert.throws(() => gas.recordJobRun_('PERFORMANCE', true, udany), /Inne uruchomienie jeszcze trwa/);
+    assert.deepEqual(znaczniki(gas), ['RUNNING_PERFORMANCE_stary']);
+    assert.equal(gas.$properties.LAST_RUN_PERFORMANCE, undefined);
+    // Sam odzysk wołany bez blokady rejestratora nadal ustępuje zajętej blokadzie.
+    assert.deepEqual(plain(gas.reclaimAbandonedRuns_('PERFORMANCE', gas.$Date.now())), []);
+    assert.deepEqual(znaczniki(gas), ['RUNNING_PERFORMANCE_stary']);
   });
 
   test('11: znacznik innego zadania o wspólnym prefiksie klucza i nieczytelna wartość — nietknięte', () => {

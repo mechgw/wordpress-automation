@@ -75,18 +75,22 @@ describe('imports under the lock', () => {
     'GSC RAW': [['date']]
   };
 
-  test('a refused lock is recorded as a failed run in B8 and no request is sent', () => {
+  // #204: odmowa blokady z menu nie jest przebiegiem — samo okno z błędem, bez
+  // rekordu i komórki statusu. Wcześniej zapisywała BŁĄD i nadpisywała stan
+  // przebiegu, który blokadę trzymał.
+  test('a refused lock from the menu throws and sends no request, leaving the run state untouched', () => {
     const gas = loadProject({ sheets, lockHeld: true, fetch: () => { throw new Error('must not fetch'); } });
     assert.throws(() => gas.importDzienny(), /Inne uruchomienie jeszcze trwa \(import GSC\)/);
-    assert.match(gas.$cell('Konfiguracja GSC', 'B8'), /BŁĄD .*Inne uruchomienie jeszcze trwa/);
-    assert.equal(JSON.parse(gas.$properties.LAST_IMPORT_GSC).lastRun.ok, false);
+    assert.equal(gas.$cell('Konfiguracja GSC', 'B8'), '');
+    assert.equal(gas.$properties.LAST_IMPORT_GSC, undefined);
     assert.equal(gas.$fetchCalls.length, 0);
   });
 
   test('GA4 import refuses the same way', () => {
     const gas = loadProject({ sheets, lockHeld: true });
     assert.throws(() => gas.importGA4Dzienny(), /Inne uruchomienie jeszcze trwa \(import GA4\)/);
-    assert.match(gas.$cell('Konfiguracja GA4', 'B9'), /BŁĄD .*import GA4/);
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), '');
+    assert.equal(gas.$properties.LAST_IMPORT_GA4, undefined);
   });
 
   test('a successful import acquires and releases the lock', () => {

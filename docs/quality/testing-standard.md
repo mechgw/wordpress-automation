@@ -87,6 +87,12 @@ samo co kod.
   `skip` / `override` dla plików źródłowych.
 - `gas.$fetchCalls` zapisuje każde `UrlFetchApp.fetch(url, params)`; `gas.$mails`, `gas.$triggers`,
   `gas.$lock`, `gas.$alerts`, `gas.$menus` zapisują pozostałe efekty.
+- Współbieżność (#204): `gas.$asOtherExecution(fn)` uruchamia `fn` jako OSOBNE wykonanie, które nie
+  ma locka trzymanego przez główne i nie może go przejąć. Zwykłe wywołanie zagnieżdżone to wciąż to
+  samo wykonanie. `gas.$events` zapisuje kolejność `setProperty`, `deleteProperty`, `appendRow`,
+  `flush` i operacji locka. `gas.$faults.deleteProperty = key => true` rzuca przy usuwaniu tej
+  właściwości, co udaje ubicie wykonania w tym miejscu. Stub czyta `lockHeld` przy każdym
+  `tryLock`, więc test może zwolnić lock w trakcie, zmieniając pole obiektu opcji.
 - `gas.$Date` to `Date` z VM; sprawdzenia `instanceof Date` w źródłach padają dla dat hosta.
 - `plain(value)` zdejmuje prototyp VM, żeby `assert.deepEqual` działał na zwróconych obiektach.
 - `Utilities.formatDate` w stubie formatuje w strefie maszyny (Warszawa lokalnie, UTC w CI): nigdy
