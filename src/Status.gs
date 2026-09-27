@@ -913,13 +913,21 @@ function takeOverPendingRuns_(own) {
       appendImportLog_(entry.job, run);
       if (!superseded) {
         const record = readJobRecord_(entry.job);
+        const last = record.lastRun;
+        // Rekord, którego ostatnim przebiegiem jest TA odmowa, to niedokończone
+        // przejęcie (awaria po zapisie rekordu): kroki niżej są idempotentne
+        // i trzeba je dokończyć, a nie pominąć (uwaga Codexa w #210).
+        const unfinished = Boolean(last) && last.ok === false && last.finishedAt === run.finishedAt &&
+          String(last.error || '') === run.error;
         // Rekord z przebiegiem nie starszym niż odmowa już ją zastąpił. Tak jest
         // np. przy wpisie ponowionym po nieudanym usunięciu, gdy między przejęciami
         // zadanie się udało. Stara odmowa nie cofa stanu (uwaga Codexa w #210).
-        const newer = Boolean(record.lastRun) && Date.parse(record.lastRun.finishedAt) >= Date.parse(entry.at);
+        const newer = Boolean(last) && !unfinished && Date.parse(last.finishedAt) >= Date.parse(entry.at);
         if (!newer) {
-          record.lastRun = run;
-          writeJobRecord_(entry.job, record);
+          if (!unfinished) {
+            record.lastRun = run;
+            writeJobRecord_(entry.job, record);
+          }
           if (isImport) writeImportStatusCell_(entry.job);
           updateImportIncident_(entry.job, record);
         }

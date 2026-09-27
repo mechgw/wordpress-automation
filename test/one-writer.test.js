@@ -282,6 +282,29 @@ describe('#204: ponowione przejęcie nie cofa stanu', () => {
   });
 });
 
+describe('#204: niedokończone przejęcie jest dokończone przy ponowieniu', () => {
+  test('awaria po zapisie rekordu, przed incydentem — ponowienie otwiera incydent z mailem', () => {
+    // Uwaga Codexa w #210: częściowy zapis rekordu (lastRun = ta sama odmowa)
+    // wyglądał przy ponowieniu jak nowszy stan, więc incydent i alert przepadały.
+    const gas = withPendingGsc();
+    let writes = 0;
+    // Pierwszy zapis rekordu (lastRun) przechodzi, drugi (otwarcie incydentu) pada raz.
+    gas.$faults.setProperty = name => name === 'LAST_IMPORT_GSC' && ++writes === 2;
+
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+    assert.equal(pendingKeys(gas).length, 1, 'wpis czeka na dokończenie');
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').lastRun.ok, false);
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').incident, undefined, 'incydent jeszcze nie zapisany');
+
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+
+    assert.deepEqual(pendingKeys(gas), []);
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').incident.open, true, 'incydent dokończony');
+    assert.match(gas.$cell('Konfiguracja GSC', 'B8'), /BŁĄD/);
+    assert.deepEqual(subjects(gas), ['[wordpress-automation] BŁĄD importu: Search Console (GSC)']);
+  });
+});
+
 describe('#204: strażnik aktualności pod blokadą', () => {
   test('8: zajęta blokada — żadnych zapisów rekordów, tylko wpis oczekujący ALERTS', () => {
     const gas = loadProject(options({ lockHeld: true }));

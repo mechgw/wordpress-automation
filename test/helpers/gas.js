@@ -527,8 +527,9 @@ function createStubs(opts) {
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
   const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus, opts.timeZone || SCRIPT_TIME_ZONE);
   const events = (spreadsheet.$realm && spreadsheet.$realm.events) || [];
-  // Awarie wstrzykiwane przez test: `faults.deleteProperty = key => true` rzuca
-  // przy usuwaniu tej właściwości, co udaje ubicie wykonania w tym miejscu (#204).
+  // Awarie wstrzykiwane przez test: `faults.deleteProperty = key => true` (albo
+  // `faults.setProperty`) rzuca przy tej operacji, co udaje ubicie wykonania
+  // albo przejściową awarię usługi w tym miejscu (#204).
   const faults = {};
 
   return {
@@ -536,7 +537,11 @@ function createStubs(opts) {
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: key => (Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null),
-        setProperty: (key, value) => { events.push(['setProperty', key]); properties[key] = String(value); },
+        setProperty: (key, value) => {
+          if (faults.setProperty && faults.setProperty(key)) throw new Error('ubite w trakcie setProperty(' + key + ')');
+          events.push(['setProperty', key]);
+          properties[key] = String(value);
+        },
         // Usunięcie właściwości to nie to samo co zapisanie w niej pustego
         // tekstu: pusta wartość blokuje edytor Script Properties (#124).
         deleteProperty: key => {
