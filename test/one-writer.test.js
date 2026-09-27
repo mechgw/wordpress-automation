@@ -258,6 +258,30 @@ describe('#204: scenariusz z 26.09', () => {
   });
 });
 
+describe('#204: ponowione przejęcie nie cofa stanu', () => {
+  test('odmowa ponowiona po udanym przebiegu tego zadania nie nadpisuje nowszego rekordu', () => {
+    // Uwaga Codexa w #210: wpis nieusunięty przy przejęciu przez udany przebieg
+    // tego samego zadania wracał przy innym zadaniu i nadpisywał nowszy sukces.
+    const gas = withPendingGsc();
+    const [key] = pendingKeys(gas);
+    let kills = 1;
+    gas.$faults.deleteProperty = name => name === key && kills-- > 0;
+
+    gas.importDzienny(TRIGGER);
+    assert.deepEqual(pendingKeys(gas), [key], 'wpis nie zginął');
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').lastRun.ok, true);
+
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+
+    assert.deepEqual(pendingKeys(gas), []);
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').lastRun.ok, true, 'nowszy sukces zostaje');
+    assert.equal(record(gas, 'LAST_IMPORT_GSC').incident, undefined, 'bez fałszywego incydentu');
+    assert.match(gas.$cell('Konfiguracja GSC', 'B8'), /^AKTYWNE/);
+    assert.deepEqual(gas.$mails, []);
+    assert.deepEqual(logKinds(gas), ['GSC BŁĄD', 'GSC OK', 'GSC BŁĄD', 'PERFORMANCE OK'], 'duplikat wiersza odmowy, bez utraty');
+  });
+});
+
 describe('#204: strażnik aktualności pod blokadą', () => {
   test('8: zajęta blokada — żadnych zapisów rekordów, tylko wpis oczekujący ALERTS', () => {
     const gas = loadProject(options({ lockHeld: true }));

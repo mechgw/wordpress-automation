@@ -913,10 +913,16 @@ function takeOverPendingRuns_(own) {
       appendImportLog_(entry.job, run);
       if (!superseded) {
         const record = readJobRecord_(entry.job);
-        record.lastRun = run;
-        writeJobRecord_(entry.job, record);
-        if (isImport) writeImportStatusCell_(entry.job);
-        updateImportIncident_(entry.job, record);
+        // Rekord z przebiegiem nie starszym niż odmowa już ją zastąpił. Tak jest
+        // np. przy wpisie ponowionym po nieudanym usunięciu, gdy między przejęciami
+        // zadanie się udało. Stara odmowa nie cofa stanu (uwaga Codexa w #210).
+        const newer = Boolean(record.lastRun) && Date.parse(record.lastRun.finishedAt) >= Date.parse(entry.at);
+        if (!newer) {
+          record.lastRun = run;
+          writeJobRecord_(entry.job, record);
+          if (isImport) writeImportStatusCell_(entry.job);
+          updateImportIncident_(entry.job, record);
+        }
       }
       props.deleteProperty(found.name);
     } catch (e) {
