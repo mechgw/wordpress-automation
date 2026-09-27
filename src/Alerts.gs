@@ -197,8 +197,15 @@ function updateImportIncident_(source, record) {
  * znowu aktualne (z opcjonalnym mailem). Handler triggera; z menu używaj
  * sprawdzAktualnoscImportowZMenu. Zwraca { opened, closed, mail } – `mail` to
  * czytelny opis, czy i jaki e-mail wyszedł (albo dlaczego nie).
+ *
+ * Strażnik zapisuje rekordy zadań, więc cały przebieg idzie pod blokadą skryptu
+ * (#204). Odmowa z triggera zostawia wpis oczekujący, jak w rejestratorach.
  */
 function sprawdzAktualnoscImportow() {
+  return withRunLock_(ALERT_GUARD_JOB_KEY, true, runFreshnessGuard_);
+}
+
+function runFreshnessGuard_() {
   const now = new Date();
   const opened = [];
   const closed = [];
@@ -282,18 +289,24 @@ function sprawdzAktualnoscImportow() {
   observeWriteFlags_(now);
 
   // Własny przebieg zapisujemy na końcu, żeby „Status danych” pokazywał, kiedy
-  // strażnik ostatnio działał.
+  // strażnik ostatnio działał. Przedtem skutki odmów z triggerów, które czekały
+  // na posiadacza blokady (#204).
+  const run = { finishedAt: now.toISOString(), ok: true, trigger: true, detail: 'sprawdzone zadania: ' + checked };
+  takeOverPendingRuns_({ key: ALERT_GUARD_JOB_KEY, run: run });
   const guard = readJobRecord_(ALERT_GUARD_JOB_KEY);
-  guard.lastRun = { finishedAt: now.toISOString(), ok: true, trigger: true, detail: 'sprawdzone zadania: ' + checked };
+  guard.lastRun = run;
   guard.lastOk = guard.lastRun;
   writeJobRecord_(ALERT_GUARD_JOB_KEY, guard);
+  // Przejęta odmowa strażnika otwiera jego incydent (#204); udany przebieg go zamyka.
+  updateImportIncident_(ALERT_GUARD_JOB_KEY, guard);
 
   return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
 }
 
 /** Strażnik uruchomiony z menu: to samo co trigger, plus okno z wynikiem. */
 function sprawdzAktualnoscImportowZMenu() {
-  const out = sprawdzAktualnoscImportow();
+  // Z menu odmowa blokady to samo okno z błędem, bez wpisu oczekującego (#204).
+  const out = withRunLock_(ALERT_GUARD_JOB_KEY, false, runFreshnessGuard_);
   const now = new Date();
   const lines = ['Sprawdzono aktualność zadań cyklicznych:'];
   scheduledJobs_().forEach(job => {

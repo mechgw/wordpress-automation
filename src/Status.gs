@@ -81,7 +81,8 @@ function scheduledJobs_() {
     { key: 'PERFORMANCE', handler: PSI_TRIGGER_HANDLER, label: 'pomiar wydajności', schedule: 'co 6 godz. (interwał konfigurowalny)', prop: 'LAST_RUN_PERFORMANCE', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true },
     // Opcjonalne, bo nie każda instalacja ma profil firmy; `log`, bo przy otwartym
     // incydencie kolejne awarie milkną i bez wiersza w IMPORT LOG nie zostałby ślad.
-    { key: 'GBP', handler: GBP_TRIGGER_HANDLER, label: 'Business Profile (GBP)', schedule: 'codziennie ok. 11:00', prop: 'LAST_RUN_GBP', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true }
+    // `lockLabel`: nazwa w komunikacie odmowy blokady, gdy różni się od etykiety (#204).
+    { key: 'GBP', handler: GBP_TRIGGER_HANDLER, label: 'Business Profile (GBP)', lockLabel: 'import Business Profile', schedule: 'codziennie ok. 11:00', prop: 'LAST_RUN_GBP', staleAfterHours: IMPORT_STALE_AFTER_HOURS, optional: true, log: true }
   ];
 }
 
@@ -128,22 +129,36 @@ function writeJobRecord_(key, record) {
  * Uruchamia import i zapisuje wynik. `fn` zwraca { rows, detail?, warning? }.
  * Błąd jest zapisywany (z zachowaniem ostatniego poprawnego runu) i rzucany dalej,
  * żeby trigger i użytkownik nadal widzieli go w Apps Script.
+ *
+ * Całość idzie pod blokadą skryptu (#204): odmowa blokady nie jest przebiegiem,
+ * a rekord jest czytany dopiero po pracy, pod blokadą. 26.09 import czytał go
+ * przed pracą i zapisując na końcu, nadpisał incydent otwarty w międzyczasie.
  */
 function recordImportRun_(source, trigger, fn) {
+  // Przed pracą: najpierw rejestr zadań, potem źródło importu. Zadanie spoza
+  // `importSources_()` padłoby dopiero przy zapisie komórki statusu, po pracy.
+  scheduledJob_(source);
+  importSource_(source);
+  return withRunLock_(source, trigger, () => recordImportRunLocked_(source, trigger, fn));
+}
+
+function recordImportRunLocked_(source, trigger, fn) {
   const startedAt = Date.now();
-  const record = readJobRecord_(source);
   let result;
 
   try {
     result = fn();
   } catch (e) {
-    record.lastRun = {
+    const failed = {
       finishedAt: new Date().toISOString(),
       ok: false,
       trigger: Boolean(trigger),
       error: String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300),
       durationMs: Date.now() - startedAt
     };
+    takeOverPendingRuns_({ key: source, run: failed });
+    const record = readJobRecord_(source);
+    record.lastRun = failed;
     writeJobRecord_(source, record);
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
@@ -168,6 +183,9 @@ function recordImportRun_(source, trigger, fn) {
     durationMs: Date.now() - startedAt
   };
 
+  // Wiersze odmów sprzed tego przebiegu trafiają do logu przed jego wierszem.
+  takeOverPendingRuns_({ key: source, run: run });
+
   // Anomalia liczona z historii TEGO profilu, zanim bieżący run do niej trafi.
   const anomaly = importAnomaly_(source, run, importLogHistory_());
   if (anomaly) {
@@ -175,6 +193,7 @@ function recordImportRun_(source, trigger, fn) {
     run.warning = [run.warning, anomaly].filter(Boolean).join(' | ');
   }
 
+  const record = readJobRecord_(source);
   record.lastRun = run;
   record.lastOk = run;
   writeJobRecord_(source, record);
@@ -737,9 +756,9 @@ function runMarkerKey_(key, runId) {
 /**
  * Znacznik wykonania to OSOBNA Script Property, a nie pole rekordu zadania.
  * Rekord to jeden JSON, który zapisuje nie tylko `recordJobRun_()`, ale też obsługa
- * incydentów ze swojej kopii (Alerts.gs), a znacznik powstaje przed przejęciem
- * blokady — w rekordzie ginąłby przy nakładających się wykonaniach (lost update).
- * Własny klucz dopisuje i usuwa się jedną operacją, niezależnie od cudzych zapisów.
+ * incydentów ze swojej kopii (Alerts.gs). Od #204 znacznik powstaje już pod
+ * blokadą rejestratora, ale własny klucz nadal dopisuje i usuwa się jedną
+ * operacją, niezależnie od zapisów rekordu, więc przetrwa ubicie w dowolnej chwili.
  */
 function startRunMarker_(key, trigger, startedAt) {
   const runId = Utilities.getUuid();
@@ -786,7 +805,9 @@ function abandonedRunMarkers_(key, now) {
  * startujące w tej samej chwili zobaczy stan już po usunięciu. Blokadę bierzemy
  * tylko wtedy, gdy wstępny odczyt bez niej w ogóle coś znalazł, więc zwykły
  * przebieg nie dokłada rywalizacji o blokadę, którą współdzielą wszystkie zadania.
- * Gdy blokady nie da się przejąć, odzysk czeka na kolejny przebieg.
+ * Gdy blokady nie da się przejąć, odzysk czeka na kolejny przebieg. Rejestrator
+ * przebiegu trzyma blokadę od #204, więc wywołany z niego odzysk idzie gałęzią
+ * blokady już trzymanej.
  */
 function reclaimAbandonedRuns_(key, now) {
   if (!abandonedRunMarkers_(key, now).length) return [];
@@ -816,6 +837,108 @@ function abandonedRunNote_(marker) {
     'możliwe przerwanie przez limit czasu wykonania Apps Script; zakres zapisanych danych jest niepewny';
 }
 
+// --- Wpisy oczekujące (#204) -------------------------------------------------
+//
+// Trigger odrzucony przez blokadę nie może zapisać wspólnego stanu, bo blokadę
+// trzyma ktoś inny. Zostawia więc wpis pod unikalnym kluczem: pojedyncze
+// `setProperty` nowego klucza nie nadpisuje cudzego stanu (ten sam wzorzec co
+// znaczniki `RUNNING_`). Skutki wpisu zapisuje następny posiadacz blokady.
+
+/** Prefiks Script Property z odmową czekającą na zapis: `PENDING_RUN_<zadanie>_<uuid>`. */
+const PENDING_RUN_PREFIX = 'PENDING_RUN_';
+
+function recordPendingRun_(key, message) {
+  const id = Utilities.getUuid();
+  PropertiesService.getScriptProperties().setProperty(PENDING_RUN_PREFIX + key + '_' + id, JSON.stringify({
+    job: key,
+    id: id,
+    at: new Date().toISOString(),
+    trigger: true,
+    error: String(message || '')
+  }));
+}
+
+/**
+ * Wpisy oczekujące od najstarszego. Wpis nieczytelny albo nieznanego zadania
+ * nie jest nasz i zostaje nietknięty, jak nieczytelny znacznik wykonania.
+ */
+function pendingRuns_() {
+  const known = scheduledJobs_().map(function (job) { return job.key; });
+  const all = PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(all)
+    .filter(function (name) { return name.indexOf(PENDING_RUN_PREFIX) === 0; })
+    .map(function (name) {
+      let entry;
+      try { entry = JSON.parse(all[name]); } catch (e) { entry = null; }
+      return { name: name, entry: entry };
+    })
+    .filter(function (found) {
+      return Boolean(found.entry) && known.indexOf(found.entry.job) >= 0 && !isNaN(Date.parse(found.entry.at));
+    })
+    .sort(function (a, b) { return Date.parse(a.entry.at) - Date.parse(b.entry.at); });
+}
+
+/**
+ * Zapisuje skutki wpisów oczekujących. Wołane pod blokadą, w obsłudze wyniku
+ * przebiegu `own` ({ key, run }), zanim ten zapisze własny wiersz i rekord.
+ *
+ * Wiersze trafiają do IMPORT LOG w kolejności czasu, a rekord i incydent zadania
+ * są aktualizowane jak przy nieudanym przebiegu. Wyjątek: późniejszy udany
+ * przebieg TEGO SAMEGO zadania w tej samej obsłudze. Wtedy odmowa zostaje tylko
+ * w logu, bo para maili „BŁĄD” i „ponownie działa” w odstępie sekund nic nie mówi.
+ * Wiersz odmowy powstaje także dla zadań bez `log: true`: przy tym wyjątku jest
+ * jedynym śladem odrzuconego triggera (uwaga Codexa w #210).
+ *
+ * Odmowa późniejsza niż przebieg przejmującego czeka na następnego posiadacza
+ * blokady. Taki wpis powstaje, gdy inne wykonanie kończy 5-sekundowe czekanie
+ * na blokadę już po pracy przejmującego. Przejęty od razu, zapisałby stan
+ * nowszy niż przebieg, który zapisuje się po nim (uwaga Codexa w #210).
+ *
+ * Wpis znika dopiero po zapisie skutków. Ubicie pomiędzy zostawia go następnemu
+ * posiadaczowi: najwyżej zduplikowany wiersz, ale nie utracony ślad. Błąd jednego
+ * wpisu nie przerywa obsługi przebiegu, a wpis czeka na kolejną.
+ */
+function takeOverPendingRuns_(own) {
+  const props = PropertiesService.getScriptProperties();
+  pendingRuns_().forEach(function (found) {
+    const entry = found.entry;
+    if (own && own.run && Date.parse(entry.at) > Date.parse(own.run.finishedAt)) return;
+    try {
+      const run = { finishedAt: entry.at, ok: false, trigger: true, error: String(entry.error || '').slice(0, 300) };
+      const isImport = Boolean(importSources_()[entry.job]);
+      // „Nie wcześniej”, nie „później”: przebieg zakończony w tej samej milisekundzie
+      // co odmowa i tak dowodzi, że zadanie działa.
+      const superseded = Boolean(own && own.key === entry.job && own.run && own.run.ok &&
+        Date.parse(own.run.finishedAt) >= Date.parse(entry.at));
+      appendImportLog_(entry.job, run);
+      if (!superseded) {
+        const record = readJobRecord_(entry.job);
+        const last = record.lastRun;
+        // Rekord, którego ostatnim przebiegiem jest TA odmowa, to niedokończone
+        // przejęcie (awaria po zapisie rekordu): kroki niżej są idempotentne
+        // i trzeba je dokończyć, a nie pominąć (uwaga Codexa w #210).
+        const unfinished = Boolean(last) && last.ok === false && last.finishedAt === run.finishedAt &&
+          String(last.error || '') === run.error;
+        // Rekord z przebiegiem nie starszym niż odmowa już ją zastąpił. Tak jest
+        // np. przy wpisie ponowionym po nieudanym usunięciu, gdy między przejęciami
+        // zadanie się udało. Stara odmowa nie cofa stanu (uwaga Codexa w #210).
+        const newer = Boolean(last) && !unfinished && Date.parse(last.finishedAt) >= Date.parse(entry.at);
+        if (!newer) {
+          if (!unfinished) {
+            record.lastRun = run;
+            writeJobRecord_(entry.job, record);
+          }
+          if (isImport) writeImportStatusCell_(entry.job);
+          updateImportIncident_(entry.job, record);
+        }
+      }
+      props.deleteProperty(found.name);
+    } catch (e) {
+      Logger.log('Wpis oczekujący ' + found.name + ' czeka na kolejne przejęcie: ' + (e && e.message ? e.message : e));
+    }
+  });
+}
+
 /**
  * Zapisuje przebieg zadania monitorującego i aktualizuje jego incydent.
  * Lżejsze niż recordImportRun_: bez anomalii i komórki statusu, bo dla tych zadań
@@ -825,8 +948,14 @@ function abandonedRunNote_(marker) {
  *
  * Każde wykonanie zakłada znacznik przed pracą i usuwa go po niej (#189), a przy
  * starcie odbiera znaczniki wykonań, które nie doszły ani do `return`, ani do `catch`.
+ *
+ * Całość idzie pod blokadą skryptu, a rekord jest czytany dopiero po pracy (#204).
  */
 function recordJobRun_(key, trigger, fn) {
+  return withRunLock_(key, trigger, () => recordJobRunLocked_(key, trigger, fn));
+}
+
+function recordJobRunLocked_(key, trigger, fn) {
   const startedAt = Date.now();
   const job = scheduledJob_(key);
   // Najpierw odzysk cudzych porzuconych znaczników, dopiero potem własny.
@@ -841,14 +970,13 @@ function recordJobRun_(key, trigger, fn) {
       appendImportLog_(key, { finishedAt: marker.startedAt, ok: false, trigger: marker.trigger, error: notes[i] });
     });
   }
-  const record = readJobRecord_(key);
   let result;
 
   try {
     result = fn();
   } catch (e) {
     clearRunMarker_(key, runId);
-    record.lastRun = {
+    const failed = {
       finishedAt: new Date().toISOString(),
       ok: false,
       trigger: Boolean(trigger),
@@ -856,6 +984,9 @@ function recordJobRun_(key, trigger, fn) {
       error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(notes).join(' | '),
       durationMs: Date.now() - startedAt
     };
+    takeOverPendingRuns_({ key: key, run: failed });
+    const record = readJobRecord_(key);
+    record.lastRun = failed;
     writeJobRecord_(key, record);
     if (job.log) appendImportLog_(key, record.lastRun);
     updateImportIncident_(key, record);
@@ -865,7 +996,7 @@ function recordJobRun_(key, trigger, fn) {
   // Kontrolowane zakończenie: znacznik znika zaraz po pracy, przed obsługą wyniku.
   clearRunMarker_(key, runId);
   const summary = result && typeof result === 'object' ? result : {};
-  record.lastRun = {
+  const run = {
     finishedAt: new Date().toISOString(),
     ok: true,
     trigger: Boolean(trigger),
@@ -878,6 +1009,9 @@ function recordJobRun_(key, trigger, fn) {
     warning: [String(summary.warning || '')].concat(notes).filter(Boolean).join(' | '),
     durationMs: Date.now() - startedAt
   };
+  takeOverPendingRuns_({ key: key, run: run });
+  const record = readJobRecord_(key);
+  record.lastRun = run;
   record.lastOk = record.lastRun;
   // Znacznik oczekiwania na pierwszy przebieg przestaje być potrzebny: od teraz
   // świeżość liczy się od ostatniego udanego uruchomienia.

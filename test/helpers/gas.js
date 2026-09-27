@@ -374,6 +374,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     setColumnWidth() { return this; },
     appendRow(row) {
       row.forEach((v, j) => checkCell(v, grid.length + 1, j + 1));
+      if (realm && realm.events) realm.events.push(['appendRow', name]);
       grid.push(row.slice());
       maxRows = Math.max(maxRows, grid.length);
       return sheet;
@@ -390,7 +391,8 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
   const instances = new Map();
   // Konstruktor Date z realm-u VM; podstawia go loadProject, bo tylko data
   // utworzona w tym samym realm-ie przechodzi `instanceof Date` w źródłach.
-  const realm = { Date };
+  // `events`: wspólny dziennik operacji (zapisy, flush, blokada) do testów kolejności (#204).
+  const realm = { Date, events: [] };
   // Fixture może podać { rows, maxRows, maxColumns } zamiast samej tablicy wierszy,
   // żeby odwzorować arkusz o ograniczonej siatce.
   const limits = {};
@@ -464,7 +466,7 @@ function makeSpreadsheet(sheets = {}, alerts = [], menus = [], timeZone = SCRIPT
   return {
     getActive: () => active,
     getUi: () => ui,
-    flush() {},
+    flush() { realm.events.push(['flush']); },
     // Budowniczy RichTextValue (#175). Tylko link na całym tekście: wariant
     // z przedziałem znaków rzuca, zamiast udawać, że działa.
     newRichTextValue() {
@@ -524,16 +526,29 @@ function createStubs(opts) {
   let uuidCounter = 0;
   const fetchImpl = opts.fetch || (() => ({ code: 200, text: '{}' }));
   const spreadsheet = opts.SpreadsheetApp || makeSpreadsheet(opts.sheets || {}, alerts, menus, opts.timeZone || SCRIPT_TIME_ZONE);
+  const events = (spreadsheet.$realm && spreadsheet.$realm.events) || [];
+  // Awarie wstrzykiwane przez test: `faults.deleteProperty = key => true` (albo
+  // `faults.setProperty`) rzuca przy tej operacji, co udaje ubicie wykonania
+  // albo przejściową awarię usługi w tym miejscu (#204).
+  const faults = {};
 
   return {
     SpreadsheetApp: spreadsheet,
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: key => (Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : null),
-        setProperty: (key, value) => { properties[key] = String(value); },
+        setProperty: (key, value) => {
+          if (faults.setProperty && faults.setProperty(key)) throw new Error('ubite w trakcie setProperty(' + key + ')');
+          events.push(['setProperty', key]);
+          properties[key] = String(value);
+        },
         // Usunięcie właściwości to nie to samo co zapisanie w niej pustego
         // tekstu: pusta wartość blokuje edytor Script Properties (#124).
-        deleteProperty: key => { delete properties[key]; },
+        deleteProperty: key => {
+          if (faults.deleteProperty && faults.deleteProperty(key)) throw new Error('ubite w trakcie deleteProperty(' + key + ')');
+          events.push(['deleteProperty', key]);
+          delete properties[key];
+        },
         // Kopia, jak w Apps Script: zmiana zwróconego obiektu nie zmienia właściwości.
         getProperties: () => Object.assign({}, properties),
         getKeys: () => Object.keys(properties)
@@ -594,11 +609,19 @@ function createStubs(opts) {
     },
     Session: { getScriptTimeZone: () => SCRIPT_TIME_ZONE },
     // Script lock: opts.lockHeld simulates another run holding it; $lock records calls.
+    // `$asOtherExecution(fn)` runs fn as a SEPARATE execution: it does not own the
+    // lock held by the main one and cannot take it (#204, scenarios 5 and 7).
     LockService: {
       getScriptLock: () => ({
-        tryLock(ms) { lockLog.push(['tryLock', ms]); if (opts.lockHeld) return false; lockLog.held = true; return true; },
-        releaseLock() { lockLog.push(['releaseLock']); lockLog.held = false; },
-        hasLock: () => Boolean(lockLog.held)
+        tryLock(ms) {
+          lockLog.push(['tryLock', ms]);
+          events.push(['tryLock']);
+          if (opts.lockHeld || (lockLog.other && lockLog.held)) return false;
+          lockLog.held = true;
+          return true;
+        },
+        releaseLock() { lockLog.push(['releaseLock']); events.push(['releaseLock']); lockLog.held = false; },
+        hasLock: () => Boolean(lockLog.held) && !lockLog.other
       })
     },
     Logger: { log() {} },
@@ -610,6 +633,17 @@ function createStubs(opts) {
     $console: consoleLines,
     $mails: mails,
     $lock: lockLog,
+    $events: events,
+    $faults: faults,
+    $asOtherExecution(fn) {
+      const before = lockLog.other;
+      lockLog.other = true;
+      try {
+        return fn();
+      } finally {
+        lockLog.other = before;
+      }
+    },
     $fetchCalls: fetchCalls,
     $alerts: alerts,
     $properties: properties,
