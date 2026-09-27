@@ -303,6 +303,22 @@ describe('#204: strażnik aktualności pod blokadą', () => {
     assert.deepEqual(pendingKeys(gas), []);
   });
 
+  test('8d: incydent po przejętej odmowie strażnika zamyka jego następny udany przebieg', () => {
+    // Przed #204 strażnik nie miał incydentów, bo nie brał blokady. Odmowa z
+    // triggera otwiera go teraz przy przejęciu, więc sukces musi go zamknąć.
+    const opts = options({ lockHeld: true });
+    const gas = loadProject(opts);
+    assert.throws(() => gas.sprawdzAktualnoscImportow(), /Inne uruchomienie jeszcze trwa \(strażnik alertów\)/);
+    opts.lockHeld = false;
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+    assert.equal(record(gas, 'LAST_RUN_ALERTS').incident.open, true);
+
+    gas.sprawdzAktualnoscImportow();
+
+    assert.equal(record(gas, 'LAST_RUN_ALERTS').incident.open, false);
+    assert.equal(subjects(gas)[subjects(gas).length - 1], '[wordpress-automation] Zadanie ponownie działa: strażnik alertów');
+  });
+
   test('8c: strażnik przejmuje wpisy oczekujące i zapisuje własny przebieg', () => {
     const gas = withPendingGsc();
 

@@ -297,6 +297,8 @@ function runFreshnessGuard_() {
   guard.lastRun = run;
   guard.lastOk = guard.lastRun;
   writeJobRecord_(ALERT_GUARD_JOB_KEY, guard);
+  // Przejęta odmowa strażnika otwiera jego incydent (#204); udany przebieg go zamyka.
+  updateImportIncident_(ALERT_GUARD_JOB_KEY, guard);
 
   return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
 }
