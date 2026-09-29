@@ -141,6 +141,11 @@
       "pattern": "src/Performance.gs",
       "threshold": 95,
       "rationale": "Nowy w #124 z pełnym pokryciem: konfiguracja, CrUX z INSUFFICIENT_DATA, PSI z próbami i medianą, upsert i rozróżnione powody odmowy."
+    },
+    {
+      "pattern": "src/SourceFreshness.gs",
+      "threshold": 100,
+      "rationale": "Nowy w #197 z pełnym pokryciem: semantyka ACTIVE/STALE/ERROR i generator formuły z NOW()."
     }
   ]
 }
