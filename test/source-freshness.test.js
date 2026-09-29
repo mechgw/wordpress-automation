@@ -7,8 +7,9 @@
  * Harness VM nie liczy formuł, więc formułę z generatora wykonuje tu mały model
  * podzbioru funkcji Arkuszy (`evaluateSheetsFormula`). Model wyłapuje błędy
  * struktury: literówkę, złą pozycję `MID`, zły separator. Nie dowodzi, że Arkusze
- * liczą tak samo — `ISDATE` na wartości z czasem, `LET`, `REGEXMATCH` i przeliczanie
- * `NOW()` potwierdza dopiero test na kopii arkusza (przypadki 12–24 z #197).
+ * liczą tak samo — to potwierdził test na prawdziwym arkuszu 2026-09-29 (#197,
+ * przypadki 12–21: 37/37 zgodnych z funkcją JS; 22–24: przejście do STALE bez
+ * skryptu, powrót do ACTIVE, odczyt zamkniętego pliku przez gviz).
  */
 
 const { test, describe } = require('node:test');

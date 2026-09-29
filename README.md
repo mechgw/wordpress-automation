@@ -291,7 +291,9 @@ Inne adresy komórek daje generator `sourceFreshnessFormula_(znacznik, próg, { 
 
 **Przeliczanie.** `NOW()` przelicza się przy każdej zmianie w pliku i dodatkowo według ustawienia *Plik → Ustawienia → Obliczenia → Przeliczanie*. Bez okresowego przeliczania („przy zmianie i co minutę” albo „co godzinę”) nieotwarty i niezmieniany plik nie przejdzie do `STALE`. Ustawienie decyduje więc o czułości sygnału i trzeba je zapisać w instalacji razem z progiem.
 
-**Odczyt przez Sheets API bez otwierania pliku:** jeszcze nie zmierzony. Do czasu pomiaru na kopii arkusza (#197, test 24) nie zakładamy, że czytelnik maszynowy dostaje wartość już przeliczoną. Sygnał jest gwarantowany w warstwie arkusza.
+**Formuła używa angielskich nazw funkcji.** Test przeszedł w pliku z polskim językiem wyświetlania przy zaznaczonym *Plik → Ustawienia → Zawsze używaj angielskich nazw funkcji*. Zachowania bez tej opcji nie sprawdzaliśmy.
+
+**Odczyt bez otwierania pliku (zmierzone 2026-09-29, #197).** Endpoint gviz (`/gviz/tq?tqx=out:csv`) czytał zamknięty plik z przeliczaniem co minutę i oddał `STALE` z `NOW()` z chwili odczytu, a nie z chwili zamknięcia pliku. Drugi odczyt po 22 s dał tę samą chwilę, więc wynik jest trzymany około minuty. Czytelnik maszynowy dostaje więc przez gviz sygnał najwyżej o minutę starszy. Sheets API v4 (`values.get`) nie było mierzone.
 
 **Czego `STALE` nie mówi.** Świeżość to nie zdrowie. `STALE` znaczy tylko, że od progu nie pojawił się nowszy rekord. Nie odróżnia dnia bez zgłoszeń od zerwanej integracji ani awarii formularza. Silniejszy sygnał, czyli porównanie najwyższego identyfikatora rekordu w źródle i w arkuszu, jest poza zakresem.
 
