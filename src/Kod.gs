@@ -122,23 +122,64 @@ function importOstatniZakres() {
   }));
 }
 
-/** Import jednego dnia: handler codziennego triggera i pozycja menu (wtedy liczony jako ręczny). */
+/**
+ * Import dzienny: handler codziennego triggera i pozycja menu (wtedy liczony jako ręczny).
+ * Pobiera dzień `dziś − dailyLagDays` i dni brakujące od ostatniego udanego importu,
+ * najwyżej GSC_DAILY_MAX_DAYS (#209).
+ */
 function importDzienny(e) {
   return recordImportRun_('GSC', isTriggerRun_(e), () => withScriptLock_('import GSC', () => {
     const cfg = getConfig_();
-
-    const targetDate = przesunDate_(
-      new Date(),
-      -cfg.dailyLagDays
-    );
-
-    const date = formatujDate_(targetDate);
-
-    return importRange_(date, date);
+    const target = formatujDate_(przesunDate_(new Date(), -cfg.dailyLagDays));
+    const range = dailyGscRange_(target, readJobRecord_('GSC'));
+    return importRange_(range.from, range.to, { daily: true, warning: range.warning });
   }));
 }
 
-function importRange_(startDate, endDate) {
+/** Najdłuższa luka, którą import dzienny uzupełnia sam (#209). */
+const GSC_DAILY_MAX_DAYS = 7;
+
+/**
+ * Zakres importu dziennego (#209). 27.09 ubity import zostawił lukę 24.09, a import
+ * dzienny pobierał tylko jeden dzień, więc luka sama się nie zapełniała. Zakres
+ * zaczyna się dzień po `lastOk.dataTo` (#180). Bez `dataTo` albo gdy dane sięgają
+ * już celu — jeden dzień, jak dawniej. Dłuższa luka: 7 najnowszych dni i ostrzeżenie.
+ */
+function dailyGscRange_(target, record) {
+  const lastOk = effectiveLastOk_(record);
+  const dataTo = lastOk && /^\d{4}-\d{2}-\d{2}$/.test(String(lastOk.dataTo || '')) ? lastOk.dataTo : '';
+  if (!dataTo || dataTo >= target) return { from: target, to: target, warning: '' };
+  const missing = dayDiff_(dataTo, target);
+  if (missing <= GSC_DAILY_MAX_DAYS) return { from: shiftDay_(dataTo, 1), to: target, warning: '' };
+  const from = shiftDay_(target, -(GSC_DAILY_MAX_DAYS - 1));
+  return {
+    from: from,
+    to: target,
+    warning: 'luka w danych: ' + missing + ' dni od ' + shiftDay_(dataTo, 1) + '; import dzienny pobrał ' +
+      GSC_DAILY_MAX_DAYS + ' najnowszych, dni ' + shiftDay_(dataTo, 1) + ' – ' + shiftDay_(from, -1) +
+      ' uzupełnij ręcznym importem zakresu (SEO / GSC → Importuj ostatni zakres)'
+  };
+}
+
+/** Dzień `RRRR-MM-DD` przesunięty o `n` dni, liczony w UTC: bez wpływu strefy i zmiany czasu. */
+function shiftDay_(day, n) {
+  const p = day.split('-').map(Number);
+  return new Date(Date.UTC(p[0], p[1] - 1, p[2] + n)).toISOString().slice(0, 10);
+}
+
+/** Liczba dni od `from` do `to` (`RRRR-MM-DD`). */
+function dayDiff_(from, to) {
+  const utc = day => { const p = day.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+  return Math.round((utc(to) - utc(from)) / 86400000);
+}
+
+/**
+ * Import zakresu dat GSC. `options.daily`: ścieżka importu dziennego, która może
+ * zapisać same importowane dni (#209); `options.warning`: ostrzeżenie zakresu.
+ */
+function importRange_(startDate, endDate, options) {
+  const opts = options || {};
+  const stage = importStageTimer_('import GSC');
   const cfg = getConfig_();
 
   const endpoint =
@@ -184,6 +225,7 @@ function importRange_(startDate, endDate) {
 
     startRow += cfg.rowLimit;
   }
+  stage('zapytania API (' + allRows.length + ' wierszy)');
 
   const downloadedAt = new Date();
 
@@ -204,7 +246,22 @@ function importRange_(startDate, endDate) {
     ];
   });
 
-  replaceRange_(startDate, endDate, output);
+  const sheet = SpreadsheetApp.getActive().getSheetByName(RAW_SHEET);
+  const warnings = [opts.warning];
+  // Same importowane dni tylko w imporcie dziennym i tylko przy zatwierdzonym
+  // układzie K–L; każdy inny przypadek to zapis całej zakładki, jak dawniej.
+  const layout = opts.daily ? gscKlLayout_(sheet) : null;
+  if (layout) stage('rozpoznanie K–L');
+  if (layout && layout.ok) {
+    appendGscDays_(sheet, startDate, endDate, output, stage);
+  } else {
+    if (layout) {
+      warnings.push(layout.warning);
+      // Pełny tekst kotwic: z niego właściciel zatwierdza wzorzec.
+      console.log('[import GSC] kotwice K–L (pełny tekst): ' + JSON.stringify(layout.anchors));
+    }
+    replaceRange_(sheet, startDate, endDate, output, stage);
+  }
 
   // Status komórki B8 zapisuje recordImportRun_() na podstawie tego wyniku.
   const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
@@ -214,14 +271,12 @@ function importRange_(startDate, endDate) {
     days: days,
     dataFrom: startDate,
     dataTo: endDate,
-    detail: output.length + ' wierszy (' + startDate + ' – ' + endDate + ')'
+    detail: output.length + ' wierszy (' + startDate + ' – ' + endDate + ')',
+    warning: warnings.filter(Boolean).join(' | ')
   };
 }
 
-function replaceRange_(startDate, endDate, newRows) {
-  const sheet = SpreadsheetApp.getActive()
-    .getSheetByName(RAW_SHEET);
-
+function replaceRange_(sheet, startDate, endDate, newRows, stage) {
   const lastRow = sheet.getLastRow();
 
   let keepRows = [];
@@ -240,10 +295,12 @@ function replaceRange_(startDate, endDate, newRows) {
 
       return date < startDate || date > endDate;
     });
+    stage('odczyt arkusza (' + existing.length + ' wierszy)');
 
     sheet
       .getRange(2, 1, lastRow - 1, 10)
       .clearContent();
+    stage('czyszczenie');
   }
 
   const combined = keepRows.concat(newRows);
@@ -252,6 +309,7 @@ function replaceRange_(startDate, endDate, newRows) {
     sheet
       .getRange(2, 1, combined.length, 10)
       .setValues(combined);
+    stage('zapis całej zakładki (' + combined.length + ' wierszy)');
 
     sheet
       .getRange(2, 8, combined.length, 1)
@@ -264,7 +322,117 @@ function replaceRange_(startDate, endDate, newRows) {
     sheet
       .getRange(2, 10, combined.length, 1)
       .setNumberFormat('yyyy-mm-dd hh:mm');
+    stage('formaty');
   }
+}
+
+/**
+ * Wzorce kotwic K–L zatwierdzone przez właściciela (#209): JSON `{"K": "…", "L": "…"}`
+ * z pełnym tekstem formuł, tak jak wypisuje je log importu.
+ */
+const GSC_KL_PROPERTY = 'GSC_KL_ANCHOR_FORMULAS';
+
+/**
+ * Czy import dzienny może zapisać same importowane dni (#209).
+ *
+ * Kolumny K–L zakładki (`Pozycja×wyświetlenia`, `Data_num`) liczy formuła spoza
+ * kodu. Usunięcie i dopisanie wierszy zostawia je poprawne tylko wtedy, gdy liczy
+ * je jedna formuła rozlana na całą kolumnę. Z tekstu formuły tego nie da się
+ * dowieść (`=ARRAYFORMULA(SUM(A2:A))` zwraca jedną wartość), więc szybka ścieżka
+ * rusza wyłącznie dla kotwic identycznych z wzorcem zatwierdzonym przez
+ * właściciela. Każdy inny stan to `ok: false` i zapis całej zakładki, który K–L
+ * nie dotyka. Kod nigdy nie zapisuje K–L.
+ */
+function gscKlLayout_(sheet) {
+  const lastRow = Math.max(sheet.getLastRow(), 2);
+  const range = sheet.getRange(1, 11, lastRow, 2);
+  const formulas = range.getFormulas();
+  const values = range.getValues();
+  const patterns = gscKlPatterns_();
+  const anchors = {};
+  const problems = [];
+  ['K', 'L'].forEach((col, c) => {
+    const found = [];
+    formulas.forEach((row, i) => {
+      if (row[c]) found.push({ row: i + 1, text: row[c], value: values[i][c] });
+    });
+    anchors[col] = found.length ? found[0].text : '';
+    const reason = gscKlProblem_(found, patterns ? patterns[col] : undefined);
+    if (reason) {
+      problems.push(col + ': ' + reason + ', kotwica: ' + (found.length ? found[0].text.slice(0, 200) : 'brak formuły'));
+    }
+  });
+  return {
+    ok: !problems.length,
+    anchors: anchors,
+    warning: problems.length ? 'K–L: zapis całej zakładki, bo ' + problems.join('; ') : ''
+  };
+}
+
+/** Pierwszy niespełniony warunek szybkiej ścieżki dla jednej kolumny; '' gdy spełnione wszystkie. */
+function gscKlProblem_(found, pattern) {
+  if (!found.length) return 'brak formuły';
+  if (found.length > 1) return 'więcej niż jedna formuła (' + found.length + ')';
+  if (found[0].row > 2) return 'kotwica w wierszu ' + found[0].row + ', a nie 1 albo 2';
+  if (typeof pattern !== 'string') return 'brak zatwierdzonego wzorca w ' + GSC_KL_PROPERTY;
+  if (found[0].text !== pattern) return 'kotwica różna od zatwierdzonego wzorca';
+  if (String(found[0].value).charAt(0) === '#') return 'wartość kotwicy to błąd (' + found[0].value + ')';
+  return '';
+}
+
+/** Wzorce z GSC_KL_PROPERTY; brak albo niepoprawny JSON to null (ścieżka dotychczasowa, nie błąd). */
+function gscKlPatterns_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(GSC_KL_PROPERTY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Zapis samych importowanych dni (#209): usuwa wiersze z datami z zakresu
+ * blokami od dołu i dopisuje nowe za ostatnią niepustą komórką kolumny A, nie za
+ * `getLastRow()` — formuła rozlana w K–L może sięgać końca arkusza. Kolejność
+ * pozostałych wierszy się nie zmienia; formaty dostają tylko dopisane wiersze.
+ */
+function appendGscDays_(sheet, startDate, endDate, newRows, stage) {
+  const lastRow = sheet.getLastRow();
+  const column = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().map(r => r[0]) : [];
+  stage('odczyt kolumny A (' + column.length + ' wierszy)');
+
+  const removed = column.map(v => {
+    const date = normalizujDate_(v);
+    return Boolean(date) && date >= startDate && date <= endDate;
+  });
+  const blocks = [];
+  removed.forEach((hit, i) => {
+    if (!hit) return;
+    const last = blocks[blocks.length - 1];
+    if (last && last.start + last.count === i) last.count++;
+    else blocks.push({ start: i, count: 1 });
+  });
+  for (let b = blocks.length - 1; b >= 0; b--) {
+    sheet.deleteRows(blocks[b].start + 2, blocks[b].count);
+  }
+  stage('usunięcie wierszy importowanych dni (' + removed.filter(Boolean).length + ')');
+
+  if (!newRows.length) return;
+  const kept = column.filter((v, i) => !removed[i]);
+  let filled = kept.length;
+  while (filled > 0 && (kept[filled - 1] === '' || kept[filled - 1] === null)) filled--;
+  const firstRow = filled + 2;
+  const needed = firstRow + newRows.length - 1;
+  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+  sheet.getRange(firstRow, 1, newRows.length, 10).setValues(newRows);
+  stage('dopisanie wierszy (' + newRows.length + ')');
+
+  sheet.getRange(firstRow, 8, newRows.length, 1).setNumberFormat('0.00%');
+  sheet.getRange(firstRow, 9, newRows.length, 1).setNumberFormat('0.0');
+  sheet.getRange(firstRow, 10, newRows.length, 1).setNumberFormat('yyyy-mm-dd hh:mm');
+  stage('formaty');
 }
 
 function apiRequest_(url, method, payload) {

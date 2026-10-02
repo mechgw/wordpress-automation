@@ -232,7 +232,8 @@ describe('Kod.gs GSC import end to end', () => {
     const rec = record(gas, 'GSC');
     assert.equal(rec.lastOk.trigger, true);
     assert.equal(rec.lastOk.detail, `2 wierszy (${day} – ${day})`);
-    assert.match(gas.$cell(GSC_SHEET, 'B8'), new RegExp(`^AKTYWNE – ostatni import: .* \\| 2 wierszy \\(${day} – ${day}\\) \\| trigger: NIE$`));
+    // Bez zatwierdzonego wzorca K–L import dzienny zapisuje całą zakładkę i mówi to (#209).
+    assert.match(gas.$cell(GSC_SHEET, 'B8'), new RegExp(`^AKTYWNE – ostatni import: .* \\| 2 wierszy \\(${day} – ${day}\\) \\| UWAGA: K–L: zapis całej zakładki, bo K: brak formuły, .* \\| trigger: NIE$`));
 
     // #180 (12): zakres danych pobranego dnia w wyniku, w rekordzie i w IMPORT LOG.
     assert.deepEqual([plain(out).dataFrom, plain(out).dataTo], [day, day]);

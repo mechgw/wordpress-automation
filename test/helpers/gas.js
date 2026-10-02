@@ -160,6 +160,14 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
   const clearLink = (row, col) => {
     if (links[row - 1] && links[row - 1].length >= col) links[row - 1][col - 1] = null;
   };
+  /**
+   * Dziennik zapisów z zakresem (#209): [operacja, arkusz, wiersz, kolumna, wierszy,
+   * kolumn]. Pozwala dowieść, że import nie zapisał całej zakładki ani kolumn,
+   * których nie wolno mu ruszać.
+   */
+  const logWrite = (op, row, col, rows, cols) => {
+    if (realm && realm.events) realm.events.push([op, name, row, col, rows, cols]);
+  };
   const ensure = (row, col) => {
     while (grid.length < row) grid.push([]);
     const line = grid[row - 1];
@@ -220,6 +228,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     },
     setValues(values) {
       values.forEach((line, i) => line.forEach((v, j) => checkCell(v, row + i, col + j)));
+      logWrite('setValues', row, col, values.length, values.length ? values[0].length : 0);
       values.forEach((line, i) => line.forEach((v, j) => {
         ensure(row + i, col + j);
         grid[row + i - 1][col + j - 1] = parseCell(v, row + i, col + j);
@@ -264,6 +273,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     },
     getRichTextValue: () => makeRichTextValue(String((grid[row - 1] || [])[col - 1] ?? ''), (links[row - 1] || [])[col - 1] ?? null),
     clearContent() {
+      logWrite('clearContent', row, col, rows, cols);
       for (let r = row; r < row + rows; r++) {
         for (let c = col; c < col + cols; c++) {
           if (grid[r - 1] && grid[r - 1].length >= c) grid[r - 1][c - 1] = '';
@@ -275,6 +285,7 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     // Format komórki jest w tym stubie stanem, nie no-opem: od niego zależy, czy
     // zapisany łańcuch zostanie tekstem, czy arkusz sparsuje go na datę (#168).
     setNumberFormat(format) {
+      logWrite('setNumberFormat', row, col, rows, cols);
       for (let r = row; r < row + rows; r++) {
         while (numberFormats.length < r) numberFormats.push([]);
         const line = numberFormats[r - 1];
@@ -363,7 +374,9 @@ function makeSheet(name, initialRows, sheetId = 0, limits = null, realm = null) 
     // Usunięcie wierszy zmniejsza też siatkę, tak jak w Arkuszach; bez tego
     // przycinanie pustego przydziału (#118) wyglądałoby w testach na nieskuteczne.
     deleteRows(row, n = 1) {
+      logWrite('deleteRows', row, 1, n, maxCols);
       grid.splice(row - 1, n);
+      formulas.splice(row - 1, n);
       numberFormats.splice(row - 1, n);
       links.splice(row - 1, n);
       maxRows = Math.max(1, maxRows - n);
