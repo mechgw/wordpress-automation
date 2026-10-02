@@ -258,6 +258,47 @@ Nieudany przebieg triggera nigdy nie udaje więc świeżego importu, a komórki 
 
 **Co znaczy „mało danych” i czego nie dowodzi.** Alert mówi tylko, że import zwrócił wyraźnie mniej wierszy niż zwykle w porównywalnych warunkach — mniej niż połowę mediany swojej bazy albo zero, gdy wcześniej były dane. Nie mówi, dlaczego: spadek ruchu, zmiana w tagowaniu, opóźnienie przetwarzania po stronie Google i problem z importem wyglądają w tej liczbie tak samo. Liczba wierszy to liczba **kombinacji wymiarów** (strona × kanał × źródło × …), a nie liczba sesji ani użytkowników: dzień z tym samym ruchem skupionym na mniejszej liczbie stron da mniej wierszy, a dane GA4 potrafią jeszcze po kilku dniach zmienić liczbę kombinacji (08.09.2026: 22 wiersze raportu landing przy imporcie, 16 przy ponownym imporcie). Alert jest więc zaproszeniem do sprawdzenia źródła, nie diagnozą.
 
+### Świeżość zewnętrznego źródła (formuła w arkuszu, #197)
+
+Źródło zewnętrzne, na przykład arkusz, do którego integracja dopisuje zgłoszenia z formularza, może być dostępne, a mimo to przestać dostawać nowe rekordy. Świeżość takiego źródła liczy **natywna formuła Arkuszy z `NOW()`**, nie wyzwalacz i nie funkcja niestandardowa. Arkusz przelicza ją sam, więc przechodzi z `ACTIVE` do `STALE` także wtedy, gdy nie działa żaden wyzwalacz Apps Script (19–26.09.2026 stały wszystkie naraz, #198). Funkcja niestandardowa nie zadziałałaby tu z dwóch powodów: jej argumenty muszą być deterministyczne, więc nie przyjmie `NOW()`, a bez zmiany komórek wejściowych w ogóle się nie przelicza.
+
+Formuła potrzebuje dwóch komórek i nie czyta niczego więcej, ani treści zgłoszeń, ani danych osobowych:
+
+- **znacznik ostatniego rekordu** (`lastTimestamp`, niżej `B2`): wartość daty i czasu Arkuszy albo tekst dokładnie `RRRR-MM-DD GG:MM:SS`, czytany strukturalnie jako czas w strefie arkusza, bez parsera zależnego od ustawień regionalnych. Każdy inny tekst, pusta komórka, nieistniejąca data (np. `2026-02-30`, godzina `24`) albo rok przed 1900 to `ERROR`;
+- **próg w godzinach** (`maxAgeHours`, niżej `C2`): liczba większa od zera, na przykład `1,5`. Próg należy do instalacji i jest świadomą tolerancją na fałszywe alarmy.
+
+| wynik | znaczenie |
+| --- | --- |
+| `ACTIVE` | znacznik jest poprawny, a jego wiek nie przekracza progu (granica włącznie) |
+| `STALE` | znacznik jest poprawny, ale starszy niż próg |
+| `ERROR` | brak albo zły znacznik, zły próg albo znacznik z przyszłości (niespójność zegara lub danych, nie świeże źródło) |
+
+Wiek liczy się w pełnych sekundach czasu ściennego strefy arkusza, tak jak Arkusze odejmują numery seryjne dat. W noc zmiany czasu różnica jest więc o godzinę większa albo mniejsza od rzeczywistej.
+
+**Formuła do wklejenia.** Separator argumentów zależy od ustawień regionalnych pliku (*Plik → Ustawienia → Język*). Formuła z niewłaściwym separatorem daje błąd, więc nie ma jednej wersji dla wszystkich plików. Dla pliku z przecinkiem dziesiętnym (np. polskie ustawienia), znacznik w `B2`, próg w `C2`:
+
+```
+=IFERROR(LET(stamp;B2;limit;C2;current;NOW();serial;IF(ISTEXT(stamp);IF(REGEXMATCH(stamp;"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$");LET(yr;VALUE(MID(stamp;1;4));mon;VALUE(MID(stamp;6;2));dy;VALUE(MID(stamp;9;2));hr;VALUE(MID(stamp;12;2));mnt;VALUE(MID(stamp;15;2));sek;VALUE(MID(stamp;18;2));IF(AND(yr>=1900;mon>=1;mon<=12;dy>=1;dy<=DAY(EOMONTH(DATE(yr;mon;1);0));hr<=23;mnt<=59;sek<=59);DATE(yr;mon;dy)+TIME(hr;mnt;sek);NA()));NA());IF(ISDATE(stamp);stamp;NA()));age;ROUND((current-serial)*86400);IF(OR(NOT(ISNUMBER(limit));ISDATE(limit);limit<=0);"ERROR";IF(age<0;"ERROR";IF(age<=limit*3600;"ACTIVE";"STALE"))));"ERROR")
+```
+
+Dla pliku z kropką dziesiętną (np. ustawienia amerykańskie):
+
+```
+=IFERROR(LET(stamp,B2,limit,C2,current,NOW(),serial,IF(ISTEXT(stamp),IF(REGEXMATCH(stamp,"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"),LET(yr,VALUE(MID(stamp,1,4)),mon,VALUE(MID(stamp,6,2)),dy,VALUE(MID(stamp,9,2)),hr,VALUE(MID(stamp,12,2)),mnt,VALUE(MID(stamp,15,2)),sek,VALUE(MID(stamp,18,2)),IF(AND(yr>=1900,mon>=1,mon<=12,dy>=1,dy<=DAY(EOMONTH(DATE(yr,mon,1),0)),hr<=23,mnt<=59,sek<=59),DATE(yr,mon,dy)+TIME(hr,mnt,sek),NA())),NA()),IF(ISDATE(stamp),stamp,NA())),age,ROUND((current-serial)*86400),IF(OR(NOT(ISNUMBER(limit)),ISDATE(limit),limit<=0),"ERROR",IF(age<0,"ERROR",IF(age<=limit*3600,"ACTIVE","STALE")))),"ERROR")
+```
+
+Inne adresy komórek daje generator `sourceFreshnessFormula_(znacznik, próg, { separator })` w `src/SourceFreshness.gs`. Test sprawdza, że obie formuły wyżej są jego wynikiem. Ta sama semantyka w JS, `sourceFreshness_()`, służy do testów. W trybie testowym generator przyjmuje zamiast `NOW()` adres komórki ze stałą chwilą (`{ now: 'E1' }`), żeby na kopii arkusza sprawdzić granicę progu deterministycznie.
+
+**Przeliczanie.** `NOW()` przelicza się przy każdej zmianie w pliku i dodatkowo według ustawienia *Plik → Ustawienia → Obliczenia → Przeliczanie*. Bez okresowego przeliczania („przy zmianie i co minutę” albo „co godzinę”) nieotwarty i niezmieniany plik nie przejdzie do `STALE`. Ustawienie decyduje więc o czułości sygnału i trzeba je zapisać w instalacji razem z progiem.
+
+**Formuła używa angielskich nazw funkcji.** Test przeszedł w pliku z polskim językiem wyświetlania przy zaznaczonym *Plik → Ustawienia → Zawsze używaj angielskich nazw funkcji*. Zachowania bez tej opcji nie sprawdzaliśmy.
+
+**Odczyt bez otwierania pliku (zmierzone 2026-09-29, #197).** Endpoint gviz (`/gviz/tq?tqx=out:csv`) czytał zamknięty plik z przeliczaniem co minutę i oddał `STALE` z `NOW()` z chwili odczytu, a nie z chwili zamknięcia pliku. Drugi odczyt po 22 s dał tę samą chwilę, więc wynik jest trzymany około minuty. Czytelnik maszynowy dostaje więc przez gviz sygnał najwyżej o minutę starszy. Sheets API v4 (`values.get`) nie było mierzone.
+
+**Czego `STALE` nie mówi.** Świeżość to nie zdrowie. `STALE` znaczy tylko, że od progu nie pojawił się nowszy rekord. Nie odróżnia dnia bez zgłoszeń od zerwanej integracji ani awarii formularza. Silniejszy sygnał, czyli porównanie najwyższego identyfikatora rekordu w źródle i w arkuszu, jest poza zakresem.
+
+**Prezentacja.** Dostępność źródła (czy mechanizm odpowiada), jeśli jest mierzona, i świeżość trzymamy w osobnych komórkach. Status łączny, jeśli instalacja go składa, nie może pokazać `ACTIVE` przy świeżości `STALE`. Etykiety wyników można przetłumaczyć w warstwie prezentacji. Produkt nie ma dashboardu źródeł zewnętrznych, a jego instalacja należy do właściciela arkusza. Alert e-mail o `STALE` nie jest częścią tego mechanizmu.
+
 ### Alerty e-mail (model incydentu)
 
 Alerty wysyła `MailApp` (zakres `script.send_mail`; pierwsze wdrożenie z tym zakresem wymaga jednorazowej ponownej autoryzacji skryptu) na adres z `ALERT_EMAIL`. Nie wysyłają się przy każdym zdarzeniu, tylko per **incydent**, jeden na źródło, przechowywany w tym samym rekordzie `LAST_IMPORT_*`:
