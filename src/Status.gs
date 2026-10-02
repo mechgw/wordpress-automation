@@ -144,6 +144,16 @@ function recordImportRun_(source, trigger, fn) {
 
 function recordImportRunLocked_(source, trigger, fn) {
   const startedAt = Date.now();
+  // Znacznik wykonania także dla importów (#209). 27.09 import GSC ubity limitem
+  // 6 min nie zostawił ani wiersza, ani maila: znaczniki z #189 miały tylko
+  // zadania monitorujące. Najpierw odzysk cudzych porzuconych, potem własny.
+  const abandoned = reclaimAbandonedRuns_(source, startedAt);
+  const runId = startRunMarker_(source, trigger, startedAt);
+  const notes = abandoned.map(abandonedRunNote_);
+  // Wiersz za porzucone wykonanie przed pracą, jak w recordJobRunLocked_.
+  abandoned.forEach(function (marker, i) {
+    appendImportLog_(source, abandonedRunEntry_(marker, notes[i]));
+  });
   let result;
 
   try {
@@ -153,7 +163,7 @@ function recordImportRunLocked_(source, trigger, fn) {
       finishedAt: new Date().toISOString(),
       ok: false,
       trigger: Boolean(trigger),
-      error: String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300),
+      error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(notes).join(' | '),
       durationMs: Date.now() - startedAt
     };
     takeOverPendingRuns_({ key: source, run: failed });
@@ -163,9 +173,13 @@ function recordImportRunLocked_(source, trigger, fn) {
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
     updateImportIncident_(source, record);
+    // Znacznik schodzi dopiero po zapisaniu skutków: ubicie w trakcie ich zapisu
+    // zostawia go strażnikowi i następnemu przebiegowi (PR #214).
+    clearRunMarker_(source, runId);
     throw e;
   }
 
+  const handledAt = Date.now();
   const summary = result && typeof result === 'object' ? result : {};
   const run = {
     finishedAt: new Date().toISOString(),
@@ -179,9 +193,12 @@ function recordImportRunLocked_(source, trigger, fn) {
     dataTo: String(summary.dataTo || ''),
     rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
-    warning: String(summary.warning || ''),
+    warning: [String(summary.warning || '')].concat(notes).filter(Boolean).join(' | '),
     durationMs: Date.now() - startedAt
   };
+  // Porzucony poprzedni przebieg otwiera incydent `warning` także dla importu
+  // (#209); inne ostrzeżenia importu nadal incydentu nie otwierają.
+  if (notes.length) run.abandoned = notes.join(' | ');
 
   // Wiersze odmów sprzed tego przebiegu trafiają do logu przed jego wierszem.
   takeOverPendingRuns_({ key: source, run: run });
@@ -200,6 +217,11 @@ function recordImportRunLocked_(source, trigger, fn) {
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
   updateImportIncident_(source, record);
+  clearRunMarker_(source, runId);
+  // Osobny pomiar: etapy pracy mają własny licznik w importRange_/importGa4Range_.
+  // Czas od startu liczony od startu przebiegu, więc nigdy nie maleje (PR #214).
+  console.log('[import ' + source + '] obsługa wyniku: ' + (Date.now() - handledAt) +
+    ' ms (osobny pomiar; od startu przebiegu ' + (Date.now() - startedAt) + ' ms)');
   return result;
 }
 
@@ -837,6 +859,28 @@ function abandonedRunNote_(marker) {
     'możliwe przerwanie przez limit czasu wykonania Apps Script; zakres zapisanych danych jest niepewny';
 }
 
+/** Przebieg porzucony jako wpis rejestru: czas = start porzuconego, czas trwania nieznany. */
+function abandonedRunEntry_(marker, note) {
+  return { finishedAt: marker.startedAt, ok: false, trigger: marker.trigger, error: note };
+}
+
+/**
+ * Czas etapów przebiegu w logu wykonania (#209). Wpis powstaje po każdym
+ * zakończonym etapie, więc rejestr wykonań pokazuje je także dla przebiegu
+ * ubitego limitem 6 min — do ostatniego etapu, który zdążył się skończyć.
+ * 27.09 ubity import GSC nie zostawił żadnego wpisu i nie dało się ustalić,
+ * czy czas szedł na API, czy na arkusz.
+ */
+function importStageTimer_(label) {
+  const started = Date.now();
+  let last = started;
+  return function (stage) {
+    const now = Date.now();
+    console.log('[' + label + '] ' + stage + ': ' + (now - last) + ' ms (od startu ' + (now - started) + ' ms)');
+    last = now;
+  };
+}
+
 // --- Wpisy oczekujące (#204) -------------------------------------------------
 //
 // Trigger odrzucony przez blokadę nie może zapisać wspólnego stanu, bo blokadę
@@ -967,7 +1011,7 @@ function recordJobRunLocked_(key, trigger, fn) {
   // czas trwania nieznany.
   if (job.log) {
     abandoned.forEach(function (marker, i) {
-      appendImportLog_(key, { finishedAt: marker.startedAt, ok: false, trigger: marker.trigger, error: notes[i] });
+      appendImportLog_(key, abandonedRunEntry_(marker, notes[i]));
     });
   }
   let result;
@@ -975,7 +1019,6 @@ function recordJobRunLocked_(key, trigger, fn) {
   try {
     result = fn();
   } catch (e) {
-    clearRunMarker_(key, runId);
     const failed = {
       finishedAt: new Date().toISOString(),
       ok: false,
@@ -990,11 +1033,10 @@ function recordJobRunLocked_(key, trigger, fn) {
     writeJobRecord_(key, record);
     if (job.log) appendImportLog_(key, record.lastRun);
     updateImportIncident_(key, record);
+    clearRunMarker_(key, runId);
     throw e;
   }
 
-  // Kontrolowane zakończenie: znacznik znika zaraz po pracy, przed obsługą wyniku.
-  clearRunMarker_(key, runId);
   const summary = result && typeof result === 'object' ? result : {};
   const run = {
     finishedAt: new Date().toISOString(),
@@ -1021,6 +1063,9 @@ function recordJobRunLocked_(key, trigger, fn) {
   // incydencie kolejne awarie milkną, więc bez wpisu w logu znikają bez śladu.
   if (job.log) appendImportLog_(key, record.lastRun);
   updateImportIncident_(key, record);
+  // Kontrolowane zakończenie: znacznik znika dopiero po zapisaniu skutków. Ubicie
+  // w trakcie ich zapisu zostawia go do odzysku (PR #214).
+  clearRunMarker_(key, runId);
   return result;
 }
 

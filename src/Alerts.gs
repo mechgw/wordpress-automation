@@ -129,6 +129,12 @@ function updateImportIncident_(source, record) {
   let problem = null;
   if (!run.ok) {
     problem = { reason: 'error', detail: String(run.error || 'nieznany błąd') };
+  } else if (run.abandoned) {
+    // Import się udał, ale poprzedni został ubity (#209). Ostrzeżenie, nie błąd:
+    // osobny incydent `error` otwarłby się i zamknął w tym samym przebiegu.
+    // Przed anomalią, a anomalia dołącza do szczegółów: inaczej nota o ubitym
+    // imporcie nie trafiłaby do maila (PR #214).
+    problem = { reason: 'warning', detail: [run.abandoned, run.anomaly].filter(Boolean).map(String).join(' | ') };
   } else if (run.anomaly) {
     problem = { reason: 'anomaly', detail: String(run.anomaly) };
   } else if (run.warning && !importSources_()[source]) {
@@ -213,6 +219,8 @@ function runFreshnessGuard_() {
   const describeSend = (subject, sent) => mail.push(sent ? 'wysłany („' + subject + '”)' : 'nie wysłano („' + subject + '”): ' + ALERT_STATE_.lastError);
   const toNotify = []; // incydenty 'stale' bez wysłanego e-maila: nowe i te z dni bez ALERT_EMAIL
   let checked = 0;
+
+  reclaimAbandonedImports_(now);
 
   // Wszystkie zadania cykliczne, nie tylko importy: zadanie, które przestało
   // działać, jest nieodróżnialne od zadania bez nowych zgłoszeń (#99).
@@ -301,6 +309,30 @@ function runFreshnessGuard_() {
   updateImportIncident_(ALERT_GUARD_JOB_KEY, guard);
 
   return { opened: opened.length, closed: closed.length, mail: mail.length ? mail.join('; ') : 'niepotrzebny (bez zmian)' };
+}
+
+/**
+ * Strażnik odbiera porzucone znaczniki importów (#209). Import uruchamiany raz
+ * dziennie odebrałby własny znacznik dopiero następnego dnia; 27.09 import GSC
+ * ubity o 05:13 widać było wyłącznie w rejestrze wykonań. Strażnik o 08:00
+ * zapisuje wiersz w IMPORT LOG i, gdy porzucony przebieg jest najnowszy, ustawia
+ * go jako ostatni przebieg źródła: komórka statusu pokazuje BŁĄD, a incydent
+ * `error` wysyła mail. Nowszy przebieg (np. ręczny po ubitym) nie jest nadpisywany.
+ */
+function reclaimAbandonedImports_(now) {
+  Object.keys(importSources_()).forEach(source => {
+    reclaimAbandonedRuns_(source, now.getTime()).forEach(marker => {
+      const run = abandonedRunEntry_(marker, abandonedRunNote_(marker));
+      appendImportLog_(source, run);
+      const record = readJobRecord_(source);
+      const lastAt = record.lastRun ? Date.parse(record.lastRun.finishedAt) : NaN;
+      if (lastAt > Date.parse(marker.startedAt)) return;
+      record.lastRun = run;
+      writeJobRecord_(source, record);
+      writeImportStatusCell_(source);
+      updateImportIncident_(source, record);
+    });
+  });
 }
 
 /** Strażnik uruchomiony z menu: to samo co trigger, plus okno z wynikiem. */

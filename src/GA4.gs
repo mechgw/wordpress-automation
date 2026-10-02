@@ -313,6 +313,8 @@ function ustawAutomatycznyImportGA4() {
 }
 
 function importGa4Range_(startDate, endDate, cfg) {
+  // Czas etapów w logu wykonania, także dla ubitego przebiegu (#209).
+  const stage = importStageTimer_('import GA4');
   const start = formatDate_(startDate);
   const end = formatDate_(endDate);
   const importedAt = new Date();
@@ -353,6 +355,8 @@ function importGa4Range_(startDate, endDate, cfg) {
     importedAt
   ]);
 
+  stage('API: landing (' + landingRows.length + ' wierszy)');
+
   // 2) Konkretne key events. Metric filter usuwa zwykłe eventy z keyEvents=0.
   const eventResp = runGa4ReportPaged_(cfg.propertyId, {
     dateRanges: [{ startDate: start, endDate: end }],
@@ -386,6 +390,8 @@ function importGa4Range_(startDate, endDate, cfg) {
     num_(metric_(r, 1)),
     importedAt
   ]);
+
+  stage('API: key events (' + eventRows.length + ' wierszy)');
 
   // 3) Główne zdarzenia biznesowe — zwykły eventCount, niezależnie od statusu key event.
   // Dzięki temu zachowujemy historię sprzed momentu oznaczenia zdarzeń jako key events.
@@ -462,6 +468,8 @@ function importGa4Range_(startDate, endDate, cfg) {
     importedAt
   ]);
 
+  stage('API: zdarzenia biznesowe (' + businessRows.length + ' wierszy)');
+
   // 4) Google Ads — dane sesyjne do analizy landingów, słów i zapytań.
   // UWAGA: celowo NIE łączymy tutaj wymiarów sesyjnych/landing page z metrykami
   // advertiserAdCost / advertiserAdClicks / advertiserAdImpressions. GA4 Data API
@@ -524,27 +532,29 @@ function importGa4Range_(startDate, endDate, cfg) {
     adsWarning = String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 220);
   }
 
+  stage('API: Google Ads (' + adsRows.length + ' wierszy)');
+
   replaceGa4Range_(cfg.landingSheet, 12, startDate, endDate, landingRows, {
     dateColumn: 1,
     percentColumns: [11],
     timestampColumn: 12
-  });
+  }, stage);
 
   replaceGa4Range_(cfg.eventsSheet, 7, startDate, endDate, eventRows, {
     dateColumn: 1,
     timestampColumn: 7
-  });
+  }, stage);
 
   replaceGa4Range_(cfg.businessEventsSheet, 8, startDate, endDate, businessRows, {
     dateColumn: 1,
     timestampColumn: 8
-  });
+  }, stage);
 
   replaceGa4Range_(cfg.adsSheet, 14, startDate, endDate, adsRows, {
     dateColumn: 1,
     currencyColumns: [11, 13],
     timestampColumn: 14
-  });
+  }, stage);
 
   // Status komórki B9 zapisuje recordImportRun_() na podstawie tego wyniku.
   return {
@@ -731,7 +741,7 @@ function requireGa4Config_() {
 /**
  * Zastępuje tylko importowany zakres dat. Dzięki temu ponowny import nie tworzy duplikatów.
  */
-function replaceGa4Range_(sheetName, columnCount, startDate, endDate, newRows, formatOptions) {
+function replaceGa4Range_(sheetName, columnCount, startDate, endDate, newRows, formatOptions, stage) {
   const ss = SpreadsheetApp.getActive();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error('Brak zakładki: ' + sheetName);
@@ -750,6 +760,8 @@ function replaceGa4Range_(sheetName, columnCount, startDate, endDate, newRows, f
     return key < startKey || key > endKey;
   });
 
+  stage(sheetName + ': odczyt (' + existing.length + ' wierszy)');
+
   const combined = kept.concat(newRows);
   const neededLastRow = combined.length + 1;
   if (sheet.getMaxRows() < neededLastRow) {
@@ -763,6 +775,7 @@ function replaceGa4Range_(sheetName, columnCount, startDate, endDate, newRows, f
   if (combined.length) {
     sheet.getRange(2, 1, combined.length, columnCount).setValues(combined);
   }
+  stage(sheetName + ': czyszczenie i zapis (' + combined.length + ' wierszy)');
 
   const n = Math.max(combined.length, 1);
   if (formatOptions && formatOptions.dateColumn) {
@@ -777,6 +790,7 @@ function replaceGa4Range_(sheetName, columnCount, startDate, endDate, newRows, f
   if (formatOptions && formatOptions.timestampColumn) {
     sheet.getRange(2, formatOptions.timestampColumn, n, 1).setNumberFormat('yyyy-mm-dd hh:mm');
   }
+  stage(sheetName + ': formaty');
 }
 
 /** Usuwa query string z landing page, żeby parametry UTM/hsa/ved nie rozbijały jednego URL na wiele wierszy. */
