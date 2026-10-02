@@ -156,6 +156,48 @@ describe('#209: znacznik wykonania importu', () => {
     assert.equal(porzucone(gas).length, 0);
   });
 
+  test('1: ubicie w obsłudze wyniku po udanej pracy zostawia znacznik do odzysku (PR #214)', () => {
+    const gas = projekt();
+    gas.updateImportIncident_ = () => { throw new Error('limit czasu w obsłudze wyniku'); };
+    assert.throws(() => gas.importDzienny({ triggerUid: 't' }), /limit czasu w obsłudze wyniku/);
+    assert.equal(znaczniki(gas).length, 1, 'znacznik zostaje, więc strażnik albo następny przebieg zgłosi przebieg');
+  });
+
+  test('4: ubicie w obsłudze błędu zostawia znacznik do odzysku (PR #214)', () => {
+    const gas = projekt({ fetch: () => ({ code: 500, text: 'awaria' }) });
+    gas.writeImportStatusCell_ = () => { throw new Error('limit czasu w obsłudze błędu'); };
+    assert.throws(() => gas.importDzienny({ triggerUid: 't' }), /limit czasu w obsłudze błędu/);
+    assert.equal(znaczniki(gas).length, 1);
+  });
+
+  test('zadanie monitorujące: ubicie w obsłudze wyniku też zostawia znacznik (#189, PR #214)', () => {
+    const gas = projekt();
+    gas.updateImportIncident_ = () => { throw new Error('limit'); };
+    assert.throws(() => gas.recordJobRun_('PERFORMANCE', true, () => ({ rows: 1 })), /limit/);
+    assert.equal(znaczniki(gas).length, 1, 'po udanej pracy');
+    const g2 = projekt();
+    g2.updateImportIncident_ = () => { throw new Error('limit'); };
+    assert.throws(() => g2.recordJobRun_('PERFORMANCE', true, () => { throw new Error('boom'); }), /limit/);
+    assert.equal(znaczniki(g2).length, 1, 'po błędzie pracy');
+  });
+
+  test('1: porzucony przebieg i anomalia naraz — incydent niesie notę o porzuceniu i anomalię (PR #214)', () => {
+    const gas = projekt();
+    for (let i = 20; i > 13; i--) {
+      gas.recordImportRun_('GSC', true, () => ({ rows: 100, days: 1, dataFrom: localDate(i), dataTo: localDate(i) }));
+    }
+    ostatniOk(gas, localDate(3)); // import jednego dnia, w profilu jednodniowym
+    znacznik(gas, 'GSC', 10);
+    gas.importDzienny({ triggerUid: 't' }); // 1 wiersz wobec mediany 100: anomalia
+    const rec = rekord(gas);
+    assert.ok(rec.lastRun.anomaly, 'anomalia jest');
+    assert.equal(rec.incident.reason, 'warning');
+    assert.match(rec.incident.detail, NOTA);
+    assert.match(rec.incident.detail, /mało danych: 1 wierszy vs mediana 100/);
+    const mail = gas.$mails.find(m => /Search Console/.test(m.subject));
+    assert.match(mail.body, NOTA);
+  });
+
   test('4: błąd w trakcie importu usuwa własny znacznik; wiersz BŁĄD bez noty o porzuceniu', () => {
     const gas = projekt({ fetch: () => ({ code: 500, text: 'awaria' }) });
     assert.throws(() => gas.importDzienny({ triggerUid: 't' }), /HTTP 500/);
@@ -240,17 +282,23 @@ describe('#209: samonaprawa luki w imporcie dziennym', () => {
     assert.equal(out.rows, 2, 'po jednym wierszu na dzień');
     assert.equal(rekord(gas).lastRun.anomaly, undefined, '2 wiersze z dwóch dni nie są porównywane z medianą 100 jednego dnia');
     assert.equal(logi(gas).slice(-1)[0][3], 2);
+
+    // Próba kontrolna: ta sama baza alarmuje przy przebiegu jednodniowym.
+    ostatniOk(gas, localDate(3));
+    gas.importDzienny({ triggerUid: 't' });
+    assert.match(String(rekord(gas).lastRun.anomaly), /mało danych: 1 wierszy vs mediana 100/);
   });
 });
 
 /** Zakładka GSC RAW z kotwicami K–L w wierszu `wiersz` i opcjonalnymi wierszami pod danymi. */
-function zakladka({ fk = FK, fl = FL, wiersz = 1, dane, ogon = 0, formulyNizej = [], maxRows } = {}) {
+function zakladka({ fk = FK, fl = FL, wiersz = 1, dane, ogon = 0, formulyNizej = [], maxRows, bezPustego = false, kotwicaKwWierszu1 = false } = {}) {
   const rows = [HEADER.concat(['Pozycja×wyświetlenia', 'Data_num'])];
-  if (wiersz === 2) rows.push(['', '', '', '', '', '', '', '', '', '', '', '']);
+  // `bezPustego`: typowy układ — dane A2:J2 obok kotwic K2:L2.
+  if (wiersz === 2 && !bezPustego) rows.push(['', '', '', '', '', '', '', '', '', '', '', '']);
   dane.forEach((d, i) => rows.push([d, 'q' + i, '/p', 'pol', 'MOBILE', 1, 10, 0.1, 2, '', 20, 46000 + i]));
   for (let i = 0; i < ogon; i++) rows.push(['', '', '', '', '', '', '', '', '', '', '', '']);
   const formulas = rows.map(() => Array(12).fill(''));
-  if (fk !== null) formulas[wiersz - 1][10] = fk;
+  if (fk !== null) formulas[kotwicaKwWierszu1 ? 0 : wiersz - 1][10] = fk;
   if (fl !== null) formulas[wiersz - 1][11] = fl;
   formulyNizej.forEach(([r, c, f]) => { formulas[r - 1][c] = f; });
   return { rows, formulas, maxRows };
@@ -315,6 +363,26 @@ describe('#209: zapis tylko importowanych dni (kotwice K–L zatwierdzone)', () 
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
     assert.doesNotMatch(out.warning, /K–L/);
     assert.equal(zapisy(gas).filter(e => e[0] === 'clearContent').length, 0);
+  });
+
+  test('7a: kotwice w wierszu 2 obok danych, data A2 poza zakresem — nowa ścieżka, kotwice nietknięte', () => {
+    const raw = zakladka({ dane: [localDate(20), CEL], wiersz: 2, bezPustego: true });
+    const gas = projekt({ raw, properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.doesNotMatch(out.warning, /K–L/);
+    assert.deepEqual(formulyKL(gas)[1], [FK, FL]);
+    assert.deepEqual(zapisy(gas).filter(e => e[0] === 'deleteRows').map(e => e[2]), [3]);
+  });
+
+  test('7b: kotwice w wierszu 2, a data A2 należy do zakresu — fallback, kotwice przetrwały (PR #214)', () => {
+    for (const [kolumna, uklad] of [['K i L', {}], ['tylko L', { fk: FK, wiersz: 2, kotwicaKwWierszu1: true }]]) {
+      const raw = zakladka(Object.assign({ dane: [CEL, localDate(20)], wiersz: 2, bezPustego: true }, uklad));
+      const gas = projekt({ raw, properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
+      const out = plain(gas.importDzienny({ triggerUid: 't' }));
+      assert.match(out.warning, /K–L: zapis całej zakładki, bo kotwica w wierszu 2, a wiersz 2 należy do importowanego zakresu/, kolumna);
+      assert.deepEqual(zapisy(gas).filter(e => e[0] === 'deleteRows'), [], kolumna);
+      assert.equal(formulyKL(gas)[1][1], FL, kolumna + ': kotwica L2 przetrwała');
+    }
   });
 
   test('7a: ręczny import zakresu zostaje przy zapisie całej zakładki, bez ostrzeżenia K–L', () => {
@@ -387,6 +455,17 @@ describe('#209: czas etapów w logu wykonania', () => {
     gas.importDzienny({ triggerUid: 't' });
     assert.deepEqual(etapy(gas, 'GSC'), ['zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie', 'zapis całej zakładki', 'formaty', 'obsługa wyniku']);
     assert.ok(gas.$console.every(([, t]) => !t.startsWith('[import GSC] zapytania') || /: \d+ ms \(od startu \d+ ms\)$/.test(t)));
+  });
+
+  test('9: czas od startu nie maleje — obsługa wyniku liczy od startu przebiegu (PR #214)', () => {
+    const gas = projekt({ raw: { rows: [HEADER] } });
+    let t = 1000;
+    gas.$Date.now = () => (t += 50);
+    gas.importDzienny({ triggerUid: 't' });
+    const odStartu = gas.$console.map(([, x]) => x).filter(x => x.startsWith('[import GSC] ') && !x.includes('kotwice'))
+      .map(x => Number(/(?:od startu|od startu przebiegu) (\d+) ms/.exec(x)[1]));
+    for (let i = 1; i < odStartu.length; i++) assert.ok(odStartu[i] >= odStartu[i - 1], 'malejący czas od startu: ' + odStartu.join(', '));
+    assert.match(gas.$console.map(([, x]) => x).find(x => x.includes('obsługa wyniku')), /osobny pomiar/);
   });
 
   test('9: GSC, nowa ścieżka — etapy usunięcia i dopisania', () => {

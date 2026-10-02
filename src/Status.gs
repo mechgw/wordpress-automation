@@ -159,7 +159,6 @@ function recordImportRunLocked_(source, trigger, fn) {
   try {
     result = fn();
   } catch (e) {
-    clearRunMarker_(source, runId);
     const failed = {
       finishedAt: new Date().toISOString(),
       ok: false,
@@ -174,12 +173,13 @@ function recordImportRunLocked_(source, trigger, fn) {
     appendImportLog_(source, record.lastRun);
     writeImportStatusCell_(source);
     updateImportIncident_(source, record);
+    // Znacznik schodzi dopiero po zapisaniu skutków: ubicie w trakcie ich zapisu
+    // zostawia go strażnikowi i następnemu przebiegowi (PR #214).
+    clearRunMarker_(source, runId);
     throw e;
   }
 
-  clearRunMarker_(source, runId);
-  // Czas obsługi wyniku (log, rekord, incydent) w logu wykonania (#209).
-  const stage = importStageTimer_('import ' + source);
+  const handledAt = Date.now();
   const summary = result && typeof result === 'object' ? result : {};
   const run = {
     finishedAt: new Date().toISOString(),
@@ -217,7 +217,11 @@ function recordImportRunLocked_(source, trigger, fn) {
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
   updateImportIncident_(source, record);
-  stage('obsługa wyniku');
+  clearRunMarker_(source, runId);
+  // Osobny pomiar: etapy pracy mają własny licznik w importRange_/importGa4Range_.
+  // Czas od startu liczony od startu przebiegu, więc nigdy nie maleje (PR #214).
+  console.log('[import ' + source + '] obsługa wyniku: ' + (Date.now() - handledAt) +
+    ' ms (osobny pomiar; od startu przebiegu ' + (Date.now() - startedAt) + ' ms)');
   return result;
 }
 
@@ -1015,7 +1019,6 @@ function recordJobRunLocked_(key, trigger, fn) {
   try {
     result = fn();
   } catch (e) {
-    clearRunMarker_(key, runId);
     const failed = {
       finishedAt: new Date().toISOString(),
       ok: false,
@@ -1030,11 +1033,10 @@ function recordJobRunLocked_(key, trigger, fn) {
     writeJobRecord_(key, record);
     if (job.log) appendImportLog_(key, record.lastRun);
     updateImportIncident_(key, record);
+    clearRunMarker_(key, runId);
     throw e;
   }
 
-  // Kontrolowane zakończenie: znacznik znika zaraz po pracy, przed obsługą wyniku.
-  clearRunMarker_(key, runId);
   const summary = result && typeof result === 'object' ? result : {};
   const run = {
     finishedAt: new Date().toISOString(),
@@ -1061,6 +1063,9 @@ function recordJobRunLocked_(key, trigger, fn) {
   // incydencie kolejne awarie milkną, więc bez wpisu w logu znikają bez śladu.
   if (job.log) appendImportLog_(key, record.lastRun);
   updateImportIncident_(key, record);
+  // Kontrolowane zakończenie: znacznik znika dopiero po zapisaniu skutków. Ubicie
+  // w trakcie ich zapisu zostawia go do odzysku (PR #214).
+  clearRunMarker_(key, runId);
   return result;
 }
 

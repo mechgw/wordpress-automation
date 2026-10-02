@@ -312,6 +312,8 @@ Inne adresy komórek daje generator `sourceFreshnessFormula_(znacznik, próg, { 
 2. jej tekst jest znak w znak taki jak wzorzec w `GSC_KL_ANCHOR_FORMULAS`;
 3. jej wartość nie jest błędem (`#REF!`, `#N/A`…).
 
+Kotwica w wierszu 2 stoi zwykle obok danych A2:J2, a usunięcie wiersza 2 zabrałoby ją razem z nimi. Dlatego gdy data w A2 należy do importowanego zakresu, import idzie ścieżką dotychczasową. Wiersz 1 nie jest usuwany nigdy.
+
 Każdy inny stan, w tym brak właściwości albo zły JSON, to zapis całej zakładki, jak dawniej, z ostrzeżeniem `K–L: zapis całej zakładki, bo …`. Ostrzeżenie podaje kolumnę, niespełniony warunek i początek formuły. Ręczny import zakresu zawsze zapisuje całą zakładkę.
 
 **Zatwierdzenie wzorca.** Pierwszy import po wdrożeniu idzie ścieżką dotychczasową i zapisuje w logu wykonania linię `[import GSC] kotwice K–L (pełny tekst): {"K":"…","L":"…"}`. Właściciel arkusza sprawdza, że obie formuły liczą wartość dla każdego wiersza (np. `ARRAYFORMULA(IF(A2:A="",,…))`), i wpisuje ten JSON do `GSC_KL_ANCHOR_FORMULAS`. Od następnego przebiegu działa nowa ścieżka. Gdy formuły w arkuszu się zmienią, a właściwość nie, import wraca do zapisu całej zakładki z ostrzeżeniem.

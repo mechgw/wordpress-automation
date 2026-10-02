@@ -129,12 +129,14 @@ function updateImportIncident_(source, record) {
   let problem = null;
   if (!run.ok) {
     problem = { reason: 'error', detail: String(run.error || 'nieznany błąd') };
-  } else if (run.anomaly) {
-    problem = { reason: 'anomaly', detail: String(run.anomaly) };
   } else if (run.abandoned) {
     // Import się udał, ale poprzedni został ubity (#209). Ostrzeżenie, nie błąd:
     // osobny incydent `error` otwarłby się i zamknął w tym samym przebiegu.
-    problem = { reason: 'warning', detail: String(run.abandoned) };
+    // Przed anomalią, a anomalia dołącza do szczegółów: inaczej nota o ubitym
+    // imporcie nie trafiłaby do maila (PR #214).
+    problem = { reason: 'warning', detail: [run.abandoned, run.anomaly].filter(Boolean).map(String).join(' | ') };
+  } else if (run.anomaly) {
+    problem = { reason: 'anomaly', detail: String(run.anomaly) };
   } else if (run.warning && !importSources_()[source]) {
     // Ostrzeżenie zadania monitorującego: przebieg się udał i dane są zapisane,
     // ale część pracy się nie powiodła (#179). Importy mają własną ścieżkę przez

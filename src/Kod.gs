@@ -250,7 +250,7 @@ function importRange_(startDate, endDate, options) {
   const warnings = [opts.warning];
   // Same importowane dni tylko w imporcie dziennym i tylko przy zatwierdzonym
   // układzie K–L; każdy inny przypadek to zapis całej zakładki, jak dawniej.
-  const layout = opts.daily ? gscKlLayout_(sheet) : null;
+  const layout = opts.daily ? gscKlLayout_(sheet, startDate, endDate) : null;
   if (layout) stage('rozpoznanie K–L');
   if (layout && layout.ok) {
     appendGscDays_(sheet, startDate, endDate, output, stage);
@@ -342,8 +342,12 @@ const GSC_KL_PROPERTY = 'GSC_KL_ANCHOR_FORMULAS';
  * rusza wyłącznie dla kotwic identycznych z wzorcem zatwierdzonym przez
  * właściciela. Każdy inny stan to `ok: false` i zapis całej zakładki, który K–L
  * nie dotyka. Kod nigdy nie zapisuje K–L.
+ *
+ * Kotwica w wierszu 2 stoi zwykle obok danych A2:J2. Usunięcie wiersza 2
+ * usunęłoby ją razem z danymi, więc gdy A2 należy do importowanego zakresu,
+ * szybka ścieżka odmawia (PR #214). Wiersz 1 nie jest usuwany nigdy.
  */
-function gscKlLayout_(sheet) {
+function gscKlLayout_(sheet, startDate, endDate) {
   const lastRow = Math.max(sheet.getLastRow(), 2);
   const range = sheet.getRange(1, 11, lastRow, 2);
   const formulas = range.getFormulas();
@@ -351,17 +355,25 @@ function gscKlLayout_(sheet) {
   const patterns = gscKlPatterns_();
   const anchors = {};
   const problems = [];
+  let anchorRow = 0;
   ['K', 'L'].forEach((col, c) => {
     const found = [];
     formulas.forEach((row, i) => {
       if (row[c]) found.push({ row: i + 1, text: row[c], value: values[i][c] });
     });
     anchors[col] = found.length ? found[0].text : '';
+    if (found.length) anchorRow = Math.max(anchorRow, found[0].row);
     const reason = gscKlProblem_(found, patterns ? patterns[col] : undefined);
     if (reason) {
       problems.push(col + ': ' + reason + ', kotwica: ' + (found.length ? found[0].text.slice(0, 200) : 'brak formuły'));
     }
   });
+  if (!problems.length && anchorRow === 2) {
+    const a2 = normalizujDate_(sheet.getRange(2, 1).getValue());
+    if (a2 && a2 >= startDate && a2 <= endDate) {
+      problems.push('kotwica w wierszu 2, a wiersz 2 należy do importowanego zakresu (' + a2 + ')');
+    }
+  }
   return {
     ok: !problems.length,
     anchors: anchors,
