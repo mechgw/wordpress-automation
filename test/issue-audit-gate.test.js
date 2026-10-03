@@ -703,7 +703,11 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
       cytat: cytat(PRZYKLAD),
       'cytat w cytacie': cytat(cytat(PRZYKLAD)),
       'element listy': ['- przykład:', ''].concat(PRZYKLAD.map(l => (l ? '  ' + l : l))),
-      '<details>': ['<details>', '<summary>Przykład</summary>', '', ...PRZYKLAD, '', '</details>']
+      '<details>': ['<details>', '<summary>Przykład</summary>', '', ...PRZYKLAD, '', '</details>'],
+      // Zwykły `div` autora, także z klasą udającą opakowanie GitHuba: GitHub usuwa `class` z treści.
+      '<div>': ['<div>', '', ...PRZYKLAD, '', '</div>'],
+      '<div class="markdown-heading">': ['<div class="markdown-heading">', '', ...PRZYKLAD, '', '</div>'],
+      '<section>': ['<section>', '', ...PRZYKLAD, '', '</section>']
     };
     for (const [nazwa, blok] of Object.entries(PRZYKLADY)) {
       // Zagnieżdżony przykład przed właściwą sekcją: nie zostaje „pierwszą sekcją”.
@@ -743,6 +747,9 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     // Przekreślenie w każdym zapisie znika; encje są rozwijane po zdjęciu znaczników.
     assert.deepEqual(rows('<h2>Triage</h2><table><tr><td>priorytet</td><td><del>P1</del> <s>P3</s> <strike>P4</strike> P2 &amp; &lt;b&gt;</td></tr></table>'),
       [['priorytet', 'P2 & <b>']]);
+    // Znaczniki w komórce mogą mieć atrybuty, także z `>` w wartości.
+    assert.deepEqual(rows('<h2>Triage</h2><table><tr><td>priorytet</td><td><del class="x">P1</del> P2 <a title="a > b" href="#x">zob.</a></td></tr></table>'),
+      [['priorytet', 'P2 zob.']]);
     // Koniec sekcji: nagłówek dowolnego poziomu albo linia pozioma, także samozamykająca.
     for (const koniec of ['<h3 dir="auto">Dalej</h3>', '<hr>', '<hr />', '<HR class="x">']) {
       assert.deepEqual(rows('<h2>Triage</h2><p>tekst</p>' + koniec + '<table><tr><td>priorytet</td><td>P1</td></tr></table>'), [], koniec);
@@ -755,6 +762,19 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
         '<' + opakowanie + '><table role="table"><tbody><tr><td>priorytet</td><td>P1</td></tr></tbody></table></' + opakowanie + '>'),
       [['priorytet', 'P1']], opakowanie);
     }
+    // `div` jest opakowaniem tylko z klasą `markdown-heading`; każdy inny to kontener autora.
+    const wDiv = atrybuty => rows('<div' + atrybuty + '><h2>Triage</h2><table><tr><td>priorytet</td><td>P1</td></tr></table></div>');
+    for (const atrybuty of ['', ' class="example"', ' class="not-markdown-heading"', ' class="markdown-heading-x"', ' data-class="markdown-heading"',
+      ' id="user-content-x"', ' title="class=\'markdown-heading\'"']) {
+      assert.deepEqual(wDiv(atrybuty), [], '<div' + atrybuty + '>');
+    }
+    for (const atrybuty of [' class="markdown-heading"', ' dir="auto" class="x markdown-heading y"', ' CLASS=\'markdown-heading\'']) {
+      assert.deepEqual(wDiv(atrybuty), [['priorytet', 'P1']], '<div' + atrybuty + '>');
+    }
+    // Opakowanie samo nie jest elementem poziomu: zostają jego dzieci, w kolejności dokumentu.
+    const nazwy = (html, przezroczyste) => plainRows(gate.topLevelElements(html, name => przezroczyste.includes(name)).map(e => e.name));
+    assert.deepEqual(nazwy('<div><h2>a</h2><br></div><p>b <em>c</em></p><hr><ul><li>d</li></ul>', ['div']), ['h2', 'br', 'p', 'hr', 'ul']);
+    assert.deepEqual(nazwy('<div><h2>a</h2><br></div><p>b</p>', []), ['div', 'p']);
     // Zagnieżdżenie: nagłówek i tabela w cytacie nie liczą się, a cytat w sekcji jej nie kończy.
     assert.deepEqual(rows('<blockquote><h2>Triage</h2><table><tr><td>priorytet</td><td>P4</td></tr></table></blockquote>'), []);
     assert.deepEqual(rows('<h2>Triage</h2><blockquote><h3>Cytat</h3><hr><table><tr><td>priorytet</td><td>P4</td></tr></table></blockquote>' +

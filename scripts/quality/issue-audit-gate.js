@@ -261,18 +261,20 @@ function familySatisfied(labels, family) {
 }
 
 /**
- * HTML bez atrybutów: każdy znacznik zostaje jako `<nazwa>` albo `</nazwa>`.
- * Wzorzec rozumie cudzysłowy, więc `>` w wartości atrybutu nie kończy znacznika,
- * a dalsze wyrażenia nie muszą się atrybutami przejmować.
+ * Znacznik HTML: ukośnik zamknięcia, nazwa i atrybuty. Wzorzec rozumie
+ * cudzysłowy, więc `>` w wartości atrybutu nie kończy znacznika.
  */
+const HTML_TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/;
+
+/** HTML bez atrybutów: każdy znacznik zostaje jako `<nazwa>` albo `</nazwa>`. */
 function stripAttributes(html) {
-  return String(html || '').replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?:"[^"]*"|'[^']*'|[^'">])*>/g,
+  return String(html || '').replace(new RegExp(HTML_TAG.source, 'g'),
     (match, slash, name) => '<' + slash + name.toLowerCase() + '>');
 }
 
 /** Tekst widoczny w kawałku HTML-a: bez znaczników, bez treści przekreślonej, z rozwiniętymi encjami. */
 function htmlText(html) {
-  return String(html || '')
+  return stripAttributes(html)
     // Przekreślenie to wartość wycofana przez autora, nie druga wartość.
     .replace(/<(del|s|strike)>[\s\S]*?<\/\1>/g, '')
     .replace(/<[^>]*>/g, '')
@@ -289,16 +291,27 @@ function htmlText(html) {
 const HTML_VOID = ['br', 'hr', 'img', 'input', 'wbr', 'col', 'area', 'source', 'track', 'embed'];
 
 /**
- * Opakowania, które GitHub sam dokłada wokół nagłówków i tabel; ich zawartość
- * jest nadal na poziomie dokumentu. Nazwa opakowania tabeli ma w HTML-u GitHuba
- * literówkę — przyjmujemy też poprawną pisownię, gdyby ją naprawiono.
+ * Czy element jest opakowaniem, które GitHub sam dokłada wokół nagłówka albo
+ * tabeli — jego zawartość stoi wtedy nadal na poziomie dokumentu.
+ *
+ * `div` liczy się tylko z klasą `markdown-heading`. Zwykły `div` wpisany przez
+ * autora to kontener jak każdy inny, a klasy autor podrobić nie może: GitHub
+ * usuwa atrybut `class` z HTML-a w treści (sprawdzone na rendererze, PR #216).
+ * Nazwa opakowania tabeli ma w HTML-u GitHuba literówkę — przyjmujemy też
+ * poprawną pisownię, gdyby ją naprawiono.
  */
-const HTML_WRAPPERS = ['div', 'markdown-accessiblity-table', 'markdown-accessibility-table'];
+function isGithubWrapper(name, attributes) {
+  if (name === 'markdown-accessiblity-table' || name === 'markdown-accessibility-table') return true;
+  if (name !== 'div') return false;
+  const cls = /(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attributes);
+  return Boolean(cls) && String(cls[1] || cls[2] || '').split(/\s+/).includes('markdown-heading');
+}
 
 /**
- * Elementy z najwyższego poziomu fragmentu HTML-a (bez atrybutów), po kolei,
- * jako `{ name, inner }`. Elementy z `transparent` nie liczą się jako poziom:
- * ich dzieci są traktowane, jakby stały bezpośrednio we fragmencie.
+ * Elementy z najwyższego poziomu fragmentu HTML-a, po kolei, jako
+ * `{ name, inner }`. Elementy, dla których `transparent(name, attributes)` jest
+ * prawdą, nie liczą się jako poziom: ich dzieci są traktowane, jakby stały
+ * bezpośrednio we fragmencie.
  *
  * Element, który się nie zamyka, zostawia wszystko po sobie zagnieżdżone, więc
  * z uszkodzonego HTML-a nie powstaje żaden element najwyższego poziomu.
@@ -306,22 +319,23 @@ const HTML_WRAPPERS = ['div', 'markdown-accessiblity-table', 'markdown-accessibi
 function topLevelElements(html, transparent) {
   const elements = [];
   const stack = [];
-  const nested = () => stack.some(open => !transparent.includes(open.name));
-  const tag = /<(\/?)([a-z][a-z0-9-]*)>/g;
+  const nested = () => stack.some(open => !open.transparent);
+  const tag = new RegExp(HTML_TAG.source, 'g');
   for (let match = tag.exec(html); match; match = tag.exec(html)) {
-    const name = match[2];
+    const name = match[2].toLowerCase();
     if (!match[1]) {
-      if (!HTML_VOID.includes(name)) stack.push({ name: name, contentStart: tag.lastIndex });
-      else if (!nested()) elements.push({ name: name, inner: '' });
+      if (!HTML_VOID.includes(name)) {
+        stack.push({ name: name, transparent: transparent(name, match[3]), contentStart: tag.lastIndex });
+      } else if (!nested()) {
+        elements.push({ name: name, inner: '' });
+      }
       continue;
     }
     const at = stack.map(open => open.name).lastIndexOf(name);
     if (at < 0) continue;
     const open = stack[at];
     stack.length = at;
-    if (!nested() && !transparent.includes(name)) {
-      elements.push({ name: name, inner: html.slice(open.contentStart, match.index) });
-    }
+    if (!nested() && !open.transparent) elements.push({ name: name, inner: html.slice(open.contentStart, match.index) });
   }
   return elements;
 }
@@ -343,14 +357,14 @@ function topLevelElements(html, transparent) {
  * Liczy się wyłącznie poziom dokumentu. Sekcja zaczyna się od pierwszego
  * nagłówka drugiego poziomu o treści „Triage” i kończy na następnym nagłówku
  * albo linii poziomej; czytane są tabele stojące bezpośrednio w sekcji.
- * Nagłówek i tabela w cytacie, na liście albo w `<details>` to przykład albo
- * cudza wypowiedź: GitHub renderuje je jako prawdziwe `<h2>` i `<table>`, więc
- * bez tej reguły zacytowany przykład zostawałby „pierwszą sekcją”.
- * Nierozpoznany kształt HTML-a daje brak wierszy, czyli `needs-triage`
+ * Nagłówek i tabela w cytacie, na liście, w `<details>` albo w `<div>` autora
+ * to przykład albo cudza wypowiedź: GitHub renderuje je jako prawdziwe `<h2>`
+ * i `<table>`, więc bez tej reguły zacytowany przykład zostawałby „pierwszą
+ * sekcją”. Nierozpoznany kształt HTML-a daje brak wierszy, czyli `needs-triage`
  * (fail-closed).
  */
 function triageTableRows(bodyHtml) {
-  const blocks = topLevelElements(stripAttributes(bodyHtml), HTML_WRAPPERS);
+  const blocks = topLevelElements(String(bodyHtml || ''), isGithubWrapper);
   const start = blocks.findIndex(block => block.name === 'h2' && htmlText(block.inner).toLowerCase() === 'triage');
   if (start < 0) return [];
 
@@ -358,8 +372,8 @@ function triageTableRows(bodyHtml) {
   for (let i = start + 1; i < blocks.length; i++) {
     if (/^h[1-6]$/.test(blocks[i].name) || blocks[i].name === 'hr') break;
     if (blocks[i].name !== 'table') continue;
-    topLevelElements(blocks[i].inner, ['thead', 'tbody', 'tfoot']).filter(row => row.name === 'tr').forEach(row => {
-      const cells = topLevelElements(row.inner, []).filter(cell => cell.name === 'td' || cell.name === 'th')
+    topLevelElements(blocks[i].inner, name => ['thead', 'tbody', 'tfoot'].includes(name)).filter(row => row.name === 'tr').forEach(row => {
+      const cells = topLevelElements(row.inner, () => false).filter(cell => cell.name === 'td' || cell.name === 'th')
         .map(cell => htmlText(cell.inner));
       if (cells.length) rows.push(cells);
     });
@@ -731,6 +745,7 @@ module.exports = {
   labelChanges,
   triageTableRows,
   triageLabelFromTable,
+  topLevelElements,
   TRIAGE_FAMILIES,
   NEEDS_TRIAGE,
   inScope,
