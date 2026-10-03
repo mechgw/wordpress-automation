@@ -48,13 +48,20 @@ const NEEDS_TRIAGE = 'needs-triage';
 
 /**
  * Rodziny etykiet triage'u (#211). `row`: początek pierwszej komórki wiersza
- * tabeli „Triage”; `token`: etykieta w komórce z wartością; `single`: rodzina
- * o kardynalności „dokładnie jedna” (dla `area` wystarczy co najmniej jedna).
+ * tabeli „Triage”; `label`: czy etykieta issue należy do rodziny; `token`:
+ * etykieta w komórce z wartością; `single`: rodzina o kardynalności „dokładnie
+ * jedna” (dla `area` wystarczy co najmniej jedna).
+ *
+ * `label` i `token` są rozdzielone celowo. Nazwę `area:*` z tabeli czytamy
+ * w całości, do białego znaku albo znaku składni Markdownu: wzorzec zawężony do
+ * liter i cyfr skracał `area:github_extra` do `area:github` i nakładał inną
+ * etykietę niż podana, a już nałożonej etykiety z podkreśleniem nie zaliczał
+ * do rodziny (PR #216).
  */
 const TRIAGE_FAMILIES = {
-  P: { row: 'priorytet', token: /\bP[0-4]\b/g, single: true },
-  T: { row: 'ryzyko', token: /\bT[1-3]\b/g, single: true },
-  area: { row: 'obszar', token: /\barea:[\p{L}\p{N}-]+/gu, single: false }
+  P: { row: 'priorytet', label: /^P[0-4]$/, token: /\bP[0-4]\b/g, single: true },
+  T: { row: 'ryzyko', label: /^T[1-3]$/, token: /\bT[1-3]\b/g, single: true },
+  area: { row: 'obszar', label: /^area:./, token: /\barea:[^\s|`*,;]+/g, single: false }
 };
 
 const DEFAULT_CONFIG = {
@@ -243,11 +250,7 @@ function reconcile(input, config = {}) {
 
 /** Etykiety issue należące do rodziny triage'u. */
 function familyLabels(labels, family) {
-  const token = TRIAGE_FAMILIES[family].token;
-  return (labels || []).filter(name => {
-    const found = String(name).match(token);
-    return Boolean(found) && found.length === 1 && found[0] === name;
-  });
+  return (labels || []).filter(name => TRIAGE_FAMILIES[family].label.test(String(name)));
 }
 
 /** Czy rodzina ma komplet: dokładnie jedna etykieta, a dla `area` co najmniej jedna. */
@@ -259,17 +262,31 @@ function familySatisfied(labels, family) {
 /**
  * Wiersze tabeli z sekcji `## Triage` treści issue, każdy jako lista komórek.
  * Sekcja kończy się na następnym nagłówku; bez sekcji albo bez tabeli — [].
+ *
+ * Bloki kodu (``` i ~~~) są pomijane w całości, także przy szukaniu nagłówka:
+ * przykład tabeli wklejony do opisu przed właściwą sekcją nałożyłby etykiety
+ * z przykładu (PR #216). Wierszem tabeli jest każda linia sekcji z `|` —
+ * Markdown nie wymaga separatorów na brzegach.
  */
 function triageTableRows(body) {
-  const lines = String(body || '').split(/\r?\n/);
-  const start = lines.findIndex(line => /^##\s+Triage\s*$/i.test(line));
-  if (start < 0) return [];
   const rows = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^#{1,6}\s/.test(lines[i])) break;
-    const line = lines[i].trim();
-    if (line.charAt(0) !== '|') continue;
-    rows.push(line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
+  let fence = '';
+  let inside = false;
+  for (const raw of String(body || '').split(/\r?\n/)) {
+    const mark = /^\s{0,3}(```|~~~)/.exec(raw);
+    if (mark) {
+      if (!fence) fence = mark[1];
+      else if (fence === mark[1]) fence = '';
+      continue;
+    }
+    if (fence) continue;
+    if (/^#{1,6}\s/.test(raw)) {
+      if (inside) break;
+      inside = /^##\s+Triage\s*$/i.test(raw);
+      continue;
+    }
+    if (!inside || raw.indexOf('|') < 0) continue;
+    rows.push(raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
   }
   return rows;
 }

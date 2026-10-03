@@ -532,6 +532,51 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P2', 'T2']);
   });
 
+  test('area:* jest czytana w całości — nieznana nazwa z istniejącym krótszym prefiksem nie staje się krótszą etykietą (PR #216)', () => {
+    // `area:github` istnieje, `area:github_extra` i `area:github/docs` nie.
+    for (const nazwa of ['area:github_extra', 'area:github/docs', 'area:github.docs']) {
+      const body = tabela('| priorytet | **P3** | proces |', '| obszar | `' + nazwa + '` | |');
+      const triage = reconcileTriage(nowa({ body }), { triageRequired: ['P', 'area'] });
+      assert.deepEqual(triage.add, ['P3', NEEDS_TRIAGE], nazwa);
+    }
+    const znane = REPO_LABELS.concat(['area:github_extra']);
+    const body = tabela('| priorytet | **P3** | proces |', '| obszar | area:github_extra | |');
+    assert.deepEqual(reconcileTriage(nowa({ body, repoLabels: znane }), { triageRequired: ['P', 'area'] }).add, ['P3', 'area:github_extra']);
+  });
+
+  test('już nałożona area:* z podkreśleniem albo ukośnikiem spełnia rodzinę (PR #216)', () => {
+    for (const nazwa of ['area:apps_script', 'area:web/front']) {
+      const triage = reconcileTriage(nowa({ labels: ['P3', nazwa] }), { triageRequired: ['P', 'area'] });
+      assert.deepEqual(triage.add, [], nazwa);
+      assert.match(triage.reason, /triage kompletny/, nazwa);
+    }
+  });
+
+  test('przykład „## Triage” w bloku kodu przed właściwą sekcją nie jest czytany (PR #216)', () => {
+    const body = ['## Problem', '', 'Przykład tabeli:', '', '```md', '## Triage', '', '| priorytet | **P4** | przykład |',
+      '| ryzyko | **T1** | przykład |', '```', '', '~~~', '## Triage', '| priorytet | **P4** | przykład |', '~~~', '',
+      '## Triage', '', '| wymiar | wartość |', '| --- | --- |', '| priorytet | **P1** |', '```', '| ryzyko | **T1** |', '```',
+      '| ryzyko | **T3** |'].join('\n');
+    const outcome = przebieg(nowa({ body }));
+    assert.deepEqual(outcome.triage.add, ['P1', 'T3']);
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+  });
+
+  test('blok kodu zamyka tylko ten sam znacznik, a z dwóch sekcji „Triage” czytana jest pierwsza (PR #216)', () => {
+    const wBloku = ['```md', '~~~', '## Triage', '| priorytet | **P4** | przykład |', '| ryzyko | **T1** | przykład |', '```', '',
+      '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: wBloku })).add, ['P1', 'T3']);
+
+    const dwie = ['## Triage', '', '| priorytet | **P1** |', '', '## Uwagi', '', 'Tekst.', '', '## Triage', '', '| priorytet | **P2** |',
+      '| ryzyko | **T2** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: dwie })).add, ['P1', NEEDS_TRIAGE], 'druga sekcja nie dokłada ani P2, ani T2');
+  });
+
+  test('tabela bez zewnętrznych separatorów | też jest czytana (PR #216)', () => {
+    const body = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | **P1**', 'ryzyko zmiany | **T2**', '', 'Zdanie bez tabeli.'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2']);
+  });
+
   test('tabela poza sekcją „Triage” nie jest czytana', () => {
     const body = ['## Zakres', '', '| priorytet | **P1** | pilne |', '', '## Triage', '', 'Do ustalenia.', '',
       '## Inne', '', '| ryzyko | **T2** | zmiana |'].join('\n');
