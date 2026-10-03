@@ -588,6 +588,14 @@ describe('#215: zero wierszy z API nie zostawia luki', () => {
     assert.deepEqual(zakres(gas), [localDate(3), CEL], 'największa jest data zapisana jako obiekt Date');
   });
 
+  test('8: tekst zaczynający się od daty nie jest datą — notatka nie może zostać ostatnim dniem z danymi (PR #217)', () => {
+    // `normalizujDate_` obcina tekst do 10 znaków, więc „9999-12-31 notatka” wyglądałoby na datę z przyszłości
+    // i import dzienny pobrałby sam cel, zamiast uzupełnić lukę.
+    const gas = projekt({ raw: zDanymi(localDate(4), '9999-12-31 notatka', localDate(1) + ' do sprawdzenia', localDate(2) + 'T00:00:00') });
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zakres(gas), [localDate(3), CEL]);
+  });
+
   test('9: obie ścieżki zapisu dają ten sam zakres', () => {
     const szybka = projekt({ raw: zakladka({ dane: [localDate(5), localDate(4)] }), properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
     const out = plain(szybka.importDzienny({ triggerUid: 't' }));

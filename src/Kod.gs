@@ -158,7 +158,10 @@ function gscLastDataDay_(sheet, stage) {
   const column = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
   let day = '';
   column.forEach(row => {
-    const date = normalizujDate_(row[0]);
+    // Tekst musi być datą w całości: `normalizujDate_` obcina go do 10 znaków,
+    // więc „9999-12-31 notatka” udawałoby datę z przyszłości i wyłączało
+    // uzupełnianie luki (PR #217).
+    const date = row[0] instanceof Date ? formatujDate_(row[0]) : String(row[0]);
     // Kształt i istnienie w kalendarzu: tekst niebędący datą nie może zostać „największą datą”.
     if (/^\d{4}-\d{2}-\d{2}$/.test(date) && shiftDay_(date, 0) === date && date > day) day = date;
   });
