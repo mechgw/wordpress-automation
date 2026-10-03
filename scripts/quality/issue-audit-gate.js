@@ -263,32 +263,50 @@ function familySatisfied(labels, family) {
  * Wiersze tabeli z sekcji `## Triage` treści issue, każdy jako lista komórek.
  * Sekcja kończy się na następnym nagłówku; bez sekcji albo bez tabeli — [].
  *
- * Bloki kodu (``` i ~~~) są pomijane w całości, także przy szukaniu nagłówka:
- * przykład tabeli wklejony do opisu przed właściwą sekcją nałożyłby etykiety
- * z przykładu (PR #216). Wierszem tabeli jest każda linia sekcji z `|` —
- * Markdown nie wymaga separatorów na brzegach.
+ * Czytamy tylko to, co GitHub pokazuje jako treść (PR #216): przykład tabeli
+ * wklejony do opisu albo zostawiony w szablonie nałożyłby etykiety z przykładu.
+ * Pomijane są więc bloki kodu i komentarze HTML, także przy szukaniu nagłówka.
+ * Wierszem tabeli jest każda linia sekcji z `|` — Markdown nie wymaga
+ * separatorów na brzegach.
  */
 function triageTableRows(body) {
   const rows = [];
-  let fence = '';
   let inside = false;
-  for (const raw of String(body || '').split(/\r?\n/)) {
-    const mark = /^\s{0,3}(```|~~~)/.exec(raw);
-    if (mark) {
-      if (!fence) fence = mark[1];
-      else if (fence === mark[1]) fence = '';
-      continue;
-    }
-    if (fence) continue;
-    if (/^#{1,6}\s/.test(raw)) {
+  for (const raw of visibleLines(body)) {
+    if (/^\s{0,3}#{1,6}\s/.test(raw)) {
       if (inside) break;
-      inside = /^##\s+Triage\s*$/i.test(raw);
+      inside = /^\s{0,3}##\s+Triage\s*#*\s*$/i.test(raw);
       continue;
     }
     if (!inside || raw.indexOf('|') < 0) continue;
     rows.push(raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
   }
   return rows;
+}
+
+/**
+ * Linie treści poza blokami kodu i komentarzami HTML.
+ *
+ * Blok kodu otwierają co najmniej trzy grawisy albo tyldy, a zamyka go znacznik
+ * z tego samego znaku, co najmniej tej samej długości i bez dopisku. Krótszy
+ * znacznik w środku jest treścią bloku: tak pokazuje się przykład Markdownu
+ * z zagnieżdżonym blokiem. Komentarze wycinamy po blokach kodu, bo `<!--`
+ * w bloku jest zwykłym tekstem; niezamknięty komentarz ukrywa resztę treści.
+ */
+function visibleLines(body) {
+  const kept = [];
+  let fence = '';
+  String(body || '').split(/\r?\n/).forEach(raw => {
+    const mark = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (!fence) {
+      if (mark) fence = mark[1];
+      else kept.push(raw);
+      return;
+    }
+    const closes = mark && mark[1].charAt(0) === fence.charAt(0) && mark[1].length >= fence.length && !mark[2].trim();
+    if (closes) fence = '';
+  });
+  return kept.join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, '').split('\n');
 }
 
 /**

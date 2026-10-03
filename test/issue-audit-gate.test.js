@@ -572,6 +572,37 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     assert.deepEqual(reconcileTriage(nowa({ body: dwie })).add, ['P1', NEEDS_TRIAGE], 'druga sekcja nie dokłada ani P2, ani T2');
   });
 
+  test('blok kodu zamyka znacznik tego samego znaku, co najmniej tej samej długości i bez dopisku (PR #216)', () => {
+    const wlasciwa = ['', '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T3** |'];
+    const przyklad = ['## Triage', '| priorytet | **P4** | przykład |', '| ryzyko | **T1** | przykład |'];
+    const warianty = {
+      'cztery grawisy z zagnieżdżonym blokiem trzech': ['````md', '```md'].concat(przyklad, ['```', '````']),
+      'krótszy znacznik nie zamyka': ['`````', '````'].concat(przyklad, ['`````']),
+      'znacznik z dopiskiem nie zamyka': ['```md', '``` js'].concat(przyklad, ['```']),
+      'tyldy z zagnieżdżonymi tyldami': ['~~~~', '~~~'].concat(przyklad, ['~~~', '~~~~'])
+    };
+    for (const [nazwa, blok] of Object.entries(warianty)) {
+      const body = ['## Problem', ''].concat(blok, wlasciwa).join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], nazwa);
+    }
+  });
+
+  test('komentarz HTML nie jest czytany: przykład przed sekcją ani wykomentowany wiersz w sekcji (PR #216)', () => {
+    const body = ['<!--', '## Triage', '| priorytet | **P4** | przykład z szablonu |', '| ryzyko | **T1** | przykład |', '-->', '',
+      '## Triage', '', '| priorytet | **P1** |', '<!-- | ryzyko | **T1** | -->', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3']);
+
+    const niezamkniety = ['## Triage', '', '| priorytet | **P1** |', '<!--', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: niezamkniety })).add, ['P1', NEEDS_TRIAGE], 'niezamknięty komentarz ukrywa resztę treści');
+  });
+
+  test('nagłówek sekcji wcięty do trzech spacji albo z zamykającymi # jest nagłówkiem (PR #216)', () => {
+    for (const naglowek of ['  ## Triage', '## Triage ##', '## triage']) {
+      const body = [naglowek, '', '| priorytet | **P1** |', '| ryzyko | **T2** |', '', '   ## Dalej', '| ryzyko | **T3** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2'], naglowek);
+    }
+  });
+
   test('tabela bez zewnętrznych separatorów | też jest czytana (PR #216)', () => {
     const body = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | **P1**', 'ryzyko zmiany | **T2**', '', 'Zdanie bez tabeli.'].join('\n');
     assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2']);
