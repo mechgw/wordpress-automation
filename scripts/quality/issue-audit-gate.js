@@ -263,50 +263,74 @@ function familySatisfied(labels, family) {
  * Wiersze tabeli z sekcji `## Triage` treści issue, każdy jako lista komórek.
  * Sekcja kończy się na następnym nagłówku; bez sekcji albo bez tabeli — [].
  *
- * Czytamy tylko to, co GitHub pokazuje jako treść (PR #216): przykład tabeli
+ * Czytamy tylko to, co GitHub pokazuje jako tabelę (PR #216): przykład tabeli
  * wklejony do opisu albo zostawiony w szablonie nałożyłby etykiety z przykładu.
- * Pomijane są więc bloki kodu i komentarze HTML, także przy szukaniu nagłówka.
- * Wierszem tabeli jest każda linia sekcji z `|` — Markdown nie wymaga
- * separatorów na brzegach.
+ * Pomijane są więc bloki kodu, bloki `<pre>` i komentarze HTML, także przy
+ * szukaniu nagłówka. Sekcję kończy następny nagłówek, także podkreślony, oraz
+ * linia pozioma. Wierszem tabeli jest każda linia sekcji z `|` — Markdown nie
+ * wymaga separatorów na brzegach.
+ *
+ * Wszystkie te reguły są fail-closed: w razie wątpliwości wiersz nie jest
+ * czytany i issue dostaje `needs-triage`, zamiast etykiet z niepewnego źródła.
  */
 function triageTableRows(body) {
   const rows = [];
   let inside = false;
   for (const raw of visibleLines(body)) {
-    if (/^\s{0,3}#{1,6}\s/.test(raw)) {
+    if (/^ {0,3}#{1,6}\s/.test(raw)) {
       if (inside) break;
-      inside = /^\s{0,3}##\s+Triage\s*#*\s*$/i.test(raw);
+      inside = /^ {0,3}##\s+Triage\s*#*\s*$/i.test(raw);
       continue;
     }
-    if (!inside || raw.indexOf('|') < 0) continue;
+    if (!inside) continue;
+    // Podkreślenie nagłówka (`===`, `---`) albo linia pozioma; separator tabeli ma `|`.
+    if (/^ {0,3}(?:=+|-{2,}|\*{3,}|_{3,})\s*$/.test(raw)) break;
+    if (raw.indexOf('|') < 0) continue;
     rows.push(raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
   }
   return rows;
 }
 
+/** Szerokość wcięcia linii w kolumnach; tabulator dociąga do wielokrotności czterech. */
+function indentColumns(line) {
+  let columns = 0;
+  for (const ch of line) {
+    if (ch === ' ') columns += 1;
+    else if (ch === '\t') columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
+}
+
 /**
- * Linie treści poza blokami kodu i komentarzami HTML.
+ * Linie treści poza kodem i komentarzami HTML.
  *
  * Blok kodu otwierają co najmniej trzy grawisy albo tyldy, a zamyka go znacznik
  * z tego samego znaku, co najmniej tej samej długości i bez dopisku. Krótszy
  * znacznik w środku jest treścią bloku: tak pokazuje się przykład Markdownu
- * z zagnieżdżonym blokiem. Komentarze wycinamy po blokach kodu, bo `<!--`
- * w bloku jest zwykłym tekstem; niezamknięty komentarz ukrywa resztę treści.
+ * z zagnieżdżonym blokiem. Linia wcięta o co najmniej cztery kolumny to blok
+ * kodu z wcięcia, więc też odpada — także wcięty znacznik, który bloku nie
+ * otwiera. Komentarze i bloki `<pre>` wycinamy po blokach kodu, bo `<!--`
+ * w kodzie jest zwykłym tekstem; niezamknięty komentarz albo `<pre>` ukrywa
+ * resztę treści.
  */
 function visibleLines(body) {
   const kept = [];
   let fence = '';
   String(body || '').split(/\r?\n/).forEach(raw => {
-    const mark = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
     if (!fence) {
       if (mark) fence = mark[1];
-      else kept.push(raw);
+      else if (indentColumns(raw) < 4) kept.push(raw);
       return;
     }
     const closes = mark && mark[1].charAt(0) === fence.charAt(0) && mark[1].length >= fence.length && !mark[2].trim();
     if (closes) fence = '';
   });
-  return kept.join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, '').split('\n');
+  return kept.join('\n')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+    .replace(/<pre\b[^>]*>[\s\S]*?(?:<\/pre\s*>|$)/gi, '')
+    .split('\n');
 }
 
 /**
@@ -323,7 +347,8 @@ function triageLabelFromTable(rows, family) {
   rows.forEach(cells => {
     const head = String(cells[0] || '').replace(/[*_`]/g, '').trim().toLowerCase();
     if (head.indexOf(def.row) !== 0) return;
-    (String(cells[1] || '').match(def.token) || []).forEach(token => {
+    // Przekreślenie to wartość wycofana przez autora, nie druga wartość.
+    (String(cells[1] || '').replace(/~~.*?~~/g, '').match(def.token) || []).forEach(token => {
       if (!tokens.includes(token)) tokens.push(token);
     });
   });

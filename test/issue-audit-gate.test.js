@@ -603,6 +603,50 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     }
   });
 
+  test('blok kodu z wcięcia (4 spacje albo tabulator) nie jest czytany, a widoczna tabela nadal tak (PR #216)', () => {
+    for (const [nazwa, wciecie] of [['cztery spacje', '    '], ['tabulator', '\t'], ['spacja i tabulator', ' \t'], ['osiem spacji', '        ']]) {
+      const body = ['## Triage', '', 'Przykład zapisu:', '', wciecie + '| priorytet | P4 |', wciecie + '| ryzyko | T1 |', '',
+        '| priorytet | **P1** |', '| ryzyko | **T3** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], nazwa);
+
+      const tylkoPrzyklad = ['## Triage', '', wciecie + '| priorytet | P1 |', wciecie + '| ryzyko | T2 |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body: tylkoPrzyklad })).add, [NEEDS_TRIAGE], nazwa + ': sam wcięty przykład');
+    }
+    // Wcięcie do trzech spacji nie robi bloku kodu.
+    const trzy = ['## Triage', '', '   | priorytet | **P1** |', '   | ryzyko | **T2** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: trzy })).add, ['P1', 'T2']);
+    // Wcięty znacznik bloku kodu jest kodem, a nie otwarciem bloku: sekcja pod nim pozostaje widoczna.
+    const wcietyZnacznik = ['\t```', '', '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T2** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: wcietyZnacznik })).add, ['P1', 'T2']);
+  });
+
+  test('przykład w bloku <pre> nie jest czytany (PR #216)', () => {
+    for (const tag of ['pre', 'PRE']) {
+      const body = ['<' + tag + '>', '## Triage', '| priorytet | P4 |', '| ryzyko | T1 |', '</' + tag + '>', '',
+        '## Triage', '', '| priorytet | **P1** |', '<' + tag + ' lang="md">', '| ryzyko | T1 |', '</' + tag + '>', '| ryzyko | **T3** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], tag);
+    }
+    const niezamkniety = ['## Triage', '', '| priorytet | **P1** |', '<pre>', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: niezamkniety })).add, ['P1', NEEDS_TRIAGE]);
+  });
+
+  test('przekreślona wartość nie jest wartością (PR #216)', () => {
+    const poprawiona = tabela('| priorytet | ~~P1~~ **P2** | po korekcie |', '| ryzyko | ~~T3~~ T2 | po korekcie |');
+    assert.deepEqual(reconcileTriage(nowa({ body: poprawiona })).add, ['P2', 'T2']);
+    const wycofana = tabela('| priorytet | ~~P1~~ | wycofane |', '| ryzyko | **T1** | |');
+    assert.deepEqual(reconcileTriage(nowa({ body: wycofana })).add, ['T1', NEEDS_TRIAGE]);
+  });
+
+  test('linia pozioma albo podkreślenie nagłówka kończy sekcję (PR #216)', () => {
+    for (const linia of ['---', '***', '___', '===', '  -----  ']) {
+      const body = ['## Triage', '', '| priorytet | **P1** |', '', 'Inna sekcja', linia, '', '| ryzyko | **T3** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', NEEDS_TRIAGE], linia);
+    }
+    // Wiersz separatora tabeli ma kreski, ale nie jest linią poziomą.
+    const zSeparatorem = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | P1', 'ryzyko | T2'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: zSeparatorem })).add, ['P1', 'T2']);
+  });
+
   test('tabela bez zewnętrznych separatorów | też jest czytana (PR #216)', () => {
     const body = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | **P1**', 'ryzyko zmiany | **T2**', '', 'Zdanie bez tabeli.'].join('\n');
     assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2']);
