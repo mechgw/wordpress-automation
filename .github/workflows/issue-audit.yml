@@ -17,6 +17,11 @@ name: Issue audit gate
 #
 # Bramka jest konwencją, nie mechanicznym zamkiem: GitHub nie potrafi
 # zablokować pracy nad issue. Etykieta jest sygnałem dla agenta i dla człowieka.
+#
+# Ten sam przebieg pilnuje triage'u (#211): brakujące etykiety wymaganych rodzin
+# bierze z tabeli „Triage” w treści, a gdy to nie wystarcza, nakłada
+# `needs-triage`. Stan audytu liczy od razu z nowymi etykietami, bo zapis
+# z GITHUB_TOKEN nie uruchamia kolejnego runu.
 
 on:
   issues:
@@ -56,6 +61,13 @@ jobs:
       # operacyjny, który wszedł do bramki innego dnia. Cofnięcie tej daty
       # zrobiłoby cichy backfill całego archiwum.
       GATE_ACTIVE_SINCE: "2026-09-08T00:00:00Z"
+      # Triage (#211): issue utworzona od tej chwili bez wymaganych etykiet
+      # dostaje je z tabeli „Triage” w treści albo `needs-triage`. Osobna data,
+      # bo data startu bramki objęłaby wstecz całe archiwum. Rodziny wymagane
+      # też są własnością repozytorium: tutaj P i T, prywatny backlog podaje
+      # własną listę.
+      TRIAGE_ACTIVE_SINCE: "2026-09-27T00:00:00Z"
+      TRIAGE_REQUIRED: "P,T"
     steps:
       - name: Checkout gate script
         uses: actions/checkout@v7
@@ -71,7 +83,11 @@ jobs:
 
       - name: Reconcile audit state
         id: gate
-        run: node scripts/quality/issue-audit-gate.js --issue "$ISSUE" --gate-active-since "$GATE_ACTIVE_SINCE"
+        run: >-
+          node scripts/quality/issue-audit-gate.js --issue "$ISSUE"
+          --gate-active-since "$GATE_ACTIVE_SINCE"
+          --triage-active-since "$TRIAGE_ACTIVE_SINCE"
+          --triage-required "$TRIAGE_REQUIRED"
 
       # Etykieta mówi, że stan się cofnął, ale nie mówi dlaczego, a historii
       # edycji issue nikt nie czyta. Marker jest śladem dla człowieka —

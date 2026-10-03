@@ -403,6 +403,224 @@ describe('#139 CLI: konfiguracja daty startu nie może zawieść po cichu', () =
   });
 });
 
+describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
+  // Numeracja 1–12 odpowiada macierzy z opisu #211.
+  const { reconcileTriage, reconcileIssue, labelChanges, NEEDS_TRIAGE } = gate;
+  const TRIAGE_ACTIVE = DEFAULT_CONFIG.triageActiveSince;
+  const CREATED = '2026-09-28T10:00:00Z';
+  const NOW = '2026-09-28T10:00:05Z';
+  const REPO_LABELS = ['P0', 'P1', 'P2', 'P3', 'P4', 'T1', 'T2', 'T3', 'area:github', 'area:business',
+    'enhancement', NEEDS_TRIAGE, AUDIT_PENDING, AUDIT_OK, AUDIT_CHANGES];
+
+  const tabela = (...wiersze) => ['## Problem', '', 'Opis.', '', '## Triage', '',
+    '| wymiar | wartość | uzasadnienie |', '| --- | --- | --- |', ...wiersze, '', 'Powiązania: #1.'].join('\n');
+  const nowa = (over = {}) => issue(Object.assign({
+    labels: [], createdAt: CREATED, barrier: CREATED, body: '', repoLabels: REPO_LABELS
+  }, over));
+  const przebieg = (input, config) => reconcileIssue(input, config, NOW);
+  // Stan po zapisie przebiegu: tak wygląda issue, gdy czyta ją kolejny run.
+  const poZapisie = (input, outcome) => {
+    const changes = labelChanges(outcome, input.labels, DEFAULT_CONFIG);
+    return Object.assign({}, input, {
+      labels: input.labels.filter(name => !changes.remove.includes(name)).concat(changes.add)
+    });
+  };
+
+  test('1: nowa issue bez etykiet, tabela z **P1** i **T2** — etykiety z tabeli i audit:pending w jednym przebiegu', () => {
+    const input = nowa({ body: tabela('| priorytet | **P1** | pilne |', '| ryzyko | **T2** | wspólny skrypt |') });
+    const outcome = przebieg(input);
+    assert.deepEqual(outcome.triage.add, ['P1', 'T2']);
+    assert.deepEqual(outcome.triage.remove, []);
+    assert.equal(outcome.audit.action, 'set');
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+    assert.deepEqual(labelChanges(outcome, input.labels, DEFAULT_CONFIG), { add: ['P1', 'T2', AUDIT_PENDING], remove: [] });
+  });
+
+  test('2: tabela bez pogrubień, wiersz „ryzyko zmiany”', () => {
+    const outcome = przebieg(nowa({ body: tabela('| priorytet | P1 | pilne |', '| ryzyko zmiany | T2 | wspólny skrypt |') }));
+    assert.deepEqual(outcome.triage.add, ['P1', 'T2']);
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+  });
+
+  test('3: wiersz priorytetu z dwoma tokenami — brak P* z tabeli, needs-triage', () => {
+    const outcome = przebieg(nowa({ body: tabela('| priorytet | **P1** albo P2 | do decyzji |', '| ryzyko | **T1** | mała zmiana |') }));
+    assert.deepEqual(outcome.triage.add, ['T1', NEEDS_TRIAGE]);
+    assert.match(outcome.triage.reason, /brak triage'u: P/);
+    assert.equal(outcome.audit.action, 'none', 'T1 bez P* jest poza zakresem bramki audytu');
+  });
+
+  test('4: issue ma już P3, a tabela mówi P1 — P3 zostaje, nic nie jest nadpisywane', () => {
+    const outcome = przebieg(nowa({ labels: ['P3'], body: tabela('| priorytet | **P1** | pilne |', '| ryzyko | **T1** | mała zmiana |') }));
+    assert.deepEqual(outcome.triage.add, ['T1']);
+    assert.deepEqual(outcome.triage.remove, []);
+    assert.deepEqual(outcome.labels, ['P3', 'T1']);
+  });
+
+  test('4: rodzina z dwiema etykietami nie jest ani uzupełniana, ani porządkowana — needs-triage', () => {
+    const input = nowa({ labels: ['P1', 'P2', 'T1'], body: tabela('| priorytet | **P1** | pilne |') });
+    const triage = reconcileTriage(input);
+    assert.deepEqual(triage.add, [NEEDS_TRIAGE]);
+    assert.deepEqual(triage.remove, [], 'istniejących etykiet nie zdejmujemy');
+  });
+
+  test('5: brak sekcji „Triage” i brak etykiet — needs-triage, bez etykiet audytu', () => {
+    const outcome = przebieg(nowa({ body: '## Problem\n\nOpis bez triage\'u.' }));
+    assert.deepEqual(outcome.triage.add, [NEEDS_TRIAGE]);
+    assert.equal(outcome.audit.action, 'none');
+    assert.equal(outcome.audit.label, '');
+  });
+
+  test('6: issue z needs-triage dostaje ręcznie P2 i T1 — needs-triage usunięte, audit:pending', () => {
+    const input = nowa({ labels: [NEEDS_TRIAGE, 'P2', 'T1'] });
+    const outcome = przebieg(input);
+    assert.deepEqual(outcome.triage.add, []);
+    assert.deepEqual(outcome.triage.remove, [NEEDS_TRIAGE]);
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+    assert.deepEqual(labelChanges(outcome, input.labels, DEFAULT_CONFIG), { add: [AUDIT_PENDING], remove: [NEEDS_TRIAGE] });
+  });
+
+  test('7: konfiguracja P,area — nałożone P2 i area:business, brak T* nie daje needs-triage', () => {
+    const body = tabela('| priorytet | **P2** | proces |', '| obszar | `area:business` | |');
+    const outcome = przebieg(nowa({ body }), { triageRequired: ['P', 'area'] });
+    assert.deepEqual(outcome.triage.add, ['P2', 'area:business']);
+    assert.match(outcome.triage.reason, /triage kompletny/);
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+  });
+
+  test('7: rodzina niewymagana nie jest brana z tabeli', () => {
+    const body = tabela('| priorytet | **P3** | proces |', '| ryzyko | **T3** | duża zmiana |', '| obszar | `area:business` | |');
+    const outcome = przebieg(nowa({ body }), { triageRequired: ['P', 'area'] });
+    assert.deepEqual(outcome.triage.add, ['P3', 'area:business']);
+  });
+
+  test('8: tabela z area:nieistniejąca — etykieta pominięta, przy wymaganym area needs-triage', () => {
+    const body = tabela('| priorytet | **P2** | proces |', '| obszar | `area:nieistniejąca` | |');
+    const outcome = przebieg(nowa({ body }), { triageRequired: ['P', 'area'] });
+    assert.deepEqual(outcome.triage.add, ['P2', NEEDS_TRIAGE]);
+    assert.match(outcome.triage.reason, /brak triage'u: area/);
+  });
+
+  test('8: bez listy etykiet repozytorium nic nie jest nakładane (fail-closed)', () => {
+    const triage = reconcileTriage(nowa({ repoLabels: undefined, body: tabela('| priorytet | **P1** | pilne |') }));
+    assert.deepEqual(triage.add, []);
+    assert.deepEqual(triage.remove, []);
+  });
+
+  test('9: issue zamknięta — bez zmian', () => {
+    const input = nowa({ state: 'closed', labels: [NEEDS_TRIAGE, 'P2', 'T1'], body: tabela('| priorytet | **P1** | pilne |') });
+    const outcome = przebieg(input);
+    assert.deepEqual(labelChanges(outcome, input.labels, DEFAULT_CONFIG), { add: [], remove: [] });
+  });
+
+  test('11: issue sprzed startu triage\'u, po starcie bramki, z tabelą — ani etykiet, ani needs-triage', () => {
+    const created = '2026-09-20T10:00:00Z';
+    assert.ok(created >= GATE_ACTIVE && created < TRIAGE_ACTIVE, 'przedział między startem bramki a startem triage\'u');
+    const input = nowa({ createdAt: created, barrier: created, body: tabela('| priorytet | **P1** | pilne |', '| ryzyko | **T2** | zmiana |') });
+    const outcome = przebieg(input);
+    assert.deepEqual(labelChanges(outcome, input.labels, DEFAULT_CONFIG), { add: [], remove: [] });
+    assert.match(outcome.triage.reason, /sprzed startu triage'u/);
+  });
+
+  test('11: granica startu triage\'u jest domknięta od dołu, a data jest konfigurowalna', () => {
+    assert.deepEqual(reconcileTriage(nowa({ createdAt: TRIAGE_ACTIVE })).add, [NEEDS_TRIAGE]);
+    assert.deepEqual(reconcileTriage(nowa(), { triageActiveSince: '2026-09-29T00:00:00Z' }).add, []);
+    assert.deepEqual(reconcileTriage(nowa({ createdAt: '' })).add, [], 'bez daty utworzenia nie zgadujemy');
+  });
+
+  test('wartość z drugiej komórki: token w uzasadnieniu nie robi niejednoznaczności', () => {
+    const body = tabela('| priorytet | **P2** | nie P1, bo bez wpływu na produkcję |', '| ryzyko zmiany | **T2** | T3 dopiero przy migracji |');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P2', 'T2']);
+  });
+
+  test('tabela poza sekcją „Triage” nie jest czytana', () => {
+    const body = ['## Zakres', '', '| priorytet | **P1** | pilne |', '', '## Triage', '', 'Do ustalenia.', '',
+      '## Inne', '', '| ryzyko | **T2** | zmiana |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, [NEEDS_TRIAGE]);
+    assert.deepEqual(gate.triageTableRows(body), []);
+  });
+
+  test('needs-triage już obecne przy brakach — bez zapisu; kolejny przebieg po zapisie też nic nie zmienia', () => {
+    assert.deepEqual(reconcileTriage(nowa({ labels: [NEEDS_TRIAGE] })).add, []);
+
+    const input = nowa({ body: tabela('| priorytet | **P1** | pilne |', '| ryzyko | **T2** | zmiana |') });
+    const drugi = poZapisie(input, przebieg(input));
+    assert.deepEqual(drugi.labels, ['P1', 'T2', AUDIT_PENDING]);
+    assert.deepEqual(labelChanges(przebieg(drugi), drugi.labels, DEFAULT_CONFIG), { add: [], remove: [] });
+  });
+
+  test('etykieta z tabeli liczy się jako wejście w zakres bramki w tym samym przebiegu', () => {
+    // Issue sprzed startu bramki, objęta triage'em przez wcześniejszą datę startu:
+    // jedynym powodem objęcia audytem jest etykieta nałożona właśnie teraz, a jej
+    // jeszcze nie ma na osi czasu.
+    const input = nowa({ createdAt: OLD, barrier: OLD, body: tabela('| priorytet | **P1** | pilne |', '| ryzyko | **T2** | zmiana |') });
+    const outcome = przebieg(input, { triageActiveSince: '2026-08-01T00:00:00Z' });
+    assert.deepEqual(outcome.triage.add, ['P1', 'T2']);
+    assert.equal(outcome.audit.label, AUDIT_PENDING);
+  });
+
+  test('triage i sprzątanie audytu idą jednym zestawem zmian', () => {
+    // P3 + T1 jest poza zakresem bramki, więc stare audit:ok znika razem z needs-triage.
+    const input = nowa({ labels: [NEEDS_TRIAGE, 'P3', 'T1', AUDIT_OK] });
+    assert.deepEqual(labelChanges(przebieg(input), input.labels, DEFAULT_CONFIG), { add: [], remove: [NEEDS_TRIAGE, AUDIT_OK] });
+  });
+});
+
+describe('#211 CLI: konfiguracja triage\'u nie może zawieść po cichu', () => {
+  const run = (extra, env = {}) => spawnSync(process.execPath,
+    [SCRIPT, '--issue', '1', '--repo', 'owner/name', '--dry-run', ...extra],
+    { encoding: 'utf8', env: { ...process.env, AUDIT_GATE_ACTIVE_SINCE: '', AUDIT_TRIAGE_ACTIVE_SINCE: '', AUDIT_TRIAGE_REQUIRED: '', ...env } });
+
+  test('10: niepoprawna wartość --triage-required to błąd konfiguracji, bez zapisu', () => {
+    for (const value of ['P,X', 'p', 'P,P', 'P,,T', 'P T', 'priorytet']) {
+      const r = run(['--triage-required', value]);
+      assert.equal(r.status, 2, value + ' → ' + r.stderr);
+      assert.match(r.stderr, /--triage-required przyjmuje rodziny/, value);
+    }
+  });
+
+  test('10: --triage-required bez wartości albo z pustą wartością też jest błędem', () => {
+    for (const extra of [['--triage-required'], ['--triage-required', '']]) {
+      const r = run(extra);
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /--triage-required podano bez wartości/);
+    }
+  });
+
+  test('10: niepoprawna wartość ze zmiennej środowiskowej jest odrzucana tak samo', () => {
+    const r = run([], { AUDIT_TRIAGE_REQUIRED: 'P,obszar' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--triage-required przyjmuje rodziny/);
+  });
+
+  test('12: --triage-active-since bez wartości albo z niepoprawną datą to błąd konfiguracji', () => {
+    for (const extra of [['--triage-active-since'], ['--triage-active-since', '']]) {
+      const r = run(extra);
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /--triage-active-since podano bez wartości/);
+    }
+    for (const value of ['wczoraj', '2026-09-27', '2026-9-27T00:00:00Z']) {
+      const r = run(['--triage-active-since', value]);
+      assert.equal(r.status, 2, value + ' → ' + r.stderr);
+      assert.match(r.stderr, /--triage-active-since musi mieć postać RRRR-MM-DD/, value);
+    }
+    const r = run(['--triage-active-since', '2026-02-30T00:00:00Z']);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--triage-active-since wskazuje datę, która nie istnieje/);
+    const env = run([], { AUDIT_TRIAGE_ACTIVE_SINCE: 'wczoraj' });
+    assert.equal(env.status, 2, env.stderr);
+  });
+
+  test('poprawna konfiguracja triage\'u przechodzi walidację', () => {
+    const offline = { PATH: '', Path: '' };
+    for (const extra of [['--triage-required', 'P,area'], ['--triage-required', 'P,T,area'],
+      ['--triage-active-since', '2026-09-27T00:00:00Z']]) {
+      const r = run(extra, offline);
+      assert.doesNotMatch(String(r.stderr), /--triage-/, 'walidacja odrzuciła poprawne wejście: ' + JSON.stringify(extra));
+      assert.notEqual(r.status, 2, r.stderr);
+    }
+  });
+});
+
 describe('#139 kontrakt workflow', () => {
   // Część kryteriów żyje w YAML-u, nie w logice: guard na komentarze w PR-ach,
   // serializacja i lista zdarzeń. Bez tego testu przeszłyby niezauważone.
@@ -421,6 +639,15 @@ describe('#139 kontrakt workflow', () => {
   test('workflow podaje datę startu bramki jawnie, zamiast polegać na domyślnej', () => {
     assert.match(workflow, /GATE_ACTIVE_SINCE:\s*"\d{4}-\d{2}-\d{2}T/);
     assert.match(workflow, /--gate-active-since\s+"\$GATE_ACTIVE_SINCE"/);
+  });
+
+  test('#211: workflow podaje datę startu triage\'u i wymagane rodziny jawnie', () => {
+    assert.match(workflow, /TRIAGE_ACTIVE_SINCE:\s*"2026-09-27T00:00:00Z"/);
+    assert.match(workflow, /--triage-active-since\s+"\$TRIAGE_ACTIVE_SINCE"/);
+    assert.match(workflow, /TRIAGE_REQUIRED:\s*"P,T"/);
+    assert.match(workflow, /--triage-required\s+"\$TRIAGE_REQUIRED"/);
+    assert.equal(DEFAULT_CONFIG.triageActiveSince, '2026-09-27T00:00:00Z');
+    assert.deepEqual(DEFAULT_CONFIG.triageRequired, ['P', 'T']);
   });
 
   test('obsłużone są wszystkie zdarzenia z kryteriów akceptacji', () => {

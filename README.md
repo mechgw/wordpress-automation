@@ -478,6 +478,16 @@ Issue objęta bramką i będąca w zakresie — `P0`, `P1` albo `P2`, **lub** `T
 
 Recenzent rozstrzyga komentarzem zaczynającym się od `/audit-ok` albo `/audit-changes` (liczą się tylko właściciel, członkowie i współpracownicy). Edycja treści issue unieważnia rozstrzygnięcie: komenda starsza niż ostatnia zmiana treści przestaje obowiązywać i stan wraca do `audit:pending`. Zmieniając treść w trakcie audytu, napisz w komentarzu, co zmieniłeś — etykieta powie, że stan się cofnął, ale nie powie dlaczego.
 
+**Triage jest warunkiem wejścia do bramki (#211).** Issue bez etykiet `P*` i `T*` jest poza zakresem, więc audyt jej nie widzi. Dlatego ten sam przebieg pilnuje triage'u każdej otwartej issue utworzonej od 2026-09-27:
+
+- wymagane rodziny to tutaj `P` (dokładnie jedna z `P0`–`P4`) i `T` (dokładnie jedna z `T1`–`T3`); listę ustawia `--triage-required` albo `AUDIT_TRIAGE_REQUIRED`, a dostępna jest też rodzina `area` (co najmniej jedna `area:*`);
+- brakującą wymaganą rodzinę bramka bierze z tabeli w sekcji `## Triage` treści: wiersz zaczynający się od `priorytet` daje `P*`, od `ryzyko` daje `T*`, od `obszar` daje `area:*`. Wartość stoi w **drugiej** komórce wiersza i musi zawierać dokładnie jeden token rodziny; przy zerze albo kilku bramka nie zgaduje;
+- istniejących etykiet bramka nie nadpisuje ani nie usuwa, a z tabeli nakłada tylko etykiety, które istnieją w repozytorium;
+- issue, której nadal brakuje wymaganej rodziny, dostaje `needs-triage`; komplet zdejmuje tę etykietę;
+- stan audytu jest liczony w tym samym przebiegu, już z etykietami z tabeli.
+
+Datę startu triage'u ustawia `--triage-active-since` albo `AUDIT_TRIAGE_ACTIVE_SINCE`, osobno od daty startu bramki. Niepoprawna wartość którejkolwiek z tych opcji kończy przebieg błędem, bez zapisu.
+
 Bramka nie objęła wstecz issue sprzed swojego wdrożenia i nie jest mechanicznym zamkiem: GitHub nie potrafi zablokować pracy nad issue, więc egzekwuje ją dyscyplina, a nie mechanizm. Logika żyje w `scripts/quality/issue-audit-gate.js` (workflow *Issue audit gate*), testy w `test/issue-audit-gate.test.js`.
 
 ### Pull requesty
