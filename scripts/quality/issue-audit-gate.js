@@ -285,6 +285,47 @@ function htmlText(html) {
     .trim();
 }
 
+/** Elementy bez treści: nie otwierają poziomu zagnieżdżenia. */
+const HTML_VOID = ['br', 'hr', 'img', 'input', 'wbr', 'col', 'area', 'source', 'track', 'embed'];
+
+/**
+ * Opakowania, które GitHub sam dokłada wokół nagłówków i tabel; ich zawartość
+ * jest nadal na poziomie dokumentu. Nazwa opakowania tabeli ma w HTML-u GitHuba
+ * literówkę — przyjmujemy też poprawną pisownię, gdyby ją naprawiono.
+ */
+const HTML_WRAPPERS = ['div', 'markdown-accessiblity-table', 'markdown-accessibility-table'];
+
+/**
+ * Elementy z najwyższego poziomu fragmentu HTML-a (bez atrybutów), po kolei,
+ * jako `{ name, inner }`. Elementy z `transparent` nie liczą się jako poziom:
+ * ich dzieci są traktowane, jakby stały bezpośrednio we fragmencie.
+ *
+ * Element, który się nie zamyka, zostawia wszystko po sobie zagnieżdżone, więc
+ * z uszkodzonego HTML-a nie powstaje żaden element najwyższego poziomu.
+ */
+function topLevelElements(html, transparent) {
+  const elements = [];
+  const stack = [];
+  const nested = () => stack.some(open => !transparent.includes(open.name));
+  const tag = /<(\/?)([a-z][a-z0-9-]*)>/g;
+  for (let match = tag.exec(html); match; match = tag.exec(html)) {
+    const name = match[2];
+    if (!match[1]) {
+      if (!HTML_VOID.includes(name)) stack.push({ name: name, contentStart: tag.lastIndex });
+      else if (!nested()) elements.push({ name: name, inner: '' });
+      continue;
+    }
+    const at = stack.map(open => open.name).lastIndexOf(name);
+    if (at < 0) continue;
+    const open = stack[at];
+    stack.length = at;
+    if (!nested() && !transparent.includes(name)) {
+      elements.push({ name: name, inner: html.slice(open.contentStart, match.index) });
+    }
+  }
+  return elements;
+}
+
 /**
  * Wiersze tabel z sekcji „Triage” treści issue, każdy jako lista komórek
  * z samym tekstem; bez sekcji albo bez tabeli — [].
@@ -299,32 +340,30 @@ function htmlText(html) {
  * rozstrzygnięcia już w sobie, a tekst i wartości atrybutów są w nim
  * zakodowane encjami, więc znacznik w treści nie udaje struktury.
  *
- * Sekcja zaczyna się od pierwszego nagłówka drugiego poziomu o treści „Triage”
- * i kończy na następnym nagłówku albo linii poziomej. Nierozpoznany kształt
- * HTML-a daje brak wierszy, czyli `needs-triage` (fail-closed).
+ * Liczy się wyłącznie poziom dokumentu. Sekcja zaczyna się od pierwszego
+ * nagłówka drugiego poziomu o treści „Triage” i kończy na następnym nagłówku
+ * albo linii poziomej; czytane są tabele stojące bezpośrednio w sekcji.
+ * Nagłówek i tabela w cytacie, na liście albo w `<details>` to przykład albo
+ * cudza wypowiedź: GitHub renderuje je jako prawdziwe `<h2>` i `<table>`, więc
+ * bez tej reguły zacytowany przykład zostawałby „pierwszą sekcją”.
+ * Nierozpoznany kształt HTML-a daje brak wierszy, czyli `needs-triage`
+ * (fail-closed).
  */
 function triageTableRows(bodyHtml) {
-  const html = stripAttributes(bodyHtml);
-  const heading = /<h([1-6])>([\s\S]*?)<\/h\1>/g;
-  let start = -1;
-  for (let match = heading.exec(html); match; match = heading.exec(html)) {
-    if (match[1] === '2' && htmlText(match[2]).toLowerCase() === 'triage') {
-      start = heading.lastIndex;
-      break;
-    }
-  }
+  const blocks = topLevelElements(stripAttributes(bodyHtml), HTML_WRAPPERS);
+  const start = blocks.findIndex(block => block.name === 'h2' && htmlText(block.inner).toLowerCase() === 'triage');
   if (start < 0) return [];
-  const rest = html.slice(start);
-  const end = rest.search(/<h[1-6]>|<hr>/);
-  const section = end < 0 ? rest : rest.slice(0, end);
 
   const rows = [];
-  (section.match(/<table>[\s\S]*?<\/table>/g) || []).forEach(table => {
-    (table.match(/<tr>[\s\S]*?<\/tr>/g) || []).forEach(row => {
-      const cells = (row.match(/<t[dh]>[\s\S]*?<\/t[dh]>/g) || []).map(htmlText);
+  for (let i = start + 1; i < blocks.length; i++) {
+    if (/^h[1-6]$/.test(blocks[i].name) || blocks[i].name === 'hr') break;
+    if (blocks[i].name !== 'table') continue;
+    topLevelElements(blocks[i].inner, ['thead', 'tbody', 'tfoot']).filter(row => row.name === 'tr').forEach(row => {
+      const cells = topLevelElements(row.inner, []).filter(cell => cell.name === 'td' || cell.name === 'th')
+        .map(cell => htmlText(cell.inner));
       if (cells.length) rows.push(cells);
     });
-  });
+  }
   return rows;
 }
 

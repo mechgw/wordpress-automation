@@ -697,6 +697,33 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     assert.deepEqual(gate.triageTableRows(render(poza)), []);
   });
 
+  test('sekcja i tabela liczą się tylko na poziomie dokumentu — cytat, lista i <details> to przykłady (PR #216)', () => {
+    const cytat = linie => linie.map(l => ('> ' + l).trimEnd());
+    const PRZYKLADY = {
+      cytat: cytat(PRZYKLAD),
+      'cytat w cytacie': cytat(cytat(PRZYKLAD)),
+      'element listy': ['- przykład:', ''].concat(PRZYKLAD.map(l => (l ? '  ' + l : l))),
+      '<details>': ['<details>', '<summary>Przykład</summary>', '', ...PRZYKLAD, '', '</details>']
+    };
+    for (const [nazwa, blok] of Object.entries(PRZYKLADY)) {
+      // Zagnieżdżony przykład przed właściwą sekcją: nie zostaje „pierwszą sekcją”.
+      const przed = ['## Problem', '', ...blok, '', ...WLASCIWA].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body: przed })).add, ['P1', 'T3'], nazwa + ' przed sekcją');
+      // Sam zagnieżdżony przykład, bez sekcji na poziomie dokumentu.
+      const sam = ['## Problem', '', ...blok].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body: sam })).add, [NEEDS_TRIAGE], nazwa + ' bez właściwej sekcji');
+      // Zagnieżdżona tabela wewnątrz właściwej sekcji nie dokłada wartości i jej nie kończy.
+      const wSekcji = [...sekcja('| priorytet | **P1** |'), '', ...blok, '', '| wymiar | wartość |', '| --- | --- |', '| ryzyko | **T3** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body: wSekcji })).add, ['P1', 'T3'], nazwa + ' w sekcji');
+    }
+    // Elementy bez treści (złamanie wiersza, linia pozioma) przed sekcją nie zostawiają otwartego poziomu.
+    const zPustymi = ['Wstęp  ', 'druga linia', '', '---', '', ...WLASCIWA].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: zPustymi })).add, ['P1', 'T3']);
+    // Linia pozioma w cytacie nie kończy sekcji; kończy ją dopiero linia na poziomie dokumentu.
+    const liniaWCytacie = [...sekcja('| priorytet | **P1** |'), '', '> uwaga', '>', '> ---', '', '| wymiar | wartość |', '| --- | --- |', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: liniaWCytacie })).add, ['P1', 'T3']);
+  });
+
   test('przekreślona wartość nie jest wartością (PR #216)', () => {
     const poprawiona = tabela('| priorytet | ~~P1~~ **P2** | po korekcie |', '| ryzyko | ~~T3~~ T2 | po korekcie |');
     assert.deepEqual(reconcileTriage(nowa({ body: poprawiona })).add, ['P2', 'T2']);
@@ -720,6 +747,24 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     for (const koniec of ['<h3 dir="auto">Dalej</h3>', '<hr>', '<hr />', '<HR class="x">']) {
       assert.deepEqual(rows('<h2>Triage</h2><p>tekst</p>' + koniec + '<table><tr><td>priorytet</td><td>P1</td></tr></table>'), [], koniec);
     }
+    // Opakowania dokładane przez GitHuba nie są poziomem zagnieżdżenia: nagłówek w `div`, tabela w elemencie
+    // o nazwie z literówką albo bez niej.
+    for (const opakowanie of ['markdown-accessiblity-table', 'markdown-accessibility-table']) {
+      assert.deepEqual(rows('<div class="markdown-heading" dir="auto"><h2 tabindex="-1" class="heading-element" dir="auto">Triage</h2>' +
+        '<a id="user-content-triage" class="anchor" href="#triage"><svg class="octicon"></svg></a></div>\n' +
+        '<' + opakowanie + '><table role="table"><tbody><tr><td>priorytet</td><td>P1</td></tr></tbody></table></' + opakowanie + '>'),
+      [['priorytet', 'P1']], opakowanie);
+    }
+    // Zagnieżdżenie: nagłówek i tabela w cytacie nie liczą się, a cytat w sekcji jej nie kończy.
+    assert.deepEqual(rows('<blockquote><h2>Triage</h2><table><tr><td>priorytet</td><td>P4</td></tr></table></blockquote>'), []);
+    assert.deepEqual(rows('<h2>Triage</h2><blockquote><h3>Cytat</h3><hr><table><tr><td>priorytet</td><td>P4</td></tr></table></blockquote>' +
+      '<table><tr><td>ryzyko</td><td>T2</td></tr></table>'), [['ryzyko', 'T2']]);
+    // Tabela w komórce jest treścią tej komórki, a nie osobnymi wierszami.
+    assert.deepEqual(rows('<h2>Triage</h2><table><tbody><tr><td>uwagi</td><td><table><tr><td>priorytet</td><td>P0</td></tr></table></td></tr>' +
+      '<tr><td>ryzyko</td><td>T1</td></tr></tbody></table>'), [['uwagi', 'priorytetP0'], ['ryzyko', 'T1']]);
+    // Uszkodzony HTML: obcy znacznik zamykający jest pomijany, a element bez zamknięcia zostawia resztę zagnieżdżoną.
+    assert.deepEqual(rows('</p><h2>Triage</h2></span><table><tr><td>priorytet</td><td>P1</td></tr></table>'), [['priorytet', 'P1']]);
+    assert.deepEqual(rows('<section><h2>Triage</h2><table><tr><td>priorytet</td><td>P1</td></tr></table>'), []);
     // Tekst udający strukturę jest w HTML-u zakodowany encjami i struktury nie tworzy.
     assert.deepEqual(rows('<p><code>&lt;h2&gt;Triage&lt;/h2&gt;&lt;table&gt;&lt;tr&gt;&lt;td&gt;priorytet&lt;/td&gt;&lt;td&gt;P0&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</code></p>' +
       '<p><span title="&lt;h2&gt;Triage&lt;/h2&gt;">s</span></p>'), []);
