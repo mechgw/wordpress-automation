@@ -25,7 +25,8 @@
  *
  * Triage (#211). Issue bez etykiet triage'u była dla bramki niewidoczna, więc
  * ten sam reconciler pilnuje też ich: brakujące etykiety wymaganych rodzin
- * bierze z tabeli w sekcji `## Triage` treści, a gdy to nie wystarcza, nakłada
+ * bierze z tabeli w sekcji `## Triage` treści (czytanej z HTML-a, który
+ * renderuje GitHub: `bodyHTML`), a gdy to nie wystarcza, nakłada
  * `needs-triage`. Stan audytu liczy w tym samym przebiegu, już z nowymi
  * etykietami: zapis z `GITHUB_TOKEN` nie uruchamia kolejnego runu workflow,
  * więc „następny przebieg” by nie nadszedł.
@@ -53,10 +54,10 @@ const NEEDS_TRIAGE = 'needs-triage';
  * jedna” (dla `area` wystarczy co najmniej jedna).
  *
  * `label` i `token` są rozdzielone celowo. Nazwę `area:*` z tabeli czytamy
- * w całości, do białego znaku albo znaku składni Markdownu: wzorzec zawężony do
- * liter i cyfr skracał `area:github_extra` do `area:github` i nakładał inną
- * etykietę niż podana, a już nałożonej etykiety z podkreśleniem nie zaliczał
- * do rodziny (PR #216).
+ * w całości, do białego znaku albo separatora: wzorzec zawężony do liter i cyfr
+ * skracał `area:github_extra` do `area:github` i nakładał inną etykietę niż
+ * podana, a już nałożonej etykiety z podkreśleniem nie zaliczał do rodziny
+ * (PR #216).
  */
 const TRIAGE_FAMILIES = {
   P: { row: 'priorytet', label: /^P[0-4]$/, token: /\bP[0-4]\b/g, single: true },
@@ -260,77 +261,71 @@ function familySatisfied(labels, family) {
 }
 
 /**
- * Wiersze tabeli z sekcji `## Triage` treści issue, każdy jako lista komórek.
- * Sekcja kończy się na następnym nagłówku; bez sekcji albo bez tabeli — [].
- *
- * Czytamy tylko to, co GitHub pokazuje jako tabelę (PR #216): przykład tabeli
- * wklejony do opisu albo zostawiony w szablonie nałożyłby etykiety z przykładu.
- * Pomijane są więc bloki kodu, bloki `<pre>` i komentarze HTML, także przy
- * szukaniu nagłówka. Sekcję kończy następny nagłówek, także podkreślony, oraz
- * linia pozioma. Wierszem tabeli jest każda linia sekcji z `|` — Markdown nie
- * wymaga separatorów na brzegach.
- *
- * Wszystkie te reguły są fail-closed: w razie wątpliwości wiersz nie jest
- * czytany i issue dostaje `needs-triage`, zamiast etykiet z niepewnego źródła.
+ * HTML bez atrybutów: każdy znacznik zostaje jako `<nazwa>` albo `</nazwa>`.
+ * Wzorzec rozumie cudzysłowy, więc `>` w wartości atrybutu nie kończy znacznika,
+ * a dalsze wyrażenia nie muszą się atrybutami przejmować.
  */
-function triageTableRows(body) {
-  const rows = [];
-  let inside = false;
-  for (const raw of visibleLines(body)) {
-    if (/^ {0,3}#{1,6}\s/.test(raw)) {
-      if (inside) break;
-      inside = /^ {0,3}##\s+Triage\s*#*\s*$/i.test(raw);
-      continue;
-    }
-    if (!inside) continue;
-    // Podkreślenie nagłówka (`===`, `---`) albo linia pozioma; separator tabeli ma `|`.
-    if (/^ {0,3}(?:=+|-{2,}|\*{3,}|_{3,})\s*$/.test(raw)) break;
-    if (raw.indexOf('|') < 0) continue;
-    rows.push(raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
-  }
-  return rows;
+function stripAttributes(html) {
+  return String(html || '').replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?:"[^"]*"|'[^']*'|[^'">])*>/g,
+    (match, slash, name) => '<' + slash + name.toLowerCase() + '>');
 }
 
-/** Szerokość wcięcia linii w kolumnach; tabulator dociąga do wielokrotności czterech. */
-function indentColumns(line) {
-  let columns = 0;
-  for (const ch of line) {
-    if (ch === ' ') columns += 1;
-    else if (ch === '\t') columns += 4 - (columns % 4);
-    else break;
-  }
-  return columns;
+/** Tekst widoczny w kawałku HTML-a: bez znaczników, bez treści przekreślonej, z rozwiniętymi encjami. */
+function htmlText(html) {
+  return String(html || '')
+    // Przekreślenie to wartość wycofana przez autora, nie druga wartość.
+    .replace(/<(del|s|strike)>[\s\S]*?<\/\1>/g, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '\'')
+    .replace(/&amp;/g, '&')
+    .trim();
 }
 
 /**
- * Linie treści poza kodem i komentarzami HTML.
+ * Wiersze tabel z sekcji „Triage” treści issue, każdy jako lista komórek
+ * z samym tekstem; bez sekcji albo bez tabeli — [].
  *
- * Blok kodu otwierają co najmniej trzy grawisy albo tyldy, a zamyka go znacznik
- * z tego samego znaku, co najmniej tej samej długości i bez dopisku. Krótszy
- * znacznik w środku jest treścią bloku: tak pokazuje się przykład Markdownu
- * z zagnieżdżonym blokiem. Linia wcięta o co najmniej cztery kolumny to blok
- * kodu z wcięcia, więc też odpada — także wcięty znacznik, który bloku nie
- * otwiera. Komentarze i bloki `<pre>` wycinamy po blokach kodu, bo `<!--`
- * w kodzie jest zwykłym tekstem; niezamknięty komentarz albo `<pre>` ukrywa
- * resztę treści.
+ * Wejściem jest HTML wyrenderowany przez GitHuba (`bodyHTML`), nie Markdown.
+ * Kontrakt mówi o TABELI, a o tym, co jest tabelą, decyduje renderer. Wersja
+ * czytająca Markdown przeszła cztery rundy recenzji (PR #216) i w każdej
+ * wychodził kolejny sposób, w jaki treść niebędąca widoczną tabelą dawała
+ * etykiety: przykład w bloku kodu z grawisów, tyld, wcięcia albo `<pre>`,
+ * komentarz HTML, linie z `|` bez wiersza separatora, `\|` w komórce. Własny
+ * czytnik musiałby powtórzyć CommonMark i GFM; HTML z GitHuba ma te
+ * rozstrzygnięcia już w sobie, a tekst i wartości atrybutów są w nim
+ * zakodowane encjami, więc znacznik w treści nie udaje struktury.
+ *
+ * Sekcja zaczyna się od pierwszego nagłówka drugiego poziomu o treści „Triage”
+ * i kończy na następnym nagłówku albo linii poziomej. Nierozpoznany kształt
+ * HTML-a daje brak wierszy, czyli `needs-triage` (fail-closed).
  */
-function visibleLines(body) {
-  const kept = [];
-  let fence = '';
-  String(body || '').split(/\r?\n/).forEach(raw => {
-    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
-    if (!fence) {
-      if (mark) fence = mark[1];
-      else if (indentColumns(raw) < 4) kept.push(raw);
-      return;
+function triageTableRows(bodyHtml) {
+  const html = stripAttributes(bodyHtml);
+  const heading = /<h([1-6])>([\s\S]*?)<\/h\1>/g;
+  let start = -1;
+  for (let match = heading.exec(html); match; match = heading.exec(html)) {
+    if (match[1] === '2' && htmlText(match[2]).toLowerCase() === 'triage') {
+      start = heading.lastIndex;
+      break;
     }
-    const closes = mark && mark[1].charAt(0) === fence.charAt(0) && mark[1].length >= fence.length && !mark[2].trim();
-    if (closes) fence = '';
+  }
+  if (start < 0) return [];
+  const rest = html.slice(start);
+  const end = rest.search(/<h[1-6]>|<hr>/);
+  const section = end < 0 ? rest : rest.slice(0, end);
+
+  const rows = [];
+  (section.match(/<table>[\s\S]*?<\/table>/g) || []).forEach(table => {
+    (table.match(/<tr>[\s\S]*?<\/tr>/g) || []).forEach(row => {
+      const cells = (row.match(/<t[dh]>[\s\S]*?<\/t[dh]>/g) || []).map(htmlText);
+      if (cells.length) rows.push(cells);
+    });
   });
-  return kept.join('\n')
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
-    .replace(/<pre\b[^>]*>[\s\S]*?(?:<\/pre\s*>|$)/gi, '')
-    .split('\n');
+  return rows;
 }
 
 /**
@@ -345,10 +340,8 @@ function triageLabelFromTable(rows, family) {
   const def = TRIAGE_FAMILIES[family];
   const tokens = [];
   rows.forEach(cells => {
-    const head = String(cells[0] || '').replace(/[*_`]/g, '').trim().toLowerCase();
-    if (head.indexOf(def.row) !== 0) return;
-    // Przekreślenie to wartość wycofana przez autora, nie druga wartość.
-    (String(cells[1] || '').replace(/~~.*?~~/g, '').match(def.token) || []).forEach(token => {
+    if (String(cells[0] || '').toLowerCase().indexOf(def.row) !== 0) return;
+    (String(cells[1] || '').match(def.token) || []).forEach(token => {
       if (!tokens.includes(token)) tokens.push(token);
     });
   });
@@ -372,7 +365,7 @@ function triageLabelFromTable(rows, family) {
  * @param {string}   input.state        'open' | 'closed'
  * @param {string[]} input.labels       aktualne etykiety issue
  * @param {string}   input.createdAt    ISO: utworzenie issue
- * @param {string}   input.body         treść issue
+ * @param {string}   input.bodyHtml     treść issue wyrenderowana przez GitHuba (`bodyHTML`)
  * @param {string[]} input.repoLabels   etykiety istniejące w repozytorium
  * @param {object}   [config]
  * @returns {{ add: string[], remove: string[], reason: string }}
@@ -388,7 +381,7 @@ function reconcileTriage(input, config = {}) {
 
   const known = input.repoLabels || [];
   const labels = (input.labels || []).slice();
-  const rows = triageTableRows(input.body);
+  const rows = triageTableRows(input.bodyHtml);
   const add = [];
   cfg.triageRequired.forEach(family => {
     if (familyLabels(labels, family).length) return;
@@ -451,7 +444,7 @@ function fetchInput(repo, issue) {
         issue(number:$number) {
           state
           createdAt
-          body
+          bodyHTML
           labels(first:100) { nodes { name } }
           userContentEdits(first:1) { nodes { editedAt } }
         }
@@ -536,7 +529,7 @@ function fetchInput(repo, issue) {
     state: String(issueNode.state || '').toLowerCase(),
     labels: issueNode.labels.nodes.map(l => l.name),
     createdAt: String(issueNode.createdAt || ''),
-    body: String(issueNode.body || ''),
+    bodyHtml: String(issueNode.bodyHTML || ''),
     barrier: revisionBarrier(issueNode),
     comments: comments,
     labelEvents: labelEvents,

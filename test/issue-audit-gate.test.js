@@ -15,11 +15,46 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const { spawnSync } = require('child_process');
+const os = require('os');
+const { spawnSync, execFileSync } = require('child_process');
 
 const gate = require('../scripts/quality/issue-audit-gate.js');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'quality', 'issue-audit-gate.js');
 const { reconcile, DEFAULT_CONFIG, AUDIT_PENDING, AUDIT_OK, AUDIT_CHANGES } = gate;
+
+/**
+ * HTML, który GitHub renderuje z podanego Markdownu (#211).
+ *
+ * Bramka czyta tabelę „Triage” z `bodyHTML`, więc testy potrzebują prawdziwego
+ * wyniku renderera, a nie jego imitacji: imitacja zgadzałaby się z naszym
+ * czytnikiem z definicji. Wyniki leżą w `test/fixtures/triage-rendered.json`,
+ * kluczem jest Markdown. Nowy przypadek dopisuje się sam:
+ *   UPDATE_TRIAGE_FIXTURES=1 node --test test/issue-audit-gate.test.js
+ * (wymaga zalogowanego `gh`; renderuje `POST /markdown` w trybie `gfm`).
+ */
+const RENDERED_PATH = path.join(__dirname, 'fixtures', 'triage-rendered.json');
+const RENDERED = fs.existsSync(RENDERED_PATH) ? JSON.parse(fs.readFileSync(RENDERED_PATH, 'utf8')) : {};
+
+function render(markdown) {
+  if (!markdown) return '';
+  if (Object.prototype.hasOwnProperty.call(RENDERED, markdown)) return RENDERED[markdown];
+  if (!process.env.UPDATE_TRIAGE_FIXTURES) {
+    throw new Error('Brak wyrenderowanego HTML-a dla treści testu; uruchom ' +
+      'UPDATE_TRIAGE_FIXTURES=1 node --test test/issue-audit-gate.test.js\n' + markdown);
+  }
+  const source = path.join(os.tmpdir(), 'triage-fixture-' + process.pid + '.md');
+  fs.writeFileSync(source, markdown);
+  try {
+    RENDERED[markdown] = execFileSync('gh', ['api', 'markdown', '-F', 'text=@' + source, '-f', 'mode=gfm'], { encoding: 'utf8' });
+  } finally {
+    fs.unlinkSync(source);
+  }
+  const sorted = {};
+  Object.keys(RENDERED).sort().forEach(key => { sorted[key] = RENDERED[key]; });
+  fs.mkdirSync(path.dirname(RENDERED_PATH), { recursive: true });
+  fs.writeFileSync(RENDERED_PATH, JSON.stringify(sorted, null, 2) + '\n');
+  return RENDERED[markdown];
+}
 
 const GATE_ACTIVE = DEFAULT_CONFIG.gateActiveSince;
 // Rewizja sprzed wdrożenia bramki (issue „legacy”) i po wdrożeniu.
@@ -414,9 +449,11 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
 
   const tabela = (...wiersze) => ['## Problem', '', 'Opis.', '', '## Triage', '',
     '| wymiar | wartość | uzasadnienie |', '| --- | --- | --- |', ...wiersze, '', 'Powiązania: #1.'].join('\n');
-  const nowa = (over = {}) => issue(Object.assign({
-    labels: [], createdAt: CREATED, barrier: CREATED, body: '', repoLabels: REPO_LABELS
+  // `body` to Markdown; bramka dostaje HTML, który renderuje z niego GitHub.
+  const nowa = ({ body = '', ...over } = {}) => issue(Object.assign({
+    labels: [], createdAt: CREATED, barrier: CREATED, bodyHtml: render(body), repoLabels: REPO_LABELS
   }, over));
+  const plainRows = rows => JSON.parse(JSON.stringify(rows));
   const przebieg = (input, config) => reconcileIssue(input, config, NOW);
   // Stan po zapisie przebiegu: tak wygląda issue, gdy czyta ją kolejny run.
   const poZapisie = (input, outcome) => {
@@ -527,6 +564,12 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     assert.deepEqual(reconcileTriage(nowa({ createdAt: '' })).add, [], 'bez daty utworzenia nie zgadujemy');
   });
 
+  test('wiersz liczy się, gdy pierwsza komórka ZACZYNA się od nazwy wymiaru', () => {
+    const body = tabela('| poprzedni priorytet | **P4** | przed korektą |', '| priorytet | **P1** | pilne |',
+      '| Ryzyko zmiany | **T2** | wielka litera |', '| szacowane ryzyko | **T3** | nie ten wiersz |');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2']);
+  });
+
   test('wartość z drugiej komórki: token w uzasadnieniu nie robi niejednoznaczności', () => {
     const body = tabela('| priorytet | **P2** | nie P1, bo bez wpływu na produkcję |', '| ryzyko zmiany | **T2** | T3 dopiero przy migracji |');
     assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P2', 'T2']);
@@ -552,82 +595,106 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     }
   });
 
-  test('przykład „## Triage” w bloku kodu przed właściwą sekcją nie jest czytany (PR #216)', () => {
-    const body = ['## Problem', '', 'Przykład tabeli:', '', '```md', '## Triage', '', '| priorytet | **P4** | przykład |',
-      '| ryzyko | **T1** | przykład |', '```', '', '~~~', '## Triage', '| priorytet | **P4** | przykład |', '~~~', '',
-      '## Triage', '', '| wymiar | wartość |', '| --- | --- |', '| priorytet | **P1** |', '```', '| ryzyko | **T1** |', '```',
-      '| ryzyko | **T3** |'].join('\n');
-    const outcome = przebieg(nowa({ body }));
-    assert.deepEqual(outcome.triage.add, ['P1', 'T3']);
-    assert.equal(outcome.audit.label, AUDIT_PENDING);
-  });
+  // --- Co jest tabelą, rozstrzyga renderer GitHuba (PR #216) ------------------
+  //
+  // Bramka czyta `bodyHTML`. Poniższe przypadki to kolejne rundy recenzji wersji,
+  // która czytała Markdown: każdy z nich dawał etykiety z treści niebędącej
+  // widoczną tabelą. Treści są tu Markdownem, a HTML pochodzi z renderera GitHuba
+  // (`test/fixtures/triage-rendered.json`).
+  const sekcja = (...wiersze) => ['## Triage', '', '| wymiar | wartość |', '| --- | --- |', ...wiersze];
+  const WLASCIWA = sekcja('| priorytet | **P1** |', '| ryzyko | **T3** |');
+  const PRZYKLAD = sekcja('| priorytet | **P4** |', '| ryzyko | **T1** |');
+  const KOD = {
+    'blok z grawisów': ['```md', ...PRZYKLAD, '```'],
+    'blok z tyld': ['~~~', ...PRZYKLAD, '~~~'],
+    'cztery grawisy z zagnieżdżonym blokiem trzech': ['````md', '```md', ...PRZYKLAD, '```', '````'],
+    'krótszy znacznik nie zamyka bloku': ['`````', '````', ...PRZYKLAD, '`````'],
+    'znacznik z dopiskiem nie zamyka bloku': ['```md', '``` js', ...PRZYKLAD, '```'],
+    'tyldy w bloku z grawisów': ['```md', '~~~', ...PRZYKLAD, '```'],
+    'wcięcie czterema spacjami': PRZYKLAD.map(l => '    ' + l),
+    'wcięcie tabulatorem': PRZYKLAD.map(l => '\t' + l),
+    'wcięcie spacją i tabulatorem': PRZYKLAD.map(l => ' \t' + l),
+    'blok <pre>': ['<pre>', ...PRZYKLAD, '</pre>'],
+    'komentarz HTML': ['<!--', ...PRZYKLAD, '-->']
+  };
 
-  test('blok kodu zamyka tylko ten sam znacznik, a z dwóch sekcji „Triage” czytana jest pierwsza (PR #216)', () => {
-    const wBloku = ['```md', '~~~', '## Triage', '| priorytet | **P4** | przykład |', '| ryzyko | **T1** | przykład |', '```', '',
-      '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T3** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: wBloku })).add, ['P1', 'T3']);
-
-    const dwie = ['## Triage', '', '| priorytet | **P1** |', '', '## Uwagi', '', 'Tekst.', '', '## Triage', '', '| priorytet | **P2** |',
-      '| ryzyko | **T2** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: dwie })).add, ['P1', NEEDS_TRIAGE], 'druga sekcja nie dokłada ani P2, ani T2');
-  });
-
-  test('blok kodu zamyka znacznik tego samego znaku, co najmniej tej samej długości i bez dopisku (PR #216)', () => {
-    const wlasciwa = ['', '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T3** |'];
-    const przyklad = ['## Triage', '| priorytet | **P4** | przykład |', '| ryzyko | **T1** | przykład |'];
-    const warianty = {
-      'cztery grawisy z zagnieżdżonym blokiem trzech': ['````md', '```md'].concat(przyklad, ['```', '````']),
-      'krótszy znacznik nie zamyka': ['`````', '````'].concat(przyklad, ['`````']),
-      'znacznik z dopiskiem nie zamyka': ['```md', '``` js'].concat(przyklad, ['```']),
-      'tyldy z zagnieżdżonymi tyldami': ['~~~~', '~~~'].concat(przyklad, ['~~~', '~~~~'])
-    };
-    for (const [nazwa, blok] of Object.entries(warianty)) {
-      const body = ['## Problem', ''].concat(blok, wlasciwa).join('\n');
+  test('przykład sekcji „Triage” w kodzie albo komentarzu przed właściwą sekcją nie jest czytany (PR #216)', () => {
+    for (const [nazwa, blok] of Object.entries(KOD)) {
+      const body = ['## Problem', '', 'Przykład zapisu:', '', ...blok, '', ...WLASCIWA].join('\n');
       assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], nazwa);
     }
   });
 
-  test('komentarz HTML nie jest czytany: przykład przed sekcją ani wykomentowany wiersz w sekcji (PR #216)', () => {
-    const body = ['<!--', '## Triage', '| priorytet | **P4** | przykład z szablonu |', '| ryzyko | **T1** | przykład |', '-->', '',
-      '## Triage', '', '| priorytet | **P1** |', '<!-- | ryzyko | **T1** | -->', '| ryzyko | **T3** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3']);
-
-    const niezamkniety = ['## Triage', '', '| priorytet | **P1** |', '<!--', '| ryzyko | **T3** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: niezamkniety })).add, ['P1', NEEDS_TRIAGE], 'niezamknięty komentarz ukrywa resztę treści');
+  test('sekcja „Triage” z samym przykładem w kodzie albo komentarzu daje needs-triage (PR #216)', () => {
+    for (const [nazwa, blok] of Object.entries(KOD)) {
+      // Wnętrze bloku bez nagłówka: sama tabela-przykład pod prawdziwym nagłówkiem sekcji.
+      const wnetrze = blok.filter(l => !/##\s+Triage/.test(l));
+      const body = ['## Triage', '', 'Przykład zapisu:', '', ...wnetrze].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, [NEEDS_TRIAGE], nazwa);
+    }
   });
 
-  test('nagłówek sekcji wcięty do trzech spacji albo z zamykającymi # jest nagłówkiem (PR #216)', () => {
-    for (const naglowek of ['  ## Triage', '## Triage ##', '## triage']) {
-      const body = [naglowek, '', '| priorytet | **P1** |', '| ryzyko | **T2** |', '', '   ## Dalej', '| ryzyko | **T3** |'].join('\n');
+  test('wiersz w kodzie albo komentarzu wewnątrz sekcji nie dokłada wartości (PR #216)', () => {
+    const body = [...sekcja('| priorytet | **P1** |'), '', '```', '| ryzyko | **T1** |', '```', '', '<!-- | ryzyko | **T1** | -->', '',
+      '    | ryzyko | **T1** |', '', '| wymiar | wartość |', '| --- | --- |', '| ryzyko | **T3** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3']);
+  });
+
+  test('linie z | bez wiersza separatora to zwykły tekst, nie tabela (PR216-MARKDOWN-TABLE-01)', () => {
+    for (const linie of [['priorytet | P1', 'ryzyko | T2'], ['| priorytet | P1 |', '| ryzyko | T2 |']]) {
+      const body = ['## Triage', '', ...linie].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, [NEEDS_TRIAGE], linie[0]);
+    }
+    // Poprawna tabela nie potrzebuje separatorów na brzegach.
+    const bezBrzegow = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | **P1**', 'ryzyko zmiany | **T2**', '', 'Zdanie bez tabeli.'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: bezBrzegow })).add, ['P1', 'T2']);
+    // Wcięcie do trzech spacji nadal jest tabelą.
+    const wcieta = sekcja('| priorytet | **P1** |', '| ryzyko | **T2** |').map(l => '   ' + l).join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: wcieta })).add, ['P1', 'T2']);
+  });
+
+  test('\\| zostaje treścią komórki — dwa tokeny w jednej komórce to brak etykiety (PR216-ESCAPED-PIPE-02)', () => {
+    const body = sekcja('| priorytet | P1 \\| P2 | do decyzji |', '| ryzyko | **T1** | |').join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['T1', NEEDS_TRIAGE]);
+    assert.equal(gate.triageTableRows(render(body))[1][1], 'P1 | P2');
+  });
+
+  test('linia pozioma w każdym zapisie i podkreślony nagłówek kończą sekcję (PR216-THEMATIC-BREAK-03)', () => {
+    const dalej = ['| wymiar | wartość |', '| --- | --- |', '| ryzyko | **T3** |'];
+    for (const linia of ['---', '***', '___', '* * *', '- - -', '_ _ _', '  -----  ']) {
+      const body = [...sekcja('| priorytet | **P1** |'), '', linia, '', ...dalej].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', NEEDS_TRIAGE], linia);
+    }
+    for (const podkreslenie of ['---', '===']) {
+      const body = [...sekcja('| priorytet | **P1** |'), '', 'Inna sekcja', podkreslenie, '', ...dalej].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', NEEDS_TRIAGE], 'podkreślenie ' + podkreslenie);
+    }
+  });
+
+  test('znacznik zapisany jako kod inline nie ukrywa dalszej treści (PR216-INLINE-PRE-04)', () => {
+    const body = ['## Problem', '', 'Przykłady wstawiaj w `<pre>`, komentarze w `<!--`, a tabelę w `<table>`.', '', ...WLASCIWA].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3']);
+  });
+
+  test('nagłówek sekcji: drugi poziom, dowolna wielkość liter, także wcięty i z zamykającymi # (PR #216)', () => {
+    for (const naglowek of ['## Triage', '  ## Triage', '## Triage ##', '## triage', '## **Triage**']) {
+      const body = [naglowek, '', '| wymiar | wartość |', '| --- | --- |', '| priorytet | **P1** |', '| ryzyko | **T2** |'].join('\n');
       assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2'], naglowek);
     }
+    for (const naglowek of ['# Triage', '### Triage', '## Triage i ryzyko', '**Triage**']) {
+      const body = [naglowek, '', '| wymiar | wartość |', '| --- | --- |', '| priorytet | **P1** |', '| ryzyko | **T2** |'].join('\n');
+      assert.deepEqual(reconcileTriage(nowa({ body })).add, [NEEDS_TRIAGE], naglowek);
+    }
   });
 
-  test('blok kodu z wcięcia (4 spacje albo tabulator) nie jest czytany, a widoczna tabela nadal tak (PR #216)', () => {
-    for (const [nazwa, wciecie] of [['cztery spacje', '    '], ['tabulator', '\t'], ['spacja i tabulator', ' \t'], ['osiem spacji', '        ']]) {
-      const body = ['## Triage', '', 'Przykład zapisu:', '', wciecie + '| priorytet | P4 |', wciecie + '| ryzyko | T1 |', '',
-        '| priorytet | **P1** |', '| ryzyko | **T3** |'].join('\n');
-      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], nazwa);
+  test('z dwóch sekcji „Triage” czytana jest pierwsza, a tabela poza sekcją wcale', () => {
+    const dwie = [...sekcja('| priorytet | **P1** |'), '', '## Uwagi', '', 'Tekst.', '', ...sekcja('| priorytet | **P2** |', '| ryzyko | **T2** |')].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: dwie })).add, ['P1', NEEDS_TRIAGE], 'druga sekcja nie dokłada ani P2, ani T2');
 
-      const tylkoPrzyklad = ['## Triage', '', wciecie + '| priorytet | P1 |', wciecie + '| ryzyko | T2 |'].join('\n');
-      assert.deepEqual(reconcileTriage(nowa({ body: tylkoPrzyklad })).add, [NEEDS_TRIAGE], nazwa + ': sam wcięty przykład');
-    }
-    // Wcięcie do trzech spacji nie robi bloku kodu.
-    const trzy = ['## Triage', '', '   | priorytet | **P1** |', '   | ryzyko | **T2** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: trzy })).add, ['P1', 'T2']);
-    // Wcięty znacznik bloku kodu jest kodem, a nie otwarciem bloku: sekcja pod nim pozostaje widoczna.
-    const wcietyZnacznik = ['\t```', '', '## Triage', '', '| priorytet | **P1** |', '| ryzyko | **T2** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: wcietyZnacznik })).add, ['P1', 'T2']);
-  });
-
-  test('przykład w bloku <pre> nie jest czytany (PR #216)', () => {
-    for (const tag of ['pre', 'PRE']) {
-      const body = ['<' + tag + '>', '## Triage', '| priorytet | P4 |', '| ryzyko | T1 |', '</' + tag + '>', '',
-        '## Triage', '', '| priorytet | **P1** |', '<' + tag + ' lang="md">', '| ryzyko | T1 |', '</' + tag + '>', '| ryzyko | **T3** |'].join('\n');
-      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T3'], tag);
-    }
-    const niezamkniety = ['## Triage', '', '| priorytet | **P1** |', '<pre>', '| ryzyko | **T3** |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: niezamkniety })).add, ['P1', NEEDS_TRIAGE]);
+    const poza = ['## Zakres', '', '| wymiar | wartość |', '| --- | --- |', '| priorytet | **P1** |', '', '## Triage', '', 'Do ustalenia.', '',
+      '## Inne', '', '| wymiar | wartość |', '| --- | --- |', '| ryzyko | **T2** |'].join('\n');
+    assert.deepEqual(reconcileTriage(nowa({ body: poza })).add, [NEEDS_TRIAGE]);
+    assert.deepEqual(gate.triageTableRows(render(poza)), []);
   });
 
   test('przekreślona wartość nie jest wartością (PR #216)', () => {
@@ -637,26 +704,28 @@ describe('#211 triage: etykiety z tabeli albo needs-triage', () => {
     assert.deepEqual(reconcileTriage(nowa({ body: wycofana })).add, ['T1', NEEDS_TRIAGE]);
   });
 
-  test('linia pozioma albo podkreślenie nagłówka kończy sekcję (PR #216)', () => {
-    for (const linia of ['---', '***', '___', '===', '  -----  ']) {
-      const body = ['## Triage', '', '| priorytet | **P1** |', '', 'Inna sekcja', linia, '', '| ryzyko | **T3** |'].join('\n');
-      assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', NEEDS_TRIAGE], linia);
+  test('czytnik HTML: atrybuty, starszy kształt nagłówka, encje i przekreślenia', () => {
+    const rows = html => plainRows(gate.triageTableRows(html));
+    // Kształt z `bodyHTML`: atrybuty na znacznikach, opakowanie tabeli.
+    assert.deepEqual(rows('<h2 dir="auto">Triage</h2>\n<markdown-accessiblity-table><table role="table">\n<thead>\n<tr>\n<th>wymiar</th>\n<th>wartość</th>\n</tr>\n</thead>\n' +
+      '<tbody>\n<tr>\n<td>priorytet</td>\n<td align="center"><strong>P1</strong></td>\n</tr>\n</tbody>\n</table></markdown-accessiblity-table>'),
+    [['wymiar', 'wartość'], ['priorytet', 'P1']]);
+    // Starszy kształt: kotwica wewnątrz nagłówka; `>` w wartości atrybutu nie kończy znacznika.
+    assert.deepEqual(rows('<H2><a id="user-content-triage" class="anchor" aria-label="a > b" href="#triage"><svg class="octicon"></svg></a>Triage</H2>' +
+      '<TABLE><TR><TD title="x > y">ryzyko</TD><TD><code class="notranslate">T2</code></TD></TR></TABLE>'), [['ryzyko', 'T2']]);
+    // Przekreślenie w każdym zapisie znika; encje są rozwijane po zdjęciu znaczników.
+    assert.deepEqual(rows('<h2>Triage</h2><table><tr><td>priorytet</td><td><del>P1</del> <s>P3</s> <strike>P4</strike> P2 &amp; &lt;b&gt;</td></tr></table>'),
+      [['priorytet', 'P2 & <b>']]);
+    // Koniec sekcji: nagłówek dowolnego poziomu albo linia pozioma, także samozamykająca.
+    for (const koniec of ['<h3 dir="auto">Dalej</h3>', '<hr>', '<hr />', '<HR class="x">']) {
+      assert.deepEqual(rows('<h2>Triage</h2><p>tekst</p>' + koniec + '<table><tr><td>priorytet</td><td>P1</td></tr></table>'), [], koniec);
     }
-    // Wiersz separatora tabeli ma kreski, ale nie jest linią poziomą.
-    const zSeparatorem = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | P1', 'ryzyko | T2'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body: zSeparatorem })).add, ['P1', 'T2']);
-  });
-
-  test('tabela bez zewnętrznych separatorów | też jest czytana (PR #216)', () => {
-    const body = ['## Triage', '', 'wymiar | wartość', '--- | ---', 'priorytet | **P1**', 'ryzyko zmiany | **T2**', '', 'Zdanie bez tabeli.'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body })).add, ['P1', 'T2']);
-  });
-
-  test('tabela poza sekcją „Triage” nie jest czytana', () => {
-    const body = ['## Zakres', '', '| priorytet | **P1** | pilne |', '', '## Triage', '', 'Do ustalenia.', '',
-      '## Inne', '', '| ryzyko | **T2** | zmiana |'].join('\n');
-    assert.deepEqual(reconcileTriage(nowa({ body })).add, [NEEDS_TRIAGE]);
-    assert.deepEqual(gate.triageTableRows(body), []);
+    // Tekst udający strukturę jest w HTML-u zakodowany encjami i struktury nie tworzy.
+    assert.deepEqual(rows('<p><code>&lt;h2&gt;Triage&lt;/h2&gt;&lt;table&gt;&lt;tr&gt;&lt;td&gt;priorytet&lt;/td&gt;&lt;td&gt;P0&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</code></p>' +
+      '<p><span title="&lt;h2&gt;Triage&lt;/h2&gt;">s</span></p>'), []);
+    for (const pusty of ['', null, undefined, '<p>bez sekcji</p>', '<h2>Triage</h2><p>bez tabeli</p>', '<h2>Triage</h2><table><tr></tr></table>']) {
+      assert.deepEqual(rows(pusty), [], String(pusty));
+    }
   });
 
   test('needs-triage już obecne przy brakach — bez zapisu; kolejny przebieg po zapisie też nic nie zmienia', () => {
