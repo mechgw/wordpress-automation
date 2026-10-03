@@ -10,7 +10,7 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadProject, plain, fetchRouter } = require('./helpers/gas');
+const { loadProject, plain, fetchRouter, freezeClock } = require('./helpers/gas');
 
 const GSC_SHEET = 'Konfiguracja GSC';
 const GA4_SHEET = 'Konfiguracja GA4';
@@ -75,8 +75,8 @@ const porzucone = gas => logi(gas).filter(r => r[4] === 'BŁĄD' && NOTA.test(St
 const rekord = gas => JSON.parse(gas.$properties.LAST_IMPORT_GSC);
 const tematy = gas => gas.$mails.map(m => m.subject);
 const zapytanie = gas => JSON.parse(gas.$fetchCalls[0].params.payload);
-const ostatniOk = (gas, dataTo) => {
-  gas.$properties.LAST_IMPORT_GSC = JSON.stringify({ lastOk: { finishedAt: new Date().toISOString(), ok: true, dataFrom: dataTo, dataTo } });
+const ostatniOk = (gas, dataTo, rows = 1) => {
+  gas.$properties.LAST_IMPORT_GSC = JSON.stringify({ lastOk: { finishedAt: new Date().toISOString(), ok: true, rows, dataFrom: dataTo, dataTo } });
 };
 
 describe('#209: znacznik wykonania importu', () => {
@@ -186,7 +186,7 @@ describe('#209: znacznik wykonania importu', () => {
     for (let i = 20; i > 13; i--) {
       gas.recordImportRun_('GSC', true, () => ({ rows: 100, days: 1, dataFrom: localDate(i), dataTo: localDate(i) }));
     }
-    ostatniOk(gas, localDate(3)); // import jednego dnia, w profilu jednodniowym
+    // Pusta zakładka: import jednego dnia, w profilu jednodniowym.
     znacznik(gas, 'GSC', 10);
     gas.importDzienny({ triggerUid: 't' }); // 1 wiersz wobec mediany 100: anomalia
     const rec = rekord(gas);
@@ -217,44 +217,48 @@ describe('#209: znacznik wykonania importu', () => {
   });
 });
 
+/** Wiersz danych `GSC RAW` z podaną wartością w kolumnie A. */
+const wiersz = dzien => [dzien, 'q', '/p', 'pol', 'MOBILE', 1, 10, 0.1, 2, ''];
+/** Zakładka `GSC RAW` z wierszami o podanych datach, w podanej kolejności. */
+const zDanymi = (...dni) => ({ rows: [HEADER].concat(dni.map(wiersz)) });
+const zakres = gas => [zapytanie(gas).startDate, zapytanie(gas).endDate];
+
+// Od #215 początek zakresu wynika z ostatniej daty w `GSC RAW`, nie z `lastOk.dataTo`:
+// testy 5 i 6 ustawiają zawartość zakładki.
 describe('#209: samonaprawa luki w imporcie dziennym', () => {
-  test('5: dataTo dwa dni przed celem — zakres dwóch dni, Dni = 2', () => {
-    const gas = projekt();
-    ostatniOk(gas, localDate(4));
+  test('5: ostatni dzień z danymi dwa dni przed celem — zakres dwóch dni, Dni = 2', () => {
+    const gas = projekt({ raw: zDanymi(localDate(4)) });
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
-    assert.deepEqual([zapytanie(gas).startDate, zapytanie(gas).endDate], [localDate(3), CEL]);
+    assert.deepEqual(zakres(gas), [localDate(3), CEL]);
     assert.equal(out.days, 2);
     assert.equal(logi(gas).slice(-1)[0][3], 2);
     assert.equal(logi(gas).slice(-1)[0][9], localDate(3) + '..' + CEL);
+    assert.doesNotMatch(out.warning, /brak danych/, '#215 (12): pełny zakres z danymi nie daje ostrzeżenia');
   });
 
-  test('6: dataTo równe celowi, dalsze niż cel albo brak dataTo — jeden dzień', () => {
-    for (const dataTo of [CEL, localDate(1), null]) {
-      const gas = projekt();
-      if (dataTo) ostatniOk(gas, dataTo);
+  test('6: ostatni dzień z danymi równy celowi, późniejszy niż cel albo zakładka z samym nagłówkiem — jeden dzień', () => {
+    for (const dzien of [CEL, localDate(1), null]) {
+      const gas = projekt({ raw: dzien ? zDanymi(localDate(9), dzien) : { rows: [HEADER] } });
       gas.importDzienny({ triggerUid: 't' });
-      assert.deepEqual([zapytanie(gas).startDate, zapytanie(gas).endDate], [CEL, CEL], String(dataTo));
+      assert.deepEqual(zakres(gas), [CEL, CEL], String(dzien));
     }
   });
 
-  test('6: niepoprawne dataTo — jeden dzień', () => {
-    const gas = projekt();
-    ostatniOk(gas, '24.09.2026');
+  test('6: w kolumnie A nie ma żadnej poprawnej daty — jeden dzień', () => {
+    const gas = projekt({ raw: zDanymi('24.09.2026', 'suma', '') });
     gas.importDzienny({ triggerUid: 't' });
-    assert.deepEqual([zapytanie(gas).startDate, zapytanie(gas).endDate], [CEL, CEL]);
+    assert.deepEqual(zakres(gas), [CEL, CEL]);
   });
 
   test('6: luka dokładnie 7 dni — cała, bez ostrzeżenia', () => {
-    const gas = projekt();
-    ostatniOk(gas, localDate(9));
+    const gas = projekt({ raw: zDanymi(localDate(9)) });
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
-    assert.deepEqual([zapytanie(gas).startDate, zapytanie(gas).endDate], [localDate(8), CEL]);
+    assert.deepEqual(zakres(gas), [localDate(8), CEL]);
     assert.doesNotMatch(out.warning, /luka w danych/);
   });
 
   test('6: luka 10 dni — 7 najnowszych i ostrzeżenie o reszcie', () => {
-    const gas = projekt();
-    ostatniOk(gas, localDate(12));
+    const gas = projekt({ raw: zDanymi(localDate(12)) });
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
     assert.deepEqual([zapytanie(gas).startDate, zapytanie(gas).endDate], [localDate(8), CEL]);
     assert.equal(out.days, 7);
@@ -271,12 +275,11 @@ describe('#209: samonaprawa luki w imporcie dziennym', () => {
   });
 
   test('8: przebieg dwudniowy nie wchodzi do bazy jednodniowej — porównanie po dniach danych (#180)', () => {
-    const gas = projekt({ fetch: gscApi(1) });
+    const gas = projekt({ raw: zDanymi(localDate(4)), fetch: gscApi(1) });
     // 7 jednodniowych próbek po 100 wierszy: mediana 100.
     for (let i = 20; i > 13; i--) {
       gas.recordImportRun_('GSC', true, () => ({ rows: 100, days: 1, dataFrom: localDate(i), dataTo: localDate(i) }));
     }
-    ostatniOk(gas, localDate(4));
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
     assert.equal(out.days, 2);
     assert.equal(out.rows, 2, 'po jednym wierszu na dzień');
@@ -284,7 +287,7 @@ describe('#209: samonaprawa luki w imporcie dziennym', () => {
     assert.equal(logi(gas).slice(-1)[0][3], 2);
 
     // Próba kontrolna: ta sama baza alarmuje przy przebiegu jednodniowym.
-    ostatniOk(gas, localDate(3));
+    // Po pierwszym przebiegu zakładka sięga celu, więc drugi pobiera jeden dzień.
     gas.importDzienny({ triggerUid: 't' });
     assert.match(String(rekord(gas).lastRun.anomaly), /mało danych: 1 wierszy vs mediana 100/);
   });
@@ -453,7 +456,9 @@ describe('#209: czas etapów w logu wykonania', () => {
   test('9: GSC, sukces — etapy w kolejności, każdy z czasem i czasem od startu', () => {
     const gas = projekt({ raw: { rows: [HEADER, [localDate(20), 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, '']] } });
     gas.importDzienny({ triggerUid: 't' });
-    assert.deepEqual(etapy(gas, 'GSC'), ['zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie', 'zapis całej zakładki', 'formaty', 'obsługa wyniku']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie', 'zapis całej zakładki', 'formaty', 'obsługa wyniku']);
+    // #215 (11): odczyt kolumny A przed zapytaniem do API, z liczbą wierszy i znalezionym dniem.
+    assert.ok(gas.$console.some(([, t]) => t.startsWith('[import GSC] ostatni dzień z danymi (1 wierszy, ' + localDate(20) + '): ')));
     assert.ok(gas.$console.every(([, t]) => !t.startsWith('[import GSC] zapytania') || /: \d+ ms \(od startu \d+ ms\)$/.test(t)));
   });
 
@@ -471,14 +476,14 @@ describe('#209: czas etapów w logu wykonania', () => {
   test('9: GSC, nowa ścieżka — etapy usunięcia i dopisania', () => {
     const gas = projekt({ raw: zakladka({ dane: [CEL] }), properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
     gas.importDzienny({ triggerUid: 't' });
-    assert.deepEqual(etapy(gas, 'GSC'), ['zapytania API', 'rozpoznanie K–L', 'odczyt kolumny A', 'usunięcie wierszy importowanych dni', 'dopisanie wierszy', 'formaty', 'obsługa wyniku']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt kolumny A', 'usunięcie wierszy importowanych dni', 'dopisanie wierszy', 'formaty', 'obsługa wyniku']);
   });
 
   test('9: GSC, błąd w środku — logi do etapu, w którym padł', () => {
     const raw = { rows: [HEADER, [localDate(20), 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, '']], maxRows: 3 };
     const gas = projekt({ raw, fetch: gscApi(5) });
     assert.throws(() => gas.importDzienny({ triggerUid: 't' }), /exceed the 3 rows/);
-    assert.deepEqual(etapy(gas, 'GSC'), ['zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie']);
   });
 
   test('9: GA4 — etapy zapytań i zapisu każdej zakładki', () => {
@@ -494,5 +499,123 @@ describe('#209: czas etapów w logu wykonania', () => {
       assert.deepEqual(lista.filter(t => t.startsWith(name + ':')), [name + ': odczyt', name + ': czyszczenie i zapis', name + ': formaty']);
     }
     assert.equal(lista[lista.length - 1], 'obsługa wyniku');
+  });
+});
+
+/**
+ * #215: 03.10.2026 Google nie opublikował jeszcze dnia 30.09, API zwróciło zero
+ * wierszy, przebieg zapisał się jako udany z `dataTo` = 30.09 i następny zaczął
+ * od 01.10. Numeracja odpowiada macierzy z #215.
+ */
+describe('#215: zero wierszy z API nie zostawia luki', () => {
+  const zapytanieNr = (gas, n) => { const p = JSON.parse(gas.$fetchCalls[n].params.payload); return [p.startDate, p.endDate]; };
+  const daty = gas => gas.$sheet(RAW).slice(1).map(r => r[0]);
+  /** API GSC zwracające wiersze tylko dla wskazanych dni zakresu. */
+  const tylkoDni = dni => (url, params) => {
+    const p = JSON.parse(params.payload);
+    return { code: 200, json: { rows: dni.filter(d => d >= p.startDate && d <= p.endDate).map(d => ({ keys: [d, 'fraza', '/s', 'pol', 'MOBILE'], clicks: 1, impressions: 10, ctr: 0.1, position: 3 })) } };
+  };
+
+  test('1: dwa przebiegi dzień po dniu, pierwszy z zerem wierszy — drugi pobiera oba dni', () => {
+    // dailyLagDays = 2: 03.10 celem jest 01.10, 04.10 celem jest 02.10.
+    let opublikowane = [];
+    const gas = projekt({ raw: zDanymi('2026-09-29', '2026-09-30'), fetch: (url, params) => tylkoDni(opublikowane)(url, params) });
+    freezeClock(gas, 2026, 9, 3);
+
+    const pierwszy = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zapytanieNr(gas, 0), ['2026-10-01', '2026-10-01']);
+    assert.equal(pierwszy.rows, 0);
+    assert.equal(rekord(gas).lastOk.dataTo, '2026-10-01', 'rekord nadal niesie zakres zapytania (#180)');
+    assert.match(pierwszy.warning, /brak danych za 2026-10-01 \(API nie zwróciło wierszy\); następny import dzienny pobierze ten dzień ponownie/);
+
+    opublikowane = ['2026-10-01', '2026-10-02'];
+    freezeClock(gas, 2026, 9, 4);
+    const drugi = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zapytanieNr(gas, 1), ['2026-10-01', '2026-10-02'], 'dzień z zerem pobrany ponownie');
+    assert.equal(drugi.days, 2);
+    assert.equal(logi(gas).slice(-1)[0][3], 2);
+    assert.deepEqual(daty(gas), ['2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02']);
+    assert.doesNotMatch(drugi.warning, /brak danych/);
+  });
+
+  test('2: rekord z dataTo równym celowi i zerem wierszy nie ma wpływu — zakres od dnia po ostatniej dacie w zakładce', () => {
+    const gas = projekt({ raw: zDanymi(localDate(5), localDate(4)) });
+    ostatniOk(gas, localDate(3), 0);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zakres(gas), [localDate(3), CEL]);
+
+    // I odwrotnie: stary rekord nie cofa zakresu, gdy zakładka sięga celu.
+    const swieza = projekt({ raw: zDanymi(CEL) });
+    ostatniOk(swieza, localDate(6));
+    swieza.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zakres(swieza), [CEL, CEL]);
+  });
+
+  test('3: zakres dwudniowy, wiersze tylko dla pierwszego dnia — ostrzeżenie o drugim, następny przebieg zaczyna od niego', () => {
+    const gas = projekt({ raw: zDanymi(localDate(4)), fetch: tylkoDni([localDate(3)]) });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zakres(gas), [localDate(3), CEL]);
+    assert.ok(out.warning.includes('brak danych za ' + CEL + ' (API nie zwróciło wierszy); następny import dzienny pobierze ten dzień ponownie'), out.warning);
+    assert.match(gas.$cell(GSC_SHEET, 'B8'), /UWAGA: .*brak danych za/);
+
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), [CEL, CEL]);
+  });
+
+  test('3: kilka końcowych dni bez wierszy — ostrzeżenie podaje przedział', () => {
+    const gas = projekt({ raw: zDanymi(localDate(6)), fetch: tylkoDni([localDate(5)]) });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.ok(out.warning.includes('brak danych za ' + localDate(4) + ' – ' + CEL + ' (API nie zwróciło wierszy); następny import dzienny pobierze te dni ponownie'), out.warning);
+  });
+
+  test('4: zakres trzydniowy, wiersze dla dnia 1 i 3 — bez ostrzeżenia, następny przebieg zaczyna dzień po dniu 3', () => {
+    const gas = projekt({ raw: zDanymi(localDate(5)), fetch: tylkoDni([localDate(4), CEL]) });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zakres(gas), [localDate(4), CEL]);
+    assert.doesNotMatch(out.warning, /brak danych/);
+
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), [CEL, CEL], 'dzień pusty w środku nie jest pobierany ponownie');
+  });
+
+  test('8: daty jako Date i jako tekst, nieposortowane, z pustymi komórkami i tekstem niebędącym datą — największa poprawna', () => {
+    const gas = projekt({ raw: zDanymi(localDate(6), 'x', '', 'suma', '2026-13-45', '9999-99-99', localDate(8)) });
+    const data = new gas.$Date();
+    data.setDate(data.getDate() - 4);
+    arkusz(gas).getRange(3, 1).setValue(data);
+
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zakres(gas), [localDate(3), CEL], 'największa jest data zapisana jako obiekt Date');
+  });
+
+  test('9: obie ścieżki zapisu dają ten sam zakres', () => {
+    const szybka = projekt({ raw: zakladka({ dane: [localDate(5), localDate(4)] }), properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
+    const out = plain(szybka.importDzienny({ triggerUid: 't' }));
+    assert.doesNotMatch(out.warning, /K–L/);
+    assert.equal(zapisy(szybka).filter(e => e[0] === 'clearContent').length, 0, 'zapis samych importowanych dni');
+    assert.deepEqual(zakres(szybka), [localDate(3), CEL]);
+
+    const pelna = projekt({ raw: zDanymi(localDate(5), localDate(4)) });
+    pelna.importDzienny({ triggerUid: 't' });
+    assert.equal(zapisy(pelna).filter(e => e[0] === 'clearContent').length, 1, 'zapis całej zakładki');
+    assert.deepEqual(zakres(pelna), [localDate(3), CEL]);
+  });
+
+  test('10: ręczny import zakresu — zakres bez zmian i bez ostrzeżenia o braku danych', () => {
+    const gas = projekt({ raw: zDanymi(localDate(20)), fetch: tylkoDni([]) });
+    const out = plain(gas.importOstatniZakres());
+    assert.deepEqual(zakres(gas), [localDate(4), CEL], 'daysBack = 3 dni do celu');
+    assert.equal(out.warning, '');
+  });
+
+  test('ostrzeżenie o końcowych dniach liczy tylko wiersze z zakresu', () => {
+    const gas = projekt();
+    const w = (...dni) => gas.gscMissingTailWarning_('2026-09-29', '2026-10-01', dni.map(d => [d]));
+    assert.equal(w('2026-09-29', '2026-09-30', '2026-10-01'), '');
+    assert.equal(w('2026-10-01'), '');
+    assert.match(w('2026-09-29'), /^brak danych za 2026-09-30 – 2026-10-01 /);
+    assert.match(w('2026-09-30', '2026-09-29'), /^brak danych za 2026-10-01 /);
+    assert.match(w(), /^brak danych za 2026-09-29 – 2026-10-01 /);
+    assert.match(w('2026-10-05', '2026-09-01'), /^brak danych za 2026-09-29 – 2026-10-01 /, 'wiersze spoza zakresu nie liczą się');
   });
 });
