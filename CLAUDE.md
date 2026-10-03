@@ -140,6 +140,10 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 - Nie uruchamiaj `clasp push` lokalnie; jedyną drogą do produkcji jest workflow deployu.
 - Nie dotykaj `.clasp.json` / `.clasprc.json` (ignorowane przez gita, poświadczenia).
 - Nie obniżaj progu pokrycia bez uzasadnienia i issue z follow-upem.
+- Każda nowa issue ma triage w etykietach: dokładnie jedna `P*` i dokładnie jedna `T*`. Zalecanym
+  źródłem jest tabela w sekcji `## Triage` treści (wiersze `priorytet`, `ryzyko zmiany`, wartość
+  w drugiej komórce): bramka audytu nakłada z niej brakujące etykiety, a issue bez kompletu dostaje
+  `needs-triage` (#211). Bez `P*`/`T*` issue nie wchodzi do audytu.
 - Twierdzenie o **obecnym** zachowaniu kodu — w treści issue, w komentarzu audytowym, w odpowiedzi —
   wymaga odwołania `plik:linia` sprawdzonego przed napisaniem. 2026-09-12 audyt odrzucił trzy
   specyfikacje naraz i każda opisywała stan niezgodny z `main`; jedna kazała wdrożyć klucz upsertu,
