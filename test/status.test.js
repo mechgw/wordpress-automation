@@ -201,17 +201,18 @@ describe('Kod.gs GSC import end to end', () => {
     { keys: ['2026-09-03', 'przesyłka', '/cennik', 'pol', 'DESKTOP'], clicks: 1, impressions: 10, ctr: 0.1, position: 8 }
   ];
 
-  function project(extraRaw = []) {
+  function project(extraRaw = [], rows = gscRows) {
     const sheets = statusSheets();
     sheets['GSC RAW'] = [['date', 'query', 'page', 'country', 'device', 'clicks', 'impressions', 'ctr', 'position', 'downloaded']].concat(extraRaw);
-    return loadProject({ sheets, fetch: () => ({ code: 200, json: { rows: gscRows } }) });
+    return loadProject({ sheets, fetch: () => ({ code: 200, json: { rows } }) });
   }
 
   test('importDzienny fetches one day, replaces that day in GSC RAW, records the run and writes B8', () => {
     const day = localDate(2);
     const keep = [localDate(10), 'old', '/x', 'pol', 'MOBILE', 1, 1, 0.1, 1, ''];
     const replaced = [day, 'stale', '/y', 'pol', 'MOBILE', 9, 9, 0.9, 9, ''];
-    const gas = project([keep, replaced]);
+    // API oddaje wiersze pobieranego dnia: wiersze spoza zakresu dałyby ostrzeżenie o braku danych (#215).
+    const gas = project([keep, replaced], gscRows.map(r => Object.assign({}, r, { keys: [day].concat(r.keys.slice(1)) })));
 
     const out = gas.importDzienny({ triggerUid: 'daily' }); // jak z triggera czasowego
 
@@ -225,7 +226,7 @@ describe('Kod.gs GSC import end to end', () => {
     const raw = gas.$sheet('GSC RAW');
     assert.equal(raw.length, 4, 'header + kept row + 2 imported rows');
     assert.equal(raw[1][1], 'old', 'row outside the imported day kept');
-    assert.deepEqual(raw[2].slice(0, 9), ['2026-09-03', 'kurier', '/oferta', 'pol', 'MOBILE', 3, 40, 0.075, 4.2]);
+    assert.deepEqual(raw[2].slice(0, 9), [day, 'kurier', '/oferta', 'pol', 'MOBILE', 3, 40, 0.075, 4.2]);
     assert.equal(raw.some(r => r[1] === 'stale'), false, 'row inside the imported day replaced');
 
     assert.equal(plain(out).rows, 2);
