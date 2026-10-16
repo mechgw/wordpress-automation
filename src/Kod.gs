@@ -132,7 +132,11 @@ function importDzienny(e) {
     const cfg = getConfig_();
     const stage = importStageTimer_('import GSC');
     const target = formatujDate_(przesunDate_(new Date(), -cfg.dailyLagDays));
-    const lastDay = gscLastDataDay_(SpreadsheetApp.getActive().getSheetByName(RAW_SHEET), stage);
+    // Osobny pomiar każdego kroku pierwszego etapu (#220): 13.10 przebieg ubito,
+    // zanim pierwszy etap się skończył, i nie dało się ustalić, który krok trwał.
+    const sheet = SpreadsheetApp.getActive().getSheetByName(RAW_SHEET);
+    stage('zakładka ' + RAW_SHEET);
+    const lastDay = gscLastDataDay_(sheet, stage);
     const range = dailyGscRange_(target, lastDay);
     return importRange_(range.from, range.to, { daily: true, warning: range.warning, stage: stage });
   }));
@@ -156,17 +160,60 @@ function gscLastDataDay_(sheet, stage) {
   if (!sheet) return '';
   const lastRow = sheet.getLastRow();
   const column = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+  stage('odczyt kolumny A do zakresu (' + column.length + ' wierszy)');
   let day = '';
+  let dates = 0;
   column.forEach(row => {
     // Tekst musi być datą w całości: `normalizujDate_` obcina go do 10 znaków,
     // więc „9999-12-31 notatka” udawałoby datę z przyszłości i wyłączało
     // uzupełnianie luki (PR #217).
+    if (row[0] instanceof Date) dates++;
     const date = row[0] instanceof Date ? formatujDate_(row[0]) : String(row[0]);
     // Kształt i istnienie w kalendarzu: tekst niebędący datą nie może zostać „największą datą”.
     if (/^\d{4}-\d{2}-\d{2}$/.test(date) && shiftDay_(date, 0) === date && date > day) day = date;
   });
-  stage('ostatni dzień z danymi (' + column.length + ' wierszy, ' + (day || 'brak') + ')');
+  // Liczba komórek typu Date to liczba wywołań `Utilities.formatDate` w pętli (#220).
+  stage('ostatni dzień z danymi (' + column.length + ' wierszy, w tym ' + dates + ' dat, ' + (day || 'brak') + ')');
   return day;
+}
+
+/**
+ * Diagnostyka #220, do uruchomienia z edytora Apps Script. Niczego nie zapisuje.
+ *
+ * Mierzy na kolumnie A `GSC RAW` to, czego nie rozdziela log importu: pierwszy
+ * odczyt wobec drugiego w tym samym wykonaniu (koszt przeliczenia formuł)
+ * i pętlę z `Utilities.formatDate` dla każdej daty wobec pętli z pamięcią
+ * po `getTime()`, która woła usługę raz na różną wartość. Na końcu sprawdza,
+ * czy oba warianty dały te same daty.
+ */
+function diagnozaDatGsc() {
+  const stage = importStageTimer_('diagnoza dat GSC');
+  const sheet = SpreadsheetApp.getActive().getSheetByName(RAW_SHEET);
+  if (!sheet) throw new Error('Brak zakładki ' + RAW_SHEET);
+  const read = () => {
+    const lastRow = sheet.getLastRow();
+    return lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().map(r => r[0]) : [];
+  };
+  const column = read();
+  stage('pierwszy odczyt kolumny A (' + column.length + ' wierszy)');
+  read();
+  stage('drugi odczyt kolumny A');
+
+  const dates = column.filter(v => v instanceof Date);
+  const direct = dates.map(formatujDate_);
+  stage('formatDate dla każdej daty (' + dates.length + ')');
+  const cache = {};
+  const cached = dates.map(d => {
+    const key = d.getTime();
+    if (!(key in cache)) cache[key] = formatujDate_(d);
+    return cache[key];
+  });
+  const distinct = Object.keys(cache).length;
+  stage('formatDate z pamięcią po getTime (' + distinct + ' różnych)');
+
+  const same = direct.every((v, i) => v === cached[i]);
+  console.log('[diagnoza dat GSC] wyniki zgodne: ' + (same ? 'tak' : 'NIE'));
+  return { rows: column.length, dates: dates.length, distinct: distinct, same: same };
 }
 
 /**
@@ -468,6 +515,9 @@ function appendGscDays_(sheet, startDate, endDate, newRows, stage) {
     const date = normalizujDate_(v);
     return Boolean(date) && date >= startDate && date <= endDate;
   });
+  // Pętla osobno od `deleteRows` (#220): przy zerze usuwanych wierszy etap trwał
+  // 10–60 s, choć nie wywołuje żadnej metody arkusza.
+  stage('rozpoznanie importowanych dni (' + column.length + ' wierszy)');
   const blocks = [];
   removed.forEach((hit, i) => {
     if (!hit) return;
