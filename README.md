@@ -320,6 +320,8 @@ Każdy inny stan, w tym brak właściwości albo zły JSON, to zapis całej zak�
 
 **Czas etapów.** Importy GSC i GA4 zapisują w logu wykonania czas każdego etapu, np. `[import GSC] zapytania API (452 wierszy): 12345 ms (od startu 12345 ms)`, potem rozpoznanie K–L, odczyt, usunięcie albo czyszczenie, zapis, formaty i obsługę wyniku. Wpis powstaje po zakończeniu etapu, więc rejestr wykonań Apps Script pokazuje go także dla przebiegu ubitego limitem, do ostatniego etapu, który się skończył.
 
+Import GSC mierzy osobno odczyt kolumny A i pętlę po jej wierszach, zarówno przy wyznaczaniu zakresu („odczyt kolumny A do zakresu”, „ostatni dzień z danymi … w tym N dat”), jak i przy zapisie („rozpoznanie importowanych dni”, „usunięcie wierszy importowanych dni”). 13.10.2026 przebieg ubito przed końcem pierwszego etapu i z logu nie dało się ustalić, który krok trwał (#220). Funkcja `diagnozaDatGsc` uruchomiona z edytora Apps Script mierzy to samo poza importem: pierwszy i drugi odczyt kolumny A oraz pętlę z `Utilities.formatDate` dla każdej daty wobec pętli z pamięcią po wartości daty. Niczego nie zapisuje.
+
 ### Alerty e-mail (model incydentu)
 
 Alerty wysyła `MailApp` (zakres `script.send_mail`; pierwsze wdrożenie z tym zakresem wymaga jednorazowej ponownej autoryzacji skryptu) na adres z `ALERT_EMAIL`. Nie wysyłają się przy każdym zdarzeniu, tylko per **incydent**, jeden na źródło, przechowywany w tym samym rekordzie `LAST_IMPORT_*`:
