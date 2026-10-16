@@ -456,9 +456,9 @@ describe('#209: czas etapów w logu wykonania', () => {
   test('9: GSC, sukces — etapy w kolejności, każdy z czasem i czasem od startu', () => {
     const gas = projekt({ raw: { rows: [HEADER, [localDate(20), 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, '']] } });
     gas.importDzienny({ triggerUid: 't' });
-    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie', 'zapis całej zakładki', 'formaty', 'obsługa wyniku']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['zakładka GSC RAW', 'odczyt kolumny A do zakresu', 'ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie', 'zapis całej zakładki', 'formaty', 'obsługa wyniku']);
     // #215 (11): odczyt kolumny A przed zapytaniem do API, z liczbą wierszy i znalezionym dniem.
-    assert.ok(gas.$console.some(([, t]) => t.startsWith('[import GSC] ostatni dzień z danymi (1 wierszy, ' + localDate(20) + '): ')));
+    assert.ok(gas.$console.some(([, t]) => t.startsWith('[import GSC] ostatni dzień z danymi (1 wierszy, w tym 0 dat, ' + localDate(20) + '): ')));
     assert.ok(gas.$console.every(([, t]) => !t.startsWith('[import GSC] zapytania') || /: \d+ ms \(od startu \d+ ms\)$/.test(t)));
   });
 
@@ -476,14 +476,14 @@ describe('#209: czas etapów w logu wykonania', () => {
   test('9: GSC, nowa ścieżka — etapy usunięcia i dopisania', () => {
     const gas = projekt({ raw: zakladka({ dane: [CEL] }), properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
     gas.importDzienny({ triggerUid: 't' });
-    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt kolumny A', 'usunięcie wierszy importowanych dni', 'dopisanie wierszy', 'formaty', 'obsługa wyniku']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['zakładka GSC RAW', 'odczyt kolumny A do zakresu', 'ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt kolumny A', 'rozpoznanie importowanych dni', 'usunięcie wierszy importowanych dni', 'dopisanie wierszy', 'formaty', 'obsługa wyniku']);
   });
 
   test('9: GSC, błąd w środku — logi do etapu, w którym padł', () => {
     const raw = { rows: [HEADER, [localDate(20), 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, '']], maxRows: 3 };
     const gas = projekt({ raw, fetch: gscApi(5) });
     assert.throws(() => gas.importDzienny({ triggerUid: 't' }), /exceed the 3 rows/);
-    assert.deepEqual(etapy(gas, 'GSC'), ['ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie']);
+    assert.deepEqual(etapy(gas, 'GSC'), ['zakładka GSC RAW', 'odczyt kolumny A do zakresu', 'ostatni dzień z danymi', 'zapytania API', 'rozpoznanie K–L', 'odczyt arkusza', 'czyszczenie']);
   });
 
   test('9: GA4 — etapy zapytań i zapisu każdej zakładki', () => {
@@ -499,6 +499,66 @@ describe('#209: czas etapów w logu wykonania', () => {
       assert.deepEqual(lista.filter(t => t.startsWith(name + ':')), [name + ': odczyt', name + ': czyszczenie i zapis', name + ': formaty']);
     }
     assert.equal(lista[lista.length - 1], 'obsługa wyniku');
+  });
+});
+
+/**
+ * #220: import GSC ubity 13.10 przed końcem pierwszego etapu. Pierwszy etap
+ * i etap usunięcia mają osobne pomiary odczytu i pętli po wierszach, a funkcja
+ * diagnostyczna mierzy je poza importem. Zachowanie importu się nie zmienia.
+ */
+describe('#220: rozbite etapy i diagnostyka dat', () => {
+  const linie = (gas, zrodlo) => gas.$console.map(([, t]) => t).filter(t => t.startsWith('[' + zrodlo + '] '));
+  const wiersz = data => [data, 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, ''];
+  /** Komórki A jako obiekty `Date` z realm projektu: `instanceof Date` w kodzie widzi tylko takie. */
+  const zDatami = (gas, dni) => dni.forEach((n, i) => {
+    if (typeof n !== 'number') return;
+    const d = new gas.$Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - n);
+    arkusz(gas).getRange(i + 2, 1).setValue(d);
+  });
+
+  test('pierwszy etap: zakładka, odczyt i pętla osobno; pętla podaje liczbę komórek typu Date', () => {
+    const gas = projekt({ raw: { rows: [HEADER, wiersz(''), wiersz(''), wiersz(localDate(22))] } });
+    zDatami(gas, [20, 21]);
+    gas.importDzienny({ triggerUid: 't' });
+    const gsc = linie(gas, 'import GSC');
+    assert.match(gsc[0], /^\[import GSC\] zakładka GSC RAW: \d+ ms \(od startu \d+ ms\)$/);
+    assert.match(gsc[1], /^\[import GSC\] odczyt kolumny A do zakresu \(3 wierszy\): \d+ ms/);
+    assert.ok(gsc[2].startsWith('[import GSC] ostatni dzień z danymi (3 wierszy, w tym 2 dat, ' + localDate(20) + '): '), gsc[2]);
+  });
+
+  test('etap usunięcia: pętla rozpoznania osobno od deleteRows, z liczbą wierszy kolumny', () => {
+    const gas = projekt({ raw: zakladka({ dane: [CEL, localDate(20)] }), properties: { GSC_KL_ANCHOR_FORMULAS: WZORZEC } });
+    gas.importDzienny({ triggerUid: 't' });
+    const gsc = linie(gas, 'import GSC');
+    const i = gsc.findIndex(t => t.startsWith('[import GSC] rozpoznanie importowanych dni (2 wierszy): '));
+    assert.ok(i > 0, gsc.join('\n'));
+    assert.ok(gsc[i + 1].startsWith('[import GSC] usunięcie wierszy importowanych dni (1): '), gsc[i + 1]);
+  });
+
+  test('diagnoza: dwa odczyty i dwie pętle, zgodne wyniki, nic nie zapisuje', () => {
+    const gas = projekt({ raw: { rows: [HEADER, wiersz(''), wiersz(''), wiersz(''), wiersz(localDate(22))] } });
+    zDatami(gas, [20, 20, 21]);
+    const przed = JSON.stringify(gas.$sheet(RAW));
+    const out = plain(gas.diagnozaDatGsc());
+
+    assert.deepEqual(out, { rows: 4, dates: 3, distinct: 2, same: true });
+    assert.deepEqual(linie(gas, 'diagnoza dat GSC').map(t => t.replace(/: \d+ ms.*$/, '')), [
+      '[diagnoza dat GSC] pierwszy odczyt kolumny A (4 wierszy)',
+      '[diagnoza dat GSC] drugi odczyt kolumny A',
+      '[diagnoza dat GSC] formatDate dla każdej daty (3)',
+      '[diagnoza dat GSC] formatDate z pamięcią po getTime (2 różnych)',
+      '[diagnoza dat GSC] wyniki zgodne: tak'
+    ]);
+    assert.equal(JSON.stringify(gas.$sheet(RAW)), przed, 'zakładka bez zmian');
+  });
+
+  test('diagnoza: zakładka z samym nagłówkiem — zero wierszy; brak zakładki — błąd', () => {
+    assert.deepEqual(plain(projekt().diagnozaDatGsc()), { rows: 0, dates: 0, distinct: 0, same: true });
+    const bez = loadProject({ sheets: konfiguracja() });
+    assert.throws(() => bez.diagnozaDatGsc(), /Brak zakładki GSC RAW/);
   });
 });
 
