@@ -138,7 +138,11 @@ function importDzienny(e) {
     stage('zakładka ' + RAW_SHEET);
     const lastDay = gscLastDataDay_(sheet, stage);
     const range = dailyGscRange_(target, lastDay);
-    return importRange_(range.from, range.to, { daily: true, warning: range.warning, stage: stage });
+    // Ponowienie dnia bez wierszy obiecujemy tylko wtedy, gdy zakres zaczął się dzień po
+    // dacie w zakładce: zero wierszy jej nie przesunie (#225). Bez daty sprzed zakresu
+    // (pusta zakładka) następny przebieg zacznie od nowego celu.
+    const retry = Boolean(lastDay) && lastDay < range.from;
+    return importRange_(range.from, range.to, { daily: true, warning: range.warning, stage: stage, retryMissing: retry });
   }));
 }
 
@@ -241,9 +245,10 @@ function dailyGscRange_(target, lastDay) {
  * Ostrzeżenie o końcowych dniach zakresu, dla których API nie zwróciło wierszy
  * (#215); '' gdy ostatni dzień zakresu ma dane. Dzień bez wierszy w środku
  * zakresu nie liczy się: Google publikuje dni po kolei, więc taki dzień jest
- * opublikowany i pusty.
+ * opublikowany i pusty. `retry`: czy następny import dzienny pobierze te dni
+ * ponownie; bez tego ostrzeżenie radzi ręczny import zakresu (#225).
  */
-function gscMissingTailWarning_(startDate, endDate, rows) {
+function gscMissingTailWarning_(startDate, endDate, rows, retry) {
   let last = '';
   rows.forEach(row => {
     const date = String(row[0]);
@@ -251,9 +256,13 @@ function gscMissingTailWarning_(startDate, endDate, rows) {
   });
   if (last === endDate) return '';
   const from = last ? shiftDay_(last, 1) : startDate;
-  return from === endDate
-    ? 'brak danych za ' + endDate + ' (API nie zwróciło wierszy); następny import dzienny pobierze ten dzień ponownie'
-    : 'brak danych za ' + from + ' – ' + endDate + ' (API nie zwróciło wierszy); następny import dzienny pobierze te dni ponownie';
+  const one = from === endDate;
+  const head = 'brak danych za ' + (one ? endDate : from + ' – ' + endDate) + ' (API nie zwróciło wierszy); ';
+  if (!retry) {
+    return head + 'następny import dzienny nie pobierze ' + (one ? 'go' : 'ich') + ' ponownie, ' +
+      'uzupełnij ręcznym importem zakresu (SEO / GSC → Importuj ostatni zakres)';
+  }
+  return head + 'następny import dzienny pobierze ' + (one ? 'ten dzień' : 'te dni') + ' ponownie';
 }
 
 /** Dzień `RRRR-MM-DD` przesunięty o `n` dni, liczony w UTC: bez wpływu strefy i zmiany czasu. */
@@ -271,7 +280,8 @@ function dayDiff_(from, to) {
 /**
  * Import zakresu dat GSC. `options.daily`: ścieżka importu dziennego, która może
  * zapisać same importowane dni (#209); `options.warning`: ostrzeżenie zakresu;
- * `options.stage`: licznik etapów zaczęty przed wyznaczeniem zakresu (#215).
+ * `options.stage`: licznik etapów zaczęty przed wyznaczeniem zakresu (#215);
+ * `options.retryMissing`: czy następny import dzienny ponowi dni bez wierszy (#225).
  */
 function importRange_(startDate, endDate, options) {
   const opts = options || {};
@@ -343,7 +353,7 @@ function importRange_(startDate, endDate, options) {
   });
 
   const sheet = SpreadsheetApp.getActive().getSheetByName(RAW_SHEET);
-  const warnings = [opts.warning, opts.daily ? gscMissingTailWarning_(startDate, endDate, output) : ''];
+  const warnings = [opts.warning, opts.daily ? gscMissingTailWarning_(startDate, endDate, output, opts.retryMissing) : ''];
   // Same importowane dni tylko w imporcie dziennym i tylko przy zatwierdzonym
   // układzie K–L; każdy inny przypadek to zapis całej zakładki, jak dawniej.
   const layout = opts.daily ? gscKlLayout_(sheet, startDate, endDate) : null;
