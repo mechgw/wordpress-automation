@@ -712,10 +712,33 @@ describe('#225: ostrzeżenie nie obiecuje ponowienia, którego nie będzie', () 
     assert.deepEqual([zapytanieNr(gas, 0), zapytanieNr(gas, 1)], [['2026-10-01', '2026-10-01'], ['2026-10-02', '2026-10-02']]);
   });
 
-  test('3: zakładka sięga już celu, zero wierszy — bez obietnicy ponowienia', () => {
-    const gas = projekt({ raw: { rows: [HEADER, [localDate(1), 'q', '/p', 'pol', 'MOBILE', 1, 1, 0.1, 1, '']] }, fetch: gscApi(0) });
+  test('3: data w zakładce późniejsza niż cel, zero wierszy — bez obietnicy ponowienia', () => {
+    const gas = projekt({ raw: zDanymi(localDate(5), localDate(1)), fetch: gscApi(0) });
     const out = plain(gas.importDzienny({ triggerUid: 't' }));
     assert.ok(out.warning.includes('nie pobierze go ponownie, ' + RECZNIE), out.warning);
+  });
+
+  test('3a: ostatnia data równa celowi i wcześniejsza w zakładce, zero — obietnica i ponowienie następnego dnia (uwaga Codexa)', () => {
+    const gas = projekt({ raw: zDanymi('2026-09-29', '2026-10-01'), fetch: gscApi(0) });
+    freezeClock(gas, 2026, 9, 3);
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zapytanieNr(gas, 0), ['2026-10-01', '2026-10-01']);
+    assert.ok(out.warning.includes('brak danych za 2026-10-01 (API nie zwróciło wierszy); następny import dzienny pobierze ten dzień ponownie'), out.warning);
+
+    freezeClock(gas, 2026, 9, 4);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), ['2026-09-30', '2026-10-02'], 'dzień z zerem pobrany ponownie');
+  });
+
+  test('3b: ostatnia data równa celowi i jedyna w zakładce, zero — bez obietnicy, następny dzień zaczyna od nowego celu', () => {
+    const gas = projekt({ raw: zDanymi('2026-10-01'), fetch: gscApi(0) });
+    freezeClock(gas, 2026, 9, 3);
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.ok(out.warning.includes('nie pobierze go ponownie, ' + RECZNIE), out.warning);
+
+    freezeClock(gas, 2026, 9, 4);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), ['2026-10-02', '2026-10-02']);
   });
 
   test('4: bez ponowienia, kilka dni — forma mnoga; z ponowieniem — treść jak w #215', () => {

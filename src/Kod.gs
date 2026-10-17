@@ -136,12 +136,14 @@ function importDzienny(e) {
     // zanim pierwszy etap się skończył, i nie dało się ustalić, który krok trwał.
     const sheet = SpreadsheetApp.getActive().getSheetByName(RAW_SHEET);
     stage('zakładka ' + RAW_SHEET);
-    const lastDay = gscLastDataDay_(sheet, stage);
-    const range = dailyGscRange_(target, lastDay);
-    // Ponowienie dnia bez wierszy obiecujemy tylko wtedy, gdy zakres zaczął się dzień po
-    // dacie w zakładce: zero wierszy jej nie przesunie (#225). Bez daty sprzed zakresu
-    // (pusta zakładka) następny przebieg zacznie od nowego celu.
-    const retry = Boolean(lastDay) && lastDay < range.from;
+    const last = gscLastDataDay_(sheet, stage, target);
+    const range = dailyGscRange_(target, last.day);
+    // Ponowienie dnia bez wierszy obiecujemy tylko wtedy, gdy po przebiegu zostanie
+    // w zakładce data sprzed celu, a żadna nie będzie późniejsza od celu (#225).
+    // Zakres zawsze kończy się na celu, a przebieg usuwa wiersze swoich dni, więc
+    // następny import dzienny zacznie wtedy najpóźniej od dnia bez wierszy. Pusta
+    // zakładka albo data po celu: następny przebieg zacznie od nowego celu.
+    const retry = Boolean(last.before) && last.day <= target;
     return importRange_(range.from, range.to, { daily: true, warning: range.warning, stage: stage, retryMissing: retry });
   }));
 }
@@ -150,8 +152,9 @@ function importDzienny(e) {
 const GSC_DAILY_MAX_DAYS = 7;
 
 /**
- * Ostatni dzień z danymi w `GSC RAW`: największa poprawna data w kolumnie A;
- * '' gdy zakładka nie ma żadnej (#215).
+ * Ostatni dzień z danymi w `GSC RAW`: `day` — największa poprawna data w kolumnie A,
+ * '' gdy zakładka nie ma żadnej (#215); `before` — największa poprawna data
+ * wcześniejsza niż `target`, z tej samej pętli (#225).
  *
  * Od niego liczy się zakres importu dziennego. Wcześniej był to `lastOk.dataTo`,
  * czyli koniec zakresu ZAPYTANIA: 03.10.2026 Google nie opublikował jeszcze dnia
@@ -159,13 +162,14 @@ const GSC_DAILY_MAX_DAYS = 7;
  * zaczął od 01.10 — dzień opublikowany z opóźnieniem został luką. Zakładka jest
  * źródłem prawdy o tym, co zaimportowano, i nie ma stanu do zepsucia.
  */
-function gscLastDataDay_(sheet, stage) {
+function gscLastDataDay_(sheet, stage, target) {
   // Brak zakładki zgłasza zapis, jak dotąd: błąd API ma pierwszeństwo przed nim.
-  if (!sheet) return '';
+  if (!sheet) return { day: '', before: '' };
   const lastRow = sheet.getLastRow();
   const column = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
   stage('odczyt kolumny A do zakresu (' + column.length + ' wierszy)');
   let day = '';
+  let before = '';
   let dates = 0;
   column.forEach(row => {
     // Tekst musi być datą w całości: `normalizujDate_` obcina go do 10 znaków,
@@ -174,11 +178,13 @@ function gscLastDataDay_(sheet, stage) {
     if (row[0] instanceof Date) dates++;
     const date = row[0] instanceof Date ? formatujDate_(row[0]) : String(row[0]);
     // Kształt i istnienie w kalendarzu: tekst niebędący datą nie może zostać „największą datą”.
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && shiftDay_(date, 0) === date && date > day) day = date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || shiftDay_(date, 0) !== date) return;
+    if (date > day) day = date;
+    if (date < target && date > before) before = date;
   });
   // Liczba komórek typu Date to liczba wywołań `Utilities.formatDate` w pętli (#220).
   stage('ostatni dzień z danymi (' + column.length + ' wierszy, w tym ' + dates + ' dat, ' + (day || 'brak') + ')');
-  return day;
+  return { day: day, before: before };
 }
 
 /**
