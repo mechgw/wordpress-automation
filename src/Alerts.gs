@@ -321,7 +321,10 @@ function runFreshnessGuard_() {
  */
 function reclaimAbandonedImports_(now) {
   Object.keys(importSources_()).forEach(source => {
-    reclaimAbandonedRuns_(source, now.getTime()).forEach(marker => {
+    // Znacznik schodzi dopiero po incydencie (#221). Ponowienie po awarii dopisze
+    // drugi wiersz i zapisze ten sam rekord; drugi mail wyjdzie tylko po awarii
+    // między wysyłką a zapisem `notifiedAt` — duplikat dopuszczony, jak wiersza.
+    settleAbandonedRuns_(reclaimAbandonedRuns_(source, now.getTime()), marker => {
       const run = abandonedRunEntry_(marker, abandonedRunNote_(marker));
       appendImportLog_(source, run);
       const record = readJobRecord_(source);
