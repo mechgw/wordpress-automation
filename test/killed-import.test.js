@@ -687,3 +687,65 @@ describe('#215: zero wierszy z API nie zostawia luki', () => {
     assert.match(w('2026-10-05', '2026-09-01'), /^brak danych za 2026-09-29 – 2026-10-01 /, 'wiersze spoza zakresu nie liczą się');
   });
 });
+
+/**
+ * #225: ostrzeżenie obiecywało ponowne pobranie także przy pustej zakładce, gdzie
+ * zero wierszy nie zostawia daty i następny przebieg zaczyna od nowego celu.
+ */
+describe('#225: ostrzeżenie nie obiecuje ponowienia, którego nie będzie', () => {
+  const RECZNIE = 'uzupełnij ręcznym importem zakresu (SEO / GSC → Importuj ostatni zakres)';
+  const zapytanieNr = (gas, n) => { const p = JSON.parse(gas.$fetchCalls[n].params.payload); return [p.startDate, p.endDate]; };
+
+  test('1: pusta zakładka, zero wierszy za cel — porada ręcznego importu zamiast obietnicy', () => {
+    const gas = projekt({ fetch: gscApi(0) });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.ok(out.warning.includes('brak danych za ' + CEL + ' (API nie zwróciło wierszy); następny import dzienny nie pobierze go ponownie, ' + RECZNIE), out.warning);
+    assert.doesNotMatch(out.warning, /pobierze ten dzień ponownie/);
+  });
+
+  test('2: pusta zakładka, zero, następny dzień — drugi przebieg pyta tylko o nowy cel (ograniczenie)', () => {
+    const gas = projekt({ fetch: gscApi(0) });
+    freezeClock(gas, 2026, 9, 3);
+    gas.importDzienny({ triggerUid: 't' });
+    freezeClock(gas, 2026, 9, 4);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual([zapytanieNr(gas, 0), zapytanieNr(gas, 1)], [['2026-10-01', '2026-10-01'], ['2026-10-02', '2026-10-02']]);
+  });
+
+  test('3: data w zakładce późniejsza niż cel, zero wierszy — bez obietnicy ponowienia', () => {
+    const gas = projekt({ raw: zDanymi(localDate(5), localDate(1)), fetch: gscApi(0) });
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.ok(out.warning.includes('nie pobierze go ponownie, ' + RECZNIE), out.warning);
+  });
+
+  test('3a: ostatnia data równa celowi i wcześniejsza w zakładce, zero — obietnica i ponowienie następnego dnia (uwaga Codexa)', () => {
+    const gas = projekt({ raw: zDanymi('2026-09-29', '2026-10-01'), fetch: gscApi(0) });
+    freezeClock(gas, 2026, 9, 3);
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.deepEqual(zapytanieNr(gas, 0), ['2026-10-01', '2026-10-01']);
+    assert.ok(out.warning.includes('brak danych za 2026-10-01 (API nie zwróciło wierszy); następny import dzienny pobierze ten dzień ponownie'), out.warning);
+
+    freezeClock(gas, 2026, 9, 4);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), ['2026-09-30', '2026-10-02'], 'dzień z zerem pobrany ponownie');
+  });
+
+  test('3b: ostatnia data równa celowi i jedyna w zakładce, zero — bez obietnicy, następny dzień zaczyna od nowego celu', () => {
+    const gas = projekt({ raw: zDanymi('2026-10-01'), fetch: gscApi(0) });
+    freezeClock(gas, 2026, 9, 3);
+    const out = plain(gas.importDzienny({ triggerUid: 't' }));
+    assert.ok(out.warning.includes('nie pobierze go ponownie, ' + RECZNIE), out.warning);
+
+    freezeClock(gas, 2026, 9, 4);
+    gas.importDzienny({ triggerUid: 't' });
+    assert.deepEqual(zapytanieNr(gas, 1), ['2026-10-02', '2026-10-02']);
+  });
+
+  test('4: bez ponowienia, kilka dni — forma mnoga; z ponowieniem — treść jak w #215', () => {
+    const gas = projekt();
+    assert.equal(gas.gscMissingTailWarning_('2026-09-29', '2026-10-01', [], false),
+      'brak danych za 2026-09-29 – 2026-10-01 (API nie zwróciło wierszy); następny import dzienny nie pobierze ich ponownie, ' + RECZNIE);
+    assert.equal(gas.gscMissingTailWarning_('2026-09-29', '2026-10-01', [], true),
+      'brak danych za 2026-09-29 – 2026-10-01 (API nie zwróciło wierszy); następny import dzienny pobierze te dni ponownie');
+  });
+});

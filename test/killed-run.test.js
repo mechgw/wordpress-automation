@@ -136,12 +136,22 @@ describe('#189: odzysk porzuconego wykonania', () => {
     assert.deepEqual(plain(gas.$lock)[0], ['tryLock', 5000], 'odbiór pod blokadą rejestratora');
   });
 
-  test('9b: odbiór usuwa znacznik przed zwolnieniem blokady — drugi odczyt niczego nie znajduje', () => {
+  test('9b: odczyt nie usuwa; znacznik schodzi pod tą samą blokadą, po zapisie śladu — potem drugi odczyt niczego nie znajduje (#221)', () => {
     const gas = projekt();
     gas.$properties.RUNNING_PERFORMANCE_stary = znacznik('PERFORMANCE', 'stary', minutTemu(gas, 8));
     const teraz = gas.$Date.now();
 
     assert.equal(gas.reclaimAbandonedRuns_('PERFORMANCE', teraz).length, 1);
+    assert.equal(gas.reclaimAbandonedRuns_('PERFORMANCE', teraz).length, 1, 'sam odczyt niczego nie usuwa');
+    let przyUsunieciu = null;
+    gas.$faults.deleteProperty = name => {
+      if (name === 'RUNNING_PERFORMANCE_stary') {
+        przyUsunieciu = { blokada: gas.LockService.getScriptLock().hasLock(), wiersze: raportyPorzuconych(gas).length };
+      }
+      return false;
+    };
+    gas.recordJobRun_('PERFORMANCE', true, udany);
+    assert.deepEqual(przyUsunieciu, { blokada: true, wiersze: 1 }, 'usunięcie pod blokadą rejestratora, po wierszu');
     assert.equal(gas.reclaimAbandonedRuns_('PERFORMANCE', teraz).length, 0);
   });
 
@@ -169,12 +179,13 @@ describe('#189: odzysk porzuconego wykonania', () => {
     assert.equal(rekord(gas, 'LAST_RUN_SEO_LIVE').lastRun.warning, '');
   });
 
-  test('12: zadanie bez log:true — bez wiersza w IMPORT LOG, ale z ostrzeżeniem i mailem', () => {
+  test('12: zadanie bez log:true — jeden wiersz BŁĄD za porzucony (#221), ostrzeżenie i mail jak dotąd', () => {
     const gas = projekt();
     gas.$properties.RUNNING_SEO_LIVE_stary = znacznik('SEO_LIVE', 'stary', minutTemu(gas, 8));
     gas.recordJobRun_('SEO_LIVE', true, udany);
 
-    assert.deepEqual(logi(gas), []);
+    assert.deepEqual(logi(gas).map(r => [r[1], r[4]]), [['SEO_LIVE', 'BŁĄD']], 'wiersz za porzucony, bez wiersza zwykłego przebiegu');
+    assert.match(String(logi(gas)[0][8]), NOTA);
     assert.match(rekord(gas, 'LAST_RUN_SEO_LIVE').lastRun.warning, NOTA);
     assert.deepEqual(tematy(gas), ['[wordpress-automation] UWAGA: live check SEO']);
   });
