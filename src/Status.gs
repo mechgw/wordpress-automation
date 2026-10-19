@@ -149,11 +149,9 @@ function recordImportRunLocked_(source, trigger, fn) {
   // zadania monitorujące. Najpierw odzysk cudzych porzuconych, potem własny.
   const abandoned = reclaimAbandonedRuns_(source, startedAt);
   const runId = startRunMarker_(source, trigger, startedAt);
-  const notes = abandoned.map(abandonedRunNote_);
-  // Wiersz za porzucone wykonanie przed pracą, jak w recordJobRunLocked_.
-  abandoned.forEach(function (marker, i) {
-    appendImportLog_(source, abandonedRunEntry_(marker, notes[i]));
-  });
+  // Wiersz za porzucone wykonanie przed pracą, jak w recordJobRunLocked_; znacznik
+  // schodzi dopiero po wierszu (#221).
+  const notes = settleAbandonedRuns_(abandoned, logAbandonedRun_(source)).map(abandonedRunNote_);
   let result;
 
   try {
@@ -821,15 +819,15 @@ function abandonedRunMarkers_(key, now) {
 }
 
 /**
- * Odbiera porzucone znaczniki zadania — usuwa je i zwraca do raportu — dokładnie raz.
+ * Porzucone znaczniki zadania do raportu: `{ name, marker }`, od najstarszego.
+ * Niczego nie usuwa (#221): znacznik schodzi w `settleAbandonedRuns_`, dopiero
+ * po zapisie śladu. Wcześniej odzysk usuwał go od razu i awaria przed zapisem
+ * wiersza gubiła porzucony przebieg bez śladu.
  *
- * Decyzja zapada pod krótką blokadą, na świeżym odczycie: drugie wykonanie
- * startujące w tej samej chwili zobaczy stan już po usunięciu. Blokadę bierzemy
- * tylko wtedy, gdy wstępny odczyt bez niej w ogóle coś znalazł, więc zwykły
- * przebieg nie dokłada rywalizacji o blokadę, którą współdzielą wszystkie zadania.
- * Gdy blokady nie da się przejąć, odzysk czeka na kolejny przebieg. Rejestrator
- * przebiegu trzyma blokadę od #204, więc wywołany z niego odzysk idzie gałęzią
- * blokady już trzymanej.
+ * Wszystkie wywołania biegną pod blokadą rejestratora albo strażnika (#204), więc
+ * dwa wykonania nie zgłoszą tego samego znacznika naraz. Bez trzymanej blokady
+ * odczyt idzie pod krótką własną, a gdy ta jest zajęta, odzysk czeka na kolejny
+ * przebieg. Blokadę bierzemy tylko wtedy, gdy wstępny odczyt w ogóle coś znalazł.
  */
 function reclaimAbandonedRuns_(key, now) {
   if (!abandonedRunMarkers_(key, now).length) return [];
@@ -838,14 +836,39 @@ function reclaimAbandonedRuns_(key, now) {
   const owned = lock.hasLock();
   if (!owned && !lock.tryLock(RUN_MARKER_LOCK_MS)) return [];
   try {
-    const props = PropertiesService.getScriptProperties();
-    return abandonedRunMarkers_(key, now).map(function (found) {
-      props.deleteProperty(found.name);
-      return found.marker;
-    });
+    return abandonedRunMarkers_(key, now);
   } finally {
     if (!owned) lock.releaseLock();
   }
+}
+
+/**
+ * Zapisuje ślad każdego porzuconego znacznika (`report(marker)`) i dopiero potem
+ * go usuwa (#221). Każdy znacznik osobno, jak wpisy oczekujące w
+ * `takeOverPendingRuns_`: błąd zapisu albo usunięcia zostawia znacznik na kolejny
+ * odzysk i nie przerywa przebiegu, bo odzysk to diagnostyka. Ubicie między
+ * zapisem a usunięciem daje najwyżej zduplikowany wiersz, nie utracony ślad.
+ * Zwraca znaczniki, których ślad się zapisał i które zeszły.
+ */
+function settleAbandonedRuns_(found, report) {
+  const props = PropertiesService.getScriptProperties();
+  return found.filter(function (item) {
+    try {
+      report(item.marker);
+      props.deleteProperty(item.name);
+      return true;
+    } catch (e) {
+      Logger.log('Porzucony znacznik ' + item.name + ' czeka na kolejny odzysk: ' + (e && e.message ? e.message : e));
+      return false;
+    }
+  }).map(function (item) { return item.marker; });
+}
+
+/** Ślad porzuconego przebiegu zadania `key`: wiersz `BŁĄD` w IMPORT LOG (#221). */
+function logAbandonedRun_(key) {
+  return function (marker) {
+    appendImportLog_(key, abandonedRunEntry_(marker, abandonedRunNote_(marker)));
+  };
 }
 
 /**
@@ -1005,15 +1028,11 @@ function recordJobRunLocked_(key, trigger, fn) {
   // Najpierw odzysk cudzych porzuconych znaczników, dopiero potem własny.
   const abandoned = reclaimAbandonedRuns_(key, startedAt);
   const runId = startRunMarker_(key, trigger, startedAt);
-  const notes = abandoned.map(abandonedRunNote_);
   // Wiersz za porzucone wykonanie od razu, przed pracą: gdyby i to wykonanie
   // zostało ubite, ślad poprzedniego już by nie zginął. Czas = start porzuconego,
-  // czas trwania nieznany.
-  if (job.log) {
-    abandoned.forEach(function (marker, i) {
-      appendImportLog_(key, abandonedRunEntry_(marker, notes[i]));
-    });
-  }
+  // czas trwania nieznany. Także dla zadań bez `log` (#221): nota w `lastRun`
+  // znika przy kolejnym przebiegu, więc nie jest trwałym śladem.
+  const notes = settleAbandonedRuns_(abandoned, logAbandonedRun_(key)).map(abandonedRunNote_);
   let result;
 
   try {
