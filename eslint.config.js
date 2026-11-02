@@ -29,7 +29,7 @@ function projectGlobals() {
 
 module.exports = [
   {
-    ignores: ["node_modules/**"],
+    ignores: ["node_modules/**", ".stryker-shadow/**", ".stryker-tmp/**", "reports/**"],
   },
   // Node-side files: unit tests and this config.
   {

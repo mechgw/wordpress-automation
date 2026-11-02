@@ -17,3 +17,8 @@ Thumbs.db
 
 # Test coverage output
 coverage/
+
+# Pilot testow mutacyjnych (StrykerJS)
+.stryker-shadow/
+.stryker-tmp/
+reports/
