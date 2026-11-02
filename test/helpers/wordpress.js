@@ -16,6 +16,8 @@
  *
  * `failures` pozwala wymusić odpowiedź dla konkretnej trasy: { 'POST /wp-json/wp/v2/pages/7': { code: 500, text: 'boom' } }.
  * Opcja `readBackLies` symuluje WordPress, który przyjął zapis, ale odczyt kontrolny nie odzwierciedla zmiany.
+ * Opcja `contentFilter` (funkcja treść → treść) symuluje filtr zapisu (np. kses albo wtyczka), który zmienia
+ * zapisywaną treść strony, zanim trafi do bazy.
  */
 /**
  * Nagłówki publicznej strony. Domyślnie odwzorowują trafienie w cache, bo to
@@ -29,7 +31,7 @@ const DEFAULT_PUBLIC_HEADERS = {
   Server: 'LiteSpeed'
 };
 
-function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, publicHeaders, perPage = 100 } = {}) {
+function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = false, stalePageCache = false, publicHeaders, perPage = 100, contentFilter } = {}) {
   const state = {
     pages: new Map(pages.map(p => [Number(p.id), normalizePage(p)])),
     media: new Map(media.map(m => [Number(m.id), normalizeMedia(m)])),
@@ -94,6 +96,7 @@ function fakeWordPress({ pages = [], media = [], failures = {}, readBackLies = f
       if (method === 'POST') {
         if (!readBackLies) {
           for (const f of ['title', 'excerpt', 'content', 'status', 'slug']) if (body[f] !== undefined) page[f] = String(body[f]);
+          if (contentFilter && body.content !== undefined) page.content = String(contentFilter(page.content));
           page.modified = '2026-09-05T12:00:00';
         }
         return ok(pageJson(page));
