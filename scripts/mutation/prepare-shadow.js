@@ -15,13 +15,16 @@ if (names.length === 0) {
   process.exit(2);
 }
 
-fs.rmSync(SHADOW, { recursive: true, force: true });
+// Katalog nie jest czyszczony: równoległe przebiegi różnych plików współdzielą go, a kopie nieróżniące
+// się od src/ nie przeszkadzają (mutowany jest tylko plik wskazany w --mutate).
 fs.mkdirSync(SHADOW, { recursive: true });
 for (const name of names) {
   if (!/^[A-Za-z0-9]+\.gs$/.test(name)) {
     console.error(`Nieprawidłowa nazwa pliku: ${name}`);
     process.exit(2);
   }
-  fs.copyFileSync(path.join(ROOT, 'src', name), path.join(SHADOW, name.replace(/\.gs$/, '.js')));
+  const target = path.join(SHADOW, name.replace(/\.gs$/, '.js'));
+  const content = fs.readFileSync(path.join(ROOT, 'src', name));
+  if (!fs.existsSync(target) || !fs.readFileSync(target).equals(content)) fs.writeFileSync(target, content);
   console.log(`${name} -> .stryker-shadow/${name.replace(/\.gs$/, '.js')}`);
 }

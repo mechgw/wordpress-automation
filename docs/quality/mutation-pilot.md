@@ -2,17 +2,27 @@
 
 Status: **pilot na osobnej gałęzi, bez bramki i bez CI** (Refs #234). Zmiany `package.json`,
 `package-lock.json` i konfiguracji nie są przeznaczone do scalenia do `main`. Nic tu nie jest
-wymogiem dla PR-ów.
+wymogiem dla PR-ów. Pełne listy linii: [mutation-pilot-listy.md](mutation-pilot-listy.md).
 
-Testy mutacyjne psują kod na próbę (np. zamieniają `||` na `&&`, `>=` na `>`) i sprawdzają, czy
-jakikolwiek test to zauważy. Mutant, który przeżył, to miejsce, w którym kod można popsuć, a testy
-zostaną zielone. Pokrycie linii tego nie pokazuje: linia może się wykonać i nic nie sprawdzać.
+Test mutacyjny psuje kod na próbę (np. zamienia `||` na `&&`, `>=` na `>`, usuwa blok) i sprawdza,
+czy jakikolwiek test to zauważy. Mutant, który przeżył, to miejsce, w którym kod można popsuć,
+a testy zostaną zielone. Pokrycie linii tego nie pokazuje: linia może się wykonać i nic nie sprawdzać.
 
-## Wynik: czy działa
+## Wynik w skrócie (2026-11-02, StrykerJS 10.1.1, Node 24, Windows)
 
-**Tak, technicznie.** StrykerJS 10.1.1 z `commandRunner` i dwoma obejściami (niżej) mutuje `.gs`,
-a `test/helpers/gas.js` wykonuje zmutowaną wersję. Dowody w sekcji „Kontrole”. Opłacalność zależy od
-zakresu: pojedyncza funkcja to kilka minut, całość repozytorium to godziny albo dni (sekcja „Koszt”).
+- **Działa na całym `src/*.gs`**: 29 plików, 15 298 mutantów, wszystkie mutatory Strykera włączone,
+  bez wykluczeń i bez pomijania mutantów statycznych.
+- **Zabite z asercją: 10 139 (66,3 %)**. Zabite bez asercji (test padł na wyjątku, nie na porównaniu):
+  1 282. Ocalałe: 3 740. Bez pokrycia (żaden test nie wykonuje linii): 89. Przekroczenia czasu: 48.
+  Przy liczeniu jak Stryker (zabite z wyjątkiem i przekroczenia czasu też są wykryte) wychodzi 75,0 %.
+- **Bramka pokrycia jest zielona dla wszystkich 29 plików** (99,14 % linii, 116 niepokrytych linii
+  w trzech plikach: `WordPress.gs` 85, `GA4.gs` 21, `Kod.gs` 10), a mimo to **3 740 mutantów przeżywa
+  na liniach pokrytych**. Pokrycie linii wykrywa 0,6 % tego, co pokazują mutacje (89 mutantów na
+  niepokrytych liniach). Oba źródła zgadzają się co do tych 89: mapa z pokrycia i LCOV dały tę samą liczbę.
+- **Czas to minuty na plik, nie sekundy**: mediana pliku 7 minut, od 6 s (`Version.gs`) do 69 min
+  (`Status.gs`, 1 336 mutantów). Cały przebieg: ok. 5,5 godziny zegarowo, na zwykłej maszynie
+  roboczej współdzielonej z innymi (obciążenie procesora 50–85 %), 3–4 procesy Strykera, w części
+  czasu dwa łańcuchy naraz.
 
 ## Ścieżka: źródło → mutant → VM → test
 
@@ -20,101 +30,160 @@ zakresu: pojedyncza funkcja to kilka minut, całość repozytorium to godziny al
 | --- | --- |
 | 1 | `src/<Nazwa>.gs` (edytowany jest tylko on) |
 | 2 | `scripts/mutation/prepare-shadow.js` kopiuje go do `.stryker-shadow/<Nazwa>.js` (identyczna treść, te same numery linii). Stryker nie ma parsera `.gs` (`No parser registered for .gs!`), więc mutuje kopię |
-| 3 | Stryker instrumentuje kopię w katalogu roboczym `.stryker-tmp/sandbox-*` i dla każdego mutanta uruchamia komendę testową z `__STRYKER_ACTIVE_MUTANT__=<id>` |
+| 3 | Stryker instrumentuje kopię w `.stryker-tmp/sandbox-*` i dla każdego mutanta uruchamia komendę testową z `__STRYKER_ACTIVE_MUTANT__=<id>` |
 | 4 | `scripts/mutation/vm-preload.js` (`node --require`) przekierowuje odczyt `src/<Nazwa>.gs` w `gas.js` na zinstrumentowaną kopię i wstrzykuje numer aktywnego mutanta do kontekstu `vm` (który nie ma `process.env`) |
 | 5 | `gas.js` wykonuje kod w `vm.runInContext`, test wywołuje funkcję i sprawdza asercją |
 | 6 | Raport JSON wskazuje lokalizację w kopii; numer linii = numer linii w `.gs` |
 
 `test/helpers/gas.js`, `test/*.js` i `src/*.gs` pozostają bez zmian.
 
+## Dobór testów per mutant
+
+Runner `command` nie zna pokrycia per test, a każdy test ładuje wszystkie 29 plików. Cały zestaw to
+ok. 50 s równolegle albo ponad 2 min po kolei na mutant, czyli dla `WordPress.gs` ponad 8 godzin.
+Dlatego:
+
+1. `coverage-map.js` uruchamia każdy plik testów osobno z pokryciem LCOV i odejmuje linie wykonane
+   przy samym ładowaniu (`load-only.test.js`). Wynik: które linie `src` wykonuje który test.
+2. `run-file.js` robi przebieg indeksujący (komenda, która pada tylko z aktywnym mutantem, daje szybko
+   listę wszystkich mutantów z id i linią) i dla każdego mutanta wybiera testy wykonujące jego linie.
+3. `run-for-mutant.js` uruchamia te pliki po kolei, od najmniejszego, i przerywa na pierwszej porażce.
+   Mutant bez żadnego testu nie uruchamia nic i jest oznaczany `NoCoverage`. Mutant wykonywany już przy
+   ładowaniu (stała, tablica; ok. 500 sztuk) dostaje testy pliku.
+
+To przybliżenie, więc sprawdzone próbką (sekcja „Kontrole”).
+
 ## Użycie
 
 ```bash
 npm ci
-npm run mutation:prepare -- WordPress.gs
-npx stryker run \
-  --mutate ".stryker-shadow/WordPress.js:1563-1627" \
-  --commandRunner.command "node scripts/mutation/run-tests.js test/wordpress-commands.test.js"
-node scripts/mutation/classify.js reports/mutation/mutation.json --list
+node scripts/mutation/coverage-map.js            # raz, ok. 3 min
+node scripts/mutation/run-file.js WordPress.gs --concurrency=3
+node scripts/mutation/report.js WordPress.gs     # zestawienie z LCOV: reports/mutation/LISTY.md, TABELA.md
+npm run test:coverage                            # LCOV potrzebny dla report.js
 ```
 
-`run-tests.js` pomija dwa testy skanujące samo repozytorium (`repo-identity`, `source-control-chars`;
-w kopii Strykera padają niezależnie od mutacji) i usuwa z otoczenia zmienne wyglądające na
-poświadczenia. `classify.js` czyta surowy raport i dzieli zabite na `killed-assert` (jest nieudana
-asercja) i `killed-other` (inny niezerowy wynik). Liczy się tylko `killed-assert`.
-Współbieżność Strykera w konfiguracji to 2; nie podnoś jej bez sprawdzenia obciążenia maszyny.
+Jedna funkcja: `npx stryker run --mutate ".stryker-shadow/WordPress.js:1563-1627" --commandRunner.command "node scripts/mutation/run-tests.js test/wordpress-commands.test.js"`
+po `npm run mutation:prepare -- WordPress.gs`. `classify.js` dzieli zabite na `killed-assert` i `killed-other`.
+`run-tests.js` i `run-for-mutant.js` usuwają z otoczenia zmienne wyglądające na poświadczenia.
 
-## Kontrole (2026-11-02, Node 24, Windows, StrykerJS 10.1.1)
+## Wyniki per plik
+
+Wynik = zabite z asercją / wszystkie mutanty. „Linie LCOV” to to, co mierzy obecna bramka (`quality:gate`).
+
+| Plik | Mutantów | Zabite z asercją | Zabite bez asercji | Ocalałe | Bez pokrycia | Przekroczenia czasu | Wynik (asercja) | Linie LCOV (próg) | Niepokryte linie |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| AdsCostExperiment.gs | 275 | 197 | 21 | 57 | 0 | 0 | 71,6 % | 100 % (95 %) | 0 |
+| Alerts.gs | 440 | 334 | 37 | 69 | 0 | 0 | 75,9 % | 100 % (95 %) | 0 |
+| BusinessProfile.gs | 483 | 349 | 27 | 107 | 0 | 0 | 72,3 % | 100 % (95 %) | 0 |
+| CodeSnippets.gs | 218 | 138 | 14 | 65 | 0 | 1 | 63,3 % | 100 % (95 %) | 0 |
+| Diagnostics.gs | 420 | 327 | 22 | 71 | 0 | 0 | 77,9 % | 100 % (95 %) | 0 |
+| FormSourcePageContext.gs | 299 | 201 | 33 | 65 | 0 | 0 | 67,2 % | 100 % (95 %) | 0 |
+| ForminatorHistory.gs | 446 | 255 | 63 | 127 | 0 | 1 | 57,2 % | 100 % (95 %) | 0 |
+| GA4.gs | 915 | 400 | 128 | 353 | 30 | 4 | 43,7 % | 97,53 % (94 %) | 21 |
+| GlobalFooterMigration.gs | 645 | 370 | 21 | 251 | 0 | 3 | 57,4 % | 100 % (95 %) | 0 |
+| Kod.gs | 697 | 514 | 63 | 109 | 3 | 8 | 73,7 % | 98,57 % (96 %) | 10 |
+| Lock.gs | 37 | 34 | 2 | 1 | 0 | 0 | 91,9 % | 100 % (100 %) | 0 |
+| OrderAnalytics.gs | 1065 | 627 | 177 | 260 | 0 | 1 | 58,9 % | 100 % (100 %) | 0 |
+| Payloads.gs | 174 | 104 | 5 | 64 | 0 | 1 | 59,8 % | 100 % (95 %) | 0 |
+| PendingChanges.gs | 177 | 122 | 7 | 48 | 0 | 0 | 68,9 % | 100 % (95 %) | 0 |
+| Performance.gs | 1557 | 993 | 201 | 355 | 0 | 8 | 63,8 % | 100 % (95 %) | 0 |
+| PerformanceMigration.gs | 172 | 133 | 2 | 37 | 0 | 0 | 77,3 % | 100 % (95 %) | 0 |
+| PhoneInquiries.gs | 135 | 103 | 11 | 20 | 0 | 1 | 76,3 % | 100 % (100 %) | 0 |
+| RecrawlQueue.gs | 532 | 359 | 26 | 147 | 0 | 0 | 67,5 % | 100 % (95 %) | 0 |
+| SchemaChecks.gs | 372 | 254 | 15 | 102 | 0 | 1 | 68,3 % | 100 % (95 %) | 0 |
+| SeoLive.gs | 682 | 506 | 35 | 140 | 0 | 1 | 74,2 % | 100 % (95 %) | 0 |
+| SheetCatalog.gs | 417 | 323 | 38 | 56 | 0 | 0 | 77,5 % | 100 % (95 %) | 0 |
+| SheetUsage.gs | 560 | 417 | 20 | 117 | 0 | 6 | 74,5 % | 100 % (95 %) | 0 |
+| SitemapUrls.gs | 307 | 184 | 18 | 99 | 0 | 6 | 59,9 % | 100 % (95 %) | 0 |
+| Sitemaps.gs | 197 | 160 | 15 | 22 | 0 | 0 | 81,2 % | 100 % (95 %) | 0 |
+| SourceFreshness.gs | 252 | 229 | 10 | 13 | 0 | 0 | 90,9 % | 100 % (100 %) | 0 |
+| Status.gs | 1336 | 888 | 206 | 238 | 0 | 4 | 66,5 % | 100 % (95 %) | 0 |
+| UrlInspection.gs | 201 | 166 | 9 | 26 | 0 | 0 | 82,6 % | 100 % (95 %) | 0 |
+| Version.gs | 5 | 0 | 0 | 5 | 0 | 0 | 0 % | 100 % (100 %) | 0 |
+| WordPress.gs | 2282 | 1452 | 56 | 716 | 56 | 2 | 63,6 % | 95,73 % (95 %) | 85 |
+| **Razem** | **15298** | **10139** | **1282** | **3740** | **89** | **48** | **66,3 %** | | **116** |
+
+Czasy per plik (sekundy zegarowe) są w `reports/mutation/time-*.json`; od 6 s (`Version.gs`) do 4 164 s (`Status.gs`).
+
+### Gdzie mutanty uciekają, wg rodzaju zmiany
+
+| Mutator | Mutantów | Zabite z asercją | Ocalałe | % ocalałych |
+| --- | ---: | ---: | ---: | ---: |
+| StringLiteral (teksty) | 4384 | 2560 | 1604 | 37 % |
+| ConditionalExpression | 3950 | 2734 | 822 | 21 % |
+| BlockStatement | 1414 | 1119 | 59 | 4 % |
+| EqualityOperator | 1134 | 826 | 208 | 18 % |
+| LogicalOperator | 1071 | 708 | 242 | 23 % |
+| BooleanLiteral | 659 | 526 | 52 | 8 % |
+| ObjectLiteral | 498 | 344 | 99 | 20 % |
+| Regex | 462 | 264 | 174 | 38 % |
+| ArrayDeclaration | 432 | 273 | 112 | 26 % |
+| ArithmeticOperator | 394 | 261 | 100 | 25 % |
+| MethodExpression | 388 | 169 | 200 | 52 % |
+| CallExpression | 251 | 169 | 47 | 19 % |
+| ArrowFunction | 161 | 116 | 13 | 8 % |
+| UpdateOperator | 64 | 44 | 3 | 5 % |
+| UnaryOperator | 21 | 17 | 4 | 19 % |
+| AssignmentOperator | 15 | 9 | 1 | 7 % |
+
+Teksty (komunikaty dla użytkownika) to 43 % ocalałych; bez nich wynik wynosi 69,4 %. To nie jest
+„szum”: zmieniony komunikat w arkuszu to widoczna dla użytkownika zmiana, ale najtańsza do pominięcia.
+Najgorzej wypadają `MethodExpression` (52 % ocalałych: usunięcie `.trim()`, `.slice()` itp.) i `Regex`.
+
+## Kontrole (wymagania #234)
 
 | Kontrola | Wynik |
 | --- | --- |
-| Zerowa, kod oryginalny | `run-tests.js`: exit 0, 1289 testów, 0 porażek |
-| Zerowa, kod zinstrumentowany bez aktywnego mutanta | exit 0, 1289 testów, 0 porażek (to samo N). `npm test` na `main`: 1297 (8 więcej to dwa pominięte pliki skanujące repozytorium) |
-| Dodatnia (mutant wskazany po pierwszym przebiegu, nie przed nim): id 67, `WordPress.gs:1612`, warunek kontrolny zastąpiony `false` | Aktywowany przez Strykera: pada dokładnie test „REPLACE_PAGE_CONTENT_TEXT: odczyt kontrolny bez podmiany jest błędem”, `AssertionError … /nie potwierdził dokładnej podmiany/`. Ta sama zamiana wpisana ręcznie w kopii roboczej `src/WordPress.gs` bez Strykera: pada ten sam test (przywrócono, `git diff` czysty) |
-| Ujemna a: zmiana, której żaden test nie sprawdza | Np. `1612` `\|\|` → `&&` albo `1603` `>= 300` → `> 300`: Stryker `Survived`; ręczna zmiana tej samej linii i 113 testów `wordpress*`+`kod`: 113 zielonych |
-| Ujemna b: mutanty `Payloads.gs`, ale wybrany test (`lock.test.js`) ich nie wykonuje | 174 z 174 `Survived`, 0 zabitych (`classify.js`: pomiar nieważny) |
-| Ujemna c: komenda, która przechodzi bez mutanta, a przy aktywnym zawsze pada | Stryker raportuje 100 % wyniku (14/14). `classify.js`: 14 × `killed-other`, 0 × `killed-assert`, pomiar nieważny |
-| Powtarzalność | 72 mutanty `replacePageContentText_`, 5 przebiegów (w tym jeden z całym zestawem testów): zawsze 40 zabitych / 32 ocalałe; dwa przebiegi z mapą id → status: 0 różnic. `Payloads.gs`, 2 przebiegi, 174 mutanty: 0 różnic |
-| Brak regresji | Czysty `main` i gałąź pilota: `npm test` i `npm run test:coverage` po 1297/1297, `quality:gate` PASS. LCOV różni się wyłącznie numeracją funkcji anonimowych (kolejność), nie pokryciem |
+| Zerowa, kod oryginalny i zinstrumentowany bez aktywnego mutanta | oba exit 0, 1289 testów, 0 porażek (to samo N). Dodatkowo suchy przebieg Strykera na każdym pliku przed jego mutantami |
+| Dodatnia: id 67, `WordPress.gs:1612`, warunek kontrolny zastąpiony `false` | Aktywowany przez Strykera: pada dokładnie test „REPLACE_PAGE_CONTENT_TEXT: odczyt kontrolny bez podmiany jest błędem”, `AssertionError`. Ta sama zamiana wpisana ręcznie w `src/WordPress.gs` bez Strykera: pada ten sam test. (Mutant wskazany po pierwszym przebiegu, nie przed nim.) |
+| Ujemna a: zmiana, której żaden test nie sprawdza | `1612` `\|\|` → `&&`, `1603` `>= 300` → `> 300`: Stryker `Survived`; ręcznie ta sama zmiana: 113 testów zielonych |
+| Ujemna b: mutanty `Payloads.gs`, wybrany test nie wykonuje ich | 174 z 174 `Survived`, 0 zabitych |
+| Ujemna c: komenda, która przechodzi bez mutanta, a z aktywnym zawsze pada | Stryker raportuje 100 %; `classify.js`: 14 × `killed-other`, 0 × `killed-assert`, pomiar nieważny |
+| Powtarzalność | `replacePageContentText_`: 5 przebiegów, zawsze 40 / 32; dwa z mapą id → status: 0 różnic. `Payloads.gs`: 3 przebiegi, 0 różnic w mapie id → status między dwoma pierwszymi; trzeci (z doborem testów) różni się jednym mutantem, który z `Survived` przeszedł w `Timeout` (podział 104 / 64 / 5 / 1) |
+| Zabite bez asercji (1 282) | Ślad stosu w `src/*.gs`: 1 048; bez śladu `.gs` (wyjątek w teście po zwróceniu złej wartości, np. `JSON.parse(undefined)`): 234. Wzmianek o preludium, loaderze lub Strykerze: 0. Mimo to nie są liczone do wyniku |
+| Dobór testów nie ukrywa zabić | Próbka ok. 180 mutantów (ocalałe, bez pokrycia, wszystkie ocalałe statyczne z `AdsCostExperiment`, `BusinessProfile`, `Performance`) uruchomiona ponownie z pełnym zestawem: **żaden nie został zabity**. Wyjątek: jeden z dwóch przekroczeń czasu w `WordPress.gs` (linia 644) pełny zestaw zabija, drugie (linia 603, `{}` zamiast bloku) to prawdziwe zawieszenie |
+| Brak regresji | Czysty `main` i gałąź pilota: `npm test`, `test:coverage` po 1297/1297, `quality:gate` PASS |
 
-Runner `command` nie ma pokrycia per mutant: status `NoCoverage` się tu nie pojawia, a mutant
-w niewykonanym kodzie wychodzi jako `Survived`. Dlatego ocalałe trzeba zestawić z LCOV
-(`npm run test:coverage`, linie z zerem trafień).
+Uwagi do kontroli:
 
-## Izolacja: warunek **niespełniony** w pełni
+- Testy czytające `src/*.gs` jako **tekst** (`scheduled-jobs`, `*-completeness`, `source-freshness`,
+  `pomiar-canonical`, `business-profile`) widzą w kopii zinstrumentowanej inny tekst i padają niezależnie
+  od mutanta. Przy próbce kontrolnej trzeba je wykluczyć (`--exclude=`); w głównych przebiegach
+  nie były wybierane, bo nie wykonują linii funkcji. Skutek: **ten rodzaj testów nie może oceniać
+  mutantów**, a mutant w kodzie sprawdzanym tylko takim testem przeżywa.
+- `Timeout` (48) obejmuje zawieszenia mutanta i mutanty wolniejsze niż limit (60 s dla `WordPress.gs`, 300 s dla pierwszych plików, 90 s dla reszty, plus wielokrotność suchego przebiegu);
+  część z nich w pełnym zestawie jest zabijana. Dlatego jest podawany osobno.
+- Runner `command` nie ma pokrycia per mutant. Status `NoCoverage` pochodzi z mapy pokrycia, nie ze Strykera.
 
-- Mutowany kod działa w `vm` bez `process`, `require`, `fetch` ani `XMLHttpRequest`
-  (sprawdzone sondą `typeof`); `UrlFetchApp`, `SpreadsheetApp` i `ScriptApp` to atrapy z `gas.js`.
-  Mutacje operatorów nie szukają ucieczki z `vm`, ale to nie jest izolacja systemowa.
-- Sieć nie została odcięta na poziomie systemu (nie ma na to narzędzia bez uprawnień administratora
-  albo kontenera). Sondy odmowy połączenia i zapisu poza katalogiem **nie zostały wykonane**.
-- Zmienne środowiskowe z poświadczeniami były widoczne dla procesów testowych w pierwszych
-  przebiegach. Testy ich nie czytają (`grep process.env` w `test/` i `src/` nie wskazuje takich
-  odczytów), ale tego nie wymuszano. Od `run-tests.js` w tej wersji są usuwane przed startem testów
-  (sprawdzone na liście nazw); ostatni przebieg `Payloads.gs` poszedł już z czyszczeniem.
-- Do szerszego zakresu: uruchamiać w kontenerze albo WSL z odciętą siecią (`unshare -n`) i bez
-  poświadczeń. Do tego czasu stosować wyłącznie na kodzie z atrapami, jak tu.
+## Niepokryte linie i obecna bramka pokrycia
 
-## Wyniki
+Bramka (`quality:gate`) sprawdza pokrycie linii per plik wobec progu (`.quality/coverage-policy.json`) oraz
+100 % zmienionych linii. Wszystkie 29 plików ją przechodzą. Niepokryte linie (LCOV, `npm run test:coverage`):
 
-| Zakres | Mutantów | Testy na mutant | Czas | `killed-assert` / ocalałe / `killed-other` |
-| --- | --- | --- | --- | --- |
-| `replacePageContentText_` (65 linii `WordPress.gs`) | 72 | `wordpress-commands.test.js` | 2–2,5 min | 40 / 32 / 0 |
-| to samo | 72 | cały zestaw (1289 testów) | 34 min | 40 / 32 / 0 |
-| cały `Payloads.gs` (139 linii) | 174 | `payloads.test.js` | 2–3 min | 104 / 65 / 5 |
+- `WordPress.gs` (85 z 1 992 linii, próg 95 %): `213-230 274-291 475-476 532-533 582-583 617-618 641 666-667 676-677 698-699 735-736 745-746 767-768 782-783 852-853 855-856 1236-1237 1276-1277 1354-1355 1376-1377 1412-1413 1461-1462 1524-1525 1567-1568 1604-1605 1833-1834 1901-1902`
+- `GA4.gs` (21 linii) i `Kod.gs` (10 linii): lista w pliku z listami.
 
-Pięć `killed-other` w `Payloads.gs` to testy, które padły na wyjątku rzuconym przez zmutowany kod
-(`TypeError` w `Payloads.gs:109`, własny `Error` źródła), nie na asercji; nie liczą się do wyniku.
-Nie sprawdzano ich pod kątem awarii preludium (stos wskazuje `src/Payloads.gs`).
+Pokrycie gałęzi (wg raportu `node --test`): 88,03 % ogółem, nie jest w bramce.
+Rozjazd z mutacjami: bramka mierzy, czy linia się wykonała, mutacje mierzą, czy test zauważy jej zmianę.
+Pliki w 100 % pokryte, ale z wynikiem poniżej 60 %: `ForminatorHistory.gs` 57,2 %, `GlobalFooterMigration.gs`
+57,4 %, `OrderAnalytics.gs` 58,9 % (próg 100 %), `Payloads.gs` 59,8 %, `SitemapUrls.gs` 59,9 %.
 
-### Ocalałe w `replacePageContentText_` (32)
+## Izolacja: warunek niespełniony w pełni
 
-Klasyfikacja ręczna (ok. 10 min), na podstawie LCOV i treści testów. Żaden nie jest uznany za
-równoważny bez dowodu.
+- Mutowany kod działa w `vm` bez `process`, `require`, `fetch` ani `XMLHttpRequest`; `UrlFetchApp`,
+  `SpreadsheetApp` i `ScriptApp` to atrapy z `gas.js`.
+- Sieć nie jest odcięta na poziomie systemu; sondy odmowy połączenia i zapisu poza katalogiem nie
+  zostały wykonane. W głównych przebiegach zmienne środowiskowe z poświadczeniami są usuwane przed
+  uruchomieniem testów, ale pierwsze przebiegi próbne (do 5 przebiegów na `replacePageContentText_`)
+  poszły bez tego.
+- Do trwałego użycia: kontener albo WSL z odciętą siecią i bez poświadczeń.
 
-| Klasa | Mutantów | Przykład |
-| --- | --- | --- |
-| Gałąź błędu nigdy nie uruchamiana (LCOV: 0 trafień w `1567`, `1604`) | 12 | brak testu dla ID strony nie będącego liczbą; brak testu dla odpowiedzi HTTP poza 2xx |
-| Wartość domyślna albo parametr odczytu bez asercji | 15 | pusty zamiennik (`null`), `getPageRawById_(…, true)` zamienione na `false`, brak `content.raw` |
-| Komunikat dla użytkownika bez asercji | 4 | w tym `+` → `-` w komunikacie wyniku (`1621`), który zamieniłby tekst w `NaN` |
-| Kontrola odczytu po zapisie | 1 | `\|\|` → `&&` w `1612`: ta linia jest przedmiotem #237 |
+## Koszt i wnioski
 
-Czyli mutacje wskazały dokładnie tę samą linię, w której później wyszedł fałszywy błąd z #237.
-
-## Koszt
-
-- Czas jednego mutanta z wąską listą testów: ok. 1,7 s (2 procesy Strykera); z całym zestawem: ok. 28 s.
-- Liczba mutantów w całym `src/*.gs`: 15 298 (`WordPress.gs` 2 282, `GA4.gs` 915, `Kod.gs` 697).
-  Rząd wielkości: ok. 7 godzin z wąskimi listami testów (których nie ma jak wybrać automatycznie,
-  bo każdy test ładuje wszystkie 29 plików), ok. 5 dni z całym zestawem.
-- Obciążenie: maszyna współdzielona; podczas przebiegów ogólne obciążenie procesora wynosiło
-  ok. 55–100 % wobec 15–40 % bez przebiegu (nie da się odseparować cudzej pracy). Pamięć bez
-  znaczenia. Każdy przebieg zostawia `.stryker-tmp/` przy przerwaniu (w `.gitignore`).
-- Domyślne mutatory generują wiele mutantów na literałach tekstowych (komunikaty); do rozważenia
-  `mutator.excludedMutations: ["StringLiteral"]`.
-
-## Ograniczenia
-
-- Dowód powtarzalności obejmuje dwa pliki i jedną maszynę.
-- Rząd kosztu całości jest ekstrapolacją, nie pomiarem.
-- Ocalałych poza `replacePageContentText_` nie klasyfikowano.
+- Cały `src/*.gs`: ok. 5,5 godziny zegarowo (mutacje) plus ok. 2 godziny na weryfikacje i narzędzia,
+  przy 3–4 procesach Strykera. Jedna funkcja z wąską listą testów: 2–3 minuty. Zmieniony plik: 1–70 minut.
+- Bez doboru testów per mutant całość to ponad tydzień; dobór jest więc warunkiem sensu.
+- Ograniczenia: dobór testów to przybliżenie (próbka nie wykazała błędu); testy czytające kod jako tekst
+  nie nadają się do mutacji; wynik dotyczy jednej maszyny i jednego dnia; mutanty „zabite bez asercji”
+  (8,4 %) wymagają ręcznej oceny, jeśli ktoś chciałby je zaliczyć do zabitych.
