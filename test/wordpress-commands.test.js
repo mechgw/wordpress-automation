@@ -296,6 +296,100 @@ describe('UPDATE_PAGE_FIELD i REPLACE_PAGE_CONTENT_TEXT', () => {
     gas.processWpCommands();
     assert.match(message(gas), /nie potwierdził dokładnej podmiany/);
   });
+
+  describe('odczyt kontrolny przy zamienniku zawierającym szukany tekst (#237)', () => {
+    const replaceOn = (content, find, repl, wpOptions = {}) => {
+      const page = { id: 7, slug: 'home', status: 'publish', title: 'Home', content };
+      const gas = project({
+        commands: [cmd('REPLACE_PAGE_CONTENT_TEXT', '7', find, repl)],
+        wp: fakeWordPress(Object.assign({ pages: [page] }, wpOptions))
+      });
+      gas.processWpCommands();
+      return gas;
+    };
+    const pageContent = gas => gas.$wp.pages.get(7).content;
+
+    test('dopisanie obok istniejącego fragmentu kończy się DONE i zapisuje wynik', () => {
+      const gas = replaceOn('<p>Praca</p>', 'Praca', 'Praca <a href="/praca/">Dołącz</a>');
+      assert.equal(status(gas), 'DONE');
+      assert.equal(pageContent(gas), '<p>Praca <a href="/praca/">Dołącz</a></p>');
+      assert.equal(results(gas).length, 1);
+      assert.equal(snapshots(gas).length, 1);
+    });
+
+    test('zapis niewidoczny w odczycie kontrolnym jest błędem, gdy zamiennik zawiera szukany tekst', () => {
+      const gas = replaceOn('<p>Praca</p>', 'Praca', 'Praca i nauka', { readBackLies: true });
+      assert.equal(status(gas), 'ERROR');
+      assert.match(message(gas), /nie potwierdził dokładnej podmiany/);
+      assert.equal(results(gas).length, 0);
+    });
+
+    test('strona, która już zawiera zamiennik, nie myli zapisu nieudanego z udanym', () => {
+      // Zliczanie wystąpień ani samo includes(zamiennik) tego nie rozróżnia:
+      // strona bez zmian i strona po zapisie ("Acme Inc Inc") mają po jednym "Acme".
+      const gas = replaceOn('Acme Inc', 'Acme', 'Acme Inc', { readBackLies: true });
+      assert.equal(status(gas), 'ERROR');
+      assert.equal(results(gas).length, 0);
+      const ok = replaceOn('Acme Inc', 'Acme', 'Acme Inc');
+      assert.equal(status(ok), 'DONE');
+      assert.equal(pageContent(ok), 'Acme Inc Inc');
+    });
+
+    test('zapis niewidoczny w odczycie kontrolnym jest błędem także przy zamienniku bez szukanego tekstu', () => {
+      const gas = replaceOn('<p>Praca</p>', 'Praca', 'Kariera', { readBackLies: true });
+      assert.equal(status(gas), 'ERROR');
+      assert.equal(results(gas).length, 0);
+    });
+
+    test('komunikat błędu ostrzega, że zapis mógł się udać, i zabrania ślepego ponowienia', () => {
+      const gas = replaceOn('<p>Praca</p>', 'Praca', 'Praca i nauka', { readBackLies: true });
+      assert.match(message(gas), /Zapis mógł się udać/);
+      assert.match(message(gas), /sprawdź stronę/);
+      assert.match(message(gas), /nie uruchamiaj polecenia ponownie/);
+    });
+
+    test('zwykła podmiana przechodzi, gdy filtr WordPressa zmienia niezwiązany fragment', () => {
+      const filter = c => c.replace('<br>', '<br />');
+      const gas = replaceOn('Linia<br>Praca', 'Praca', 'Kariera', { contentFilter: filter });
+      assert.equal(status(gas), 'DONE');
+      assert.equal(pageContent(gas), 'Linia<br />Kariera');
+    });
+
+    test('zamiennik zawierający szukany tekst + filtr zmieniający niezwiązany fragment daje ERROR z ostrzeżeniem', () => {
+      const filter = c => c.replace('<br>', '<br />');
+      const gas = replaceOn('Linia<br>Praca', 'Praca', 'Praca i nauka', { contentFilter: filter });
+      assert.equal(status(gas), 'ERROR');
+      assert.match(message(gas), /Zapis mógł się udać/);
+      assert.equal(pageContent(gas), 'Linia<br />Praca i nauka');
+    });
+
+    test('wzorce specjalne $ w zamienniku trafiają do strony dosłownie', () => {
+      const gas = replaceOn('Cena: X.', 'X', 'a$&b$$c$\'d');
+      assert.equal(status(gas), 'DONE');
+      assert.equal(writes(gas)[0].body.content, 'Cena: a$&b$$c$\'d.');
+      assert.equal(pageContent(gas), 'Cena: a$&b$$c$\'d.');
+    });
+
+    test('fragment nakładający się sam na siebie jest odrzucany przed snapshotem i zapisem', () => {
+      const gas = replaceOn('aaa', 'aa', 'b');
+      assert.equal(status(gas), 'ERROR');
+      assert.match(message(gas), /znaleziono: 2/);
+      assert.equal(writes(gas).length, 0);
+      assert.equal(snapshots(gas).length, 0);
+    });
+
+    test('pusty zamiennik usuwa fragment', () => {
+      const gas = replaceOn('Witaj Acme.', 'Acme', '');
+      assert.equal(status(gas), 'DONE');
+      assert.equal(pageContent(gas), 'Witaj .');
+    });
+
+    test('zamiennik, który na styku z otoczeniem tworzy nowe wystąpienie szukanego tekstu, przechodzi', () => {
+      const gas = replaceOn('aabb', 'ab', '');
+      assert.equal(status(gas), 'DONE');
+      assert.equal(pageContent(gas), 'ab');
+    });
+  });
 });
 
 describe('UPDATE_RANK_MATH_FIELD i UPDATE_MEDIA_FIELD', () => {
