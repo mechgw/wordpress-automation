@@ -54,6 +54,10 @@ describe('#275: failImportRun_ i failJobRun_', () => {
     rzuca(() => przebiegiImportu(gas, () => { throw new Error('ab '.repeat(200)); }));
 
     assert.equal(importRecord(gas).lastRun.error.length, 300);
+
+    rzuca(() => przebiegiZadania(gas, () => { throw new Error('ab '.repeat(200)); }));
+
+    assert.equal(jobRecord(gas, 'PERFORMANCE').lastRun.error.length, 300);
   });
 
   test('czas trwania nieudanego przebiegu to różnica, nie suma', () => {
