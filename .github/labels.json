@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "repo": "mechgw/wordpress-automation",
+  "repo": "CityCouriers/wordpress-automation",
   "prune": false,
   "color_rules": {
     "priority": "warm colors = urgency",
