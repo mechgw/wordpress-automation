@@ -9,7 +9,8 @@
       "keyMode": "global",
       "limits": {
         "complexity": 12,
-        "lines": 40
+        "lines": 40,
+        "fileLines": 400
       }
     },
     "scripts": {
@@ -20,7 +21,8 @@
       "keyMode": "file",
       "limits": {
         "complexity": 12,
-        "lines": 40
+        "lines": 40,
+        "fileLines": 400
       }
     }
   }

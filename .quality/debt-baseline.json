@@ -331,5 +331,33 @@
       "complexity": 13
     }
   },
-  "files": {}
+  "files": {
+    "scripts/quality/debt-ratchet.js": {
+      "fileLines": 471
+    },
+    "scripts/quality/issue-audit-gate.js": {
+      "fileLines": 432
+    },
+    "src/GA4.gs": {
+      "fileLines": 677
+    },
+    "src/GlobalFooterMigration.gs": {
+      "fileLines": 475
+    },
+    "src/Kod.gs": {
+      "fileLines": 505
+    },
+    "src/OrderAnalytics.gs": {
+      "fileLines": 612
+    },
+    "src/Performance.gs": {
+      "fileLines": 929
+    },
+    "src/Status.gs": {
+      "fileLines": 733
+    },
+    "src/WordPress.gs": {
+      "fileLines": 1484
+    }
+  }
 }
