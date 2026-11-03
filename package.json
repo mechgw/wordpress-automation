@@ -13,16 +13,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mechgw/wordpress-automation.git"
+    "url": "git+https://github.com/CityCouriers/wordpress-automation.git"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/mechgw/wordpress-automation/issues"
+    "url": "https://github.com/CityCouriers/wordpress-automation/issues"
   },
-  "homepage": "https://github.com/mechgw/wordpress-automation#readme",
+  "homepage": "https://github.com/CityCouriers/wordpress-automation#readme",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@google/clasp": "^3.4.1",
