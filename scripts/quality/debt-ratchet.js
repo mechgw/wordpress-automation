@@ -73,16 +73,10 @@ class UsageError extends Error {}
 // Pliki i konfiguracja
 // ---------------------------------------------------------------------------
 
+const GLOB_TOKENS = { '**/': '(?:.*/)?', '**': '.*', '*': '[^/]*', '?': '[^/]' };
+
 function globToRegExp(pattern) {
-  let re = '';
-  for (let i = 0; i < pattern.length; i += 1) {
-    const c = pattern[i];
-    if (c === '*' && pattern[i + 1] === '*') {
-      if (pattern[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
-    } else if (c === '*') re += '[^/]*';
-    else if (c === '?') re += '[^/]';
-    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  }
+  const re = pattern.replace(/\*\*\/|\*\*|\*|\?|[.+^${}()|[\]\\]/g, token => GLOB_TOKENS[token] || `\\${token}`);
   return new RegExp(`^${re}$`);
 }
 
