@@ -81,6 +81,18 @@ Wynik `RED` blokuje (kod 1) w trybie `--mode=enforce`; w `--mode=report` silnik 
 | `file-*` | to samo dla miar plików (`file-over-limit-no-entry`, `file-growth`, `file-shrink`, `file-repaid`, `file-entry-without-file`, `file-metric-without-entry`) |
 | `new-entry`, `new-file-entry` | baza z PR ma nowy wpis względem stanu bazowego (patrz niżej) |
 | `growth-vs-base`, `file-growth-vs-base` | wpis rośnie względem stanu bazowego |
+| `touched-over-limit` | funkcja zmieniona w PR (jej skrót nie występuje na stanie bazowym) jest ponad limit mimo wpisu w bazie (patrz niżej) |
+
+### Dotknięta funkcja: „dotykasz, spłacasz” (#241)
+
+Z `--base` silnik sprawdza dodatkowo, które funkcje zmieniły się względem stanu bazowego: funkcja, której skrót
+(parametry i ciało, bez komentarzy i położenia) nie występuje wśród skrótów na `ref`, jest **dotknięta** i musi spełniać
+**pełne** limity z `.quality/debt-limits.json`. Wpis w bazie jest tylko dolną zapadką: nie zwalnia dotkniętej funkcji z limitów
+(`touched-over-limit`, czerwone w trybie `enforce` także lokalnie), a po spełnieniu limitów wpis trzeba usunąć (`repaid`, w CI
+czerwone). Zmiana samego komentarza albo odstępów, przeniesienie funkcji do innego pliku bez zmiany ciała i funkcje nietknięte w tym
+samym pliku nie wyzwalają reguły; zmiana parametrów albo ciała o jeden token tak. Nowa funkcja ponad limit jest zgłaszana przez
+`over-limit-no-entry` (bez dublowania). Reguła działa w hooku i w CI tak samo, bo oba liczą od stanu bazowego (`origin/main`
+lokalnie, SHA bazowy PR w CI). Bez odstępstw: wariant awaryjnego odstępstwa i reguły „mały plik” czekają na rozstrzygnięcie właściciela.
 
 ### Dług nie wchodzi przez dopisanie wpisu
 
@@ -132,7 +144,7 @@ a spadek miary i spłacony dług są czerwone.
 
 ## Ograniczenia
 
-- Dotknięta funkcja musi spełniać pełne limity: osobna reguła (#241), nie część silnika.
+- Reguła dotkniętej funkcji nie raportuje jeszcze zmienionych instrukcji modułu (stałych poza funkcjami); to osobny krok.
 - Komentarze `eslint-disable` i `/* eslint reguła: off */` w mierzonym kodzie są ignorowane (`allowInlineConfig: false`):
   limity nie dają się obejść komentarzem.
 - Silnik widzi funkcje po składni (`espree`); funkcje tworzone dynamicznie (`new Function`) nie są mierzone.

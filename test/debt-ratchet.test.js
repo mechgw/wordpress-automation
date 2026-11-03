@@ -1379,3 +1379,96 @@ describe('#243: limit złożoności cyklomatycznej funkcji (12)', () => {
     assert.equal(cur.functions['src::ponad'].metrics.complexity, 13);
   });
 });
+
+describe('#241: funkcja zmieniona w PR musi spełniać pełne limity (dotknięta funkcja)', () => {
+  describe('compareTouched', () => {
+    const fn = (hash, metrics) => ({ hash, file: 'src/A.gs', line: 7, metrics });
+    const baseline = { version: 1, functions: { 'src::f': { hash: 'H0', complexity: 20 } }, files: {} };
+    const touched = (current, base, bl = baseline) => ratchet.compareTouched({ current: { functions: current }, baseline: bl, base: { hashes: base } });
+
+    test('zmieniony skrót funkcji z wpisem w bazie: czerwono, z miarą, wartością i miejscem', () => {
+      assert.deepEqual(touched({ 'src::f': fn('H1', { complexity: 20, lines: 45 }) }, { 'src::f': 'H0' }), [{
+        level: 'red', code: 'touched-over-limit', key: 'src::f',
+        message: 'funkcja zmieniona w tym PR musi spełniać pełne limity (complexity=20, lines=45, src/A.gs:7); wpis w bazie nie zwalnia, po poprawie usuń wpis'
+      }]);
+    });
+
+    test('ten sam skrót, także pod inną nazwą (przeniesienie), nie jest dotknięty', () => {
+      assert.deepEqual(touched({ 'src::f': fn('H0', { complexity: 20 }) }, { 'src::f': 'H0' }), []);
+      assert.deepEqual(touched({ 'src::g': fn('H0', { complexity: 20 }) }, { 'src::f': 'H0' }, { version: 1, functions: { 'src::g': { hash: 'H0', complexity: 20 } }, files: {} }), []);
+    });
+
+    test('funkcja bez wpisu w bazie nie jest dublowana (zgłasza ją over-limit-no-entry)', () => {
+      assert.deepEqual(touched({ 'src::nowa': fn('HN', { complexity: 20 }) }, {}), []);
+    });
+  });
+
+  describe('na tymczasowym repozytorium z gitem', () => {
+    const LIMITS = JSON.stringify(limitsOf({ complexity: 3 }, {}), null, 2);
+    const OVER = lines(
+      'function stary(a, b) {', '  // opis', '  if (a) { return 1; }', '  if (b) { return 2; }', '  if (a && b) { return 3; }', '  return 4;', '}'
+    );
+    const SMALL = lines('function stary(a, b) {', '  if (a) { return 1; }', '  return b ? 2 : 4;', '}');
+
+    async function repo() {
+      const root = makeRoot({ '.quality/debt-limits.json': LIMITS, 'src/A.gs': OVER, 'src/B.gs': 'function inna() { return 1; }\n' });
+      await ratchet.main([`--root=${root}`, 'write-baseline'], collect());
+      git(root, 'init', '-q', '-b', 'main');
+      git(root, 'add', '-A');
+      git(root, 'commit', '-q', '-m', 'baza');
+      return root;
+    }
+
+    async function check(root) {
+      const io = collect();
+      const code = await ratchet.main([`--root=${root}`, '--base=main', '--ci'], io);
+      return { code, text: io.out.join('\n') };
+    }
+
+    test('zmiana samego komentarza w funkcji z długiem nie wyzwala reguły', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/A.gs': OVER.replace('// opis', '// inny opis, dłuższy') });
+      const r = await check(root);
+      assert.equal(r.code, 0, r.text);
+      assert.doesNotMatch(r.text, /touched-over-limit/);
+    });
+
+    test('zmiana jednej linii kodu w funkcji ponad limit jest czerwona, także z wpisem w bazie (miara bez zmiany)', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/A.gs': OVER.replace('return 4;', 'return 5;') });
+      const r = await check(root);
+      assert.equal(r.code, 1, r.text);
+      assert.match(r.text, /RED touched-over-limit src::stary: funkcja zmieniona w tym PR musi spełniać pełne limity \(complexity=5, src\/A\.gs:1\)/);
+      assert.match(r.text, /::error title=debt-ratchet touched-over-limit::src::stary/);
+      assert.doesNotMatch(r.text, /RED growth/);
+    });
+
+    test('zmiana, po której funkcja mieści się w limicie, jest zielona po usunięciu wpisu, a z wpisem czerwona w CI (spłata)', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/A.gs': SMALL });
+      const withEntry = await check(root);
+      assert.equal(withEntry.code, 1, withEntry.text);
+      assert.match(withEntry.text, /RED repaid src::stary: complexity poniżej limitu: usuń miarę z wpisu/);
+      assert.doesNotMatch(withEntry.text, /touched-over-limit/);
+      await ratchet.main([`--root=${root}`, 'write-baseline'], collect());
+      const cleaned = await check(root);
+      assert.equal(cleaned.code, 0, cleaned.text);
+    });
+
+    test('funkcja przeniesiona do innego pliku bez zmiany ciała i funkcja nietknięta w tym samym pliku nie są dotknięte', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/A.gs': '', 'src/B.gs': `function inna() { return 1; }\n${OVER}` });
+      const r = await check(root);
+      assert.equal(r.code, 0, r.text);
+      assert.doesNotMatch(r.text, /touched-over-limit/);
+    });
+
+    test('dopisanie parametru zmienia funkcję: wpis z długiem nie przechodzi jako niezmieniony', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/A.gs': OVER.replace('stary(a, b)', 'stary(a, b, c)') });
+      const r = await check(root);
+      assert.equal(r.code, 1, r.text);
+      assert.match(r.text, /RED touched-over-limit src::stary/);
+    });
+  });
+});
