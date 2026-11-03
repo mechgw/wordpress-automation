@@ -270,6 +270,7 @@ async function lintScope(root, scope, files) {
     cwd: root,
     overrideConfigFile: true,
     ignore: false,
+    allowInlineConfig: false, // komentarze `eslint-disable` i `/* eslint reguła: off */` w kodzie nie obniżają limitów
     overrideConfig: [{ files: scope.files, languageOptions: { ecmaVersion: ECMA_VERSION, sourceType: scope.sourceType }, rules }]
   });
   return eslint.lintFiles(files.map(f => path.join(root, f)));
@@ -500,24 +501,27 @@ function introduced(limits, base, scopeId, metric) {
  * Dług nie wchodzi przez dopisanie wpisu. Nowa para (klucz, miara) jest dozwolona tylko dla miary wprowadzonej lub
  * zaostrzonej w tym PR i tylko dla funkcji (pliku) niezmienionej względem `main` (ten sam skrót), albo jako
  * przeniesienie istniejącego wpisu pod nowy klucz. Wzrost wpisu względem `main` jest czerwony; wyjątek: migracja po
- * zmianie wersji narzędzia, z uzasadnieniem, dla funkcji o tym samym skrócie.
+ * zmianie wersji narzędzia, z uzasadnieniem, dla funkcji niezmienionej (ten sam skrót we wpisie, na `main` i w kodzie).
+ * Wpis stanu bazowego przenosi się najwyżej raz: kopie tej samej funkcji pod nowymi nazwami dłużej nie powielają długu.
  */
 function compareWithBase({ baseline, limits, base, current, red }) {
   const toolChanged = JSON.stringify(baseline.tool || null) !== JSON.stringify(base.baseline.tool || null);
   const oldFunctions = base.baseline.functions;
   const oldFiles = base.baseline.files;
+  const claimed = new Set();
 
   for (const [key, entry] of Object.entries(baseline.functions)) {
     const old = oldFunctions[key];
     for (const metric of metricsOf(entry)) {
       if (old && old[metric] !== undefined) {
-        const migration = toolChanged && Boolean(entry.uzasadnienie) && entry.hash === old.hash;
+        const migration = toolChanged && Boolean(entry.uzasadnienie) && base.hashes[key] === entry.hash && current.allKeys[key] === entry.hash;
         if (entry[metric] > old[metric] && !migration) red('growth-vs-base', key, `${metric} wpisu rośnie względem ${base.ref}: ${old[metric]} -> ${entry[metric]}`);
         continue;
       }
       const unchanged = introduced(limits, base, scopeOfKey(key), metric) && base.hashes[key] === entry.hash && current.allKeys[key] === entry.hash;
-      const moved = Object.entries(oldFunctions).some(([k, e]) => !(k in baseline.functions) && e.hash === entry.hash && e[metric] >= entry[metric]);
-      if (!unchanged && !moved) red('new-entry', key, `nowy wpis ${metric}=${entry[metric]} względem ${base.ref}: dług nie wchodzi przez dopisanie wpisu (nowa lub zmieniona funkcja musi mieścić się w limicie)`);
+      const source = unchanged ? null : Object.entries(oldFunctions).find(([k, e]) => !claimed.has(`${k}|${metric}`) && !(k in baseline.functions) && e.hash === entry.hash && e[metric] >= entry[metric]);
+      if (source) claimed.add(`${source[0]}|${metric}`);
+      if (!unchanged && !source) red('new-entry', key, `nowy wpis ${metric}=${entry[metric]} względem ${base.ref}: dług nie wchodzi przez dopisanie wpisu (nowa lub zmieniona funkcja musi mieścić się w limicie)`);
     }
   }
   for (const [rel, entry] of Object.entries(baseline.files)) {

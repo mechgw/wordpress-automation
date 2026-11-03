@@ -83,7 +83,7 @@ dozwolona tylko gdy:
 2. miara jest **nowa lub zaostrzona w tym PR** (porównanie limitów z `ref`) **i** funkcja (plik) jest niezmieniona
    względem `ref`: ten sam skrót w bazie, na `ref` i w bieżącym kodzie, albo
 3. wpis jest **przeniesieniem** istniejącego wpisu pod nowy klucz (ten sam skrót, stary klucz usunięty, wartość nie
-   większa).
+   większa); każdy stary wpis przenosi się najwyżej raz, więc kopie usuniętej funkcji pod nowymi nazwami nie powielają długu.
 
 Czyli nowa funkcja ponad limit z dopisanym wpisem jest czerwona, podobnie funkcja zmieniona w PR, która przy
 wprowadzaniu miary dostaje wpis. Wzrost istniejącego wpisu względem `ref` jest czerwony **także z uzasadnieniem**;
@@ -96,8 +96,9 @@ jest pełna historia (`fetch-depth: 0`, jest w `ci.yml`).
 
 Baza zapisuje wersje narzędzi (`tool`). Gdy się zmienią, silnik pisze `INFO tool-changed`. Procedura: osobny PR,
 `node scripts/quality/debt-ratchet.js write-baseline` (przelicza skróty i wartości), wzrost wartości wpisu względem
-`main` wolno wprowadzić tylko z polem `"uzasadnienie"` we wpisie i z tym samym skrótem ciała funkcji. Różnica wartości
-bez zmiany kodu wynika wtedy z nowego sposobu liczenia, nie z nowego długu.
+`main` wolno wprowadzić tylko z polem `"uzasadnienie"` we wpisie, gdy funkcja jest niezmieniona: ten sam skrót we wpisie,
+na `main` (liczony bieżącym narzędziem) i w kodzie z PR. Różnica wartości bez zmiany kodu wynika wtedy z nowego sposobu
+liczenia, nie z nowego długu.
 
 ## Uruchamianie
 
@@ -123,6 +124,8 @@ a spadek miary i spłacony dług są czerwone.
 ## Ograniczenia
 
 - Dotknięta funkcja musi spełniać pełne limity: osobna reguła (#241), nie część silnika.
+- Komentarze `eslint-disable` i `/* eslint reguła: off */` w mierzonym kodzie są ignorowane (`allowInlineConfig: false`):
+  limity nie dają się obejść komentarzem.
 - Silnik widzi funkcje po składni (`espree`); funkcje tworzone dynamicznie (`new Function`) nie są mierzone.
 - Tożsamość funkcji anonimowych opiera się na skrócie ciała: zmiana ciała lambdy zmienia jej klucz (wpis bez funkcji
   i nowa funkcja ponad limit), czyli wymaga spłaty albo zmieszczenia się w limicie.

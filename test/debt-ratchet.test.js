@@ -346,9 +346,10 @@ describe('#240: porównanie z bazą (compare)', () => {
       const with_ = bl({ 'src::f': { hash: 'H', complexity: 22, uzasadnienie: 'nowy sposób liczenia' } }, {}, { eslint: '2', espree: '2' });
       const without = bl({ 'src::f': { hash: 'H', complexity: 22 } }, {}, { eslint: '2', espree: '2' });
       const otherHash = bl({ 'src::f': { hash: 'X', complexity: 22, uzasadnienie: 'x' } }, {}, { eslint: '2', espree: '2' });
-      assert.deepEqual(codes(run({ current, baseline: with_, base: base({ baseline: old }) })), []);
-      assert.deepEqual(codes(run({ current, baseline: without, base: base({ baseline: old }) })), ['growth-vs-base']);
-      assert.deepEqual(codes(run({ current, baseline: otherHash, base: base({ baseline: old }) })).includes('growth-vs-base'), true);
+      const onMain = base({ baseline: old, hashes: { 'src::f': 'H' } });
+      assert.deepEqual(codes(run({ current, baseline: with_, base: onMain })), []);
+      assert.deepEqual(codes(run({ current, baseline: without, base: onMain })), ['growth-vs-base']);
+      assert.deepEqual(codes(run({ current, baseline: otherHash, base: onMain })).includes('growth-vs-base'), true);
     });
 
     test('pliki: nowy wpis dozwolony tylko dla nowej miary i niezmienionego pliku', () => {
@@ -959,7 +960,7 @@ describe('#240: compare: komunikaty, poziomy i skrajne przypadki', () => {
   test('migracja narzędzi wymaga realnej zmiany wersji: te same wersje z uzasadnieniem nie legalizują wzrostu', () => {
     const current = cur({ 'src::f': { hash: 'H', metrics: { complexity: 22 } } });
     const grown = (tool, uzasadnienie) => bl({ 'src::f': Object.assign({ hash: 'H', complexity: 22 }, uzasadnienie ? { uzasadnienie } : {}) }, {}, tool);
-    const old = tool => base({ baseline: bl({ 'src::f': { hash: 'H', complexity: 20 } }, {}, tool) });
+    const old = tool => base({ baseline: bl({ 'src::f': { hash: 'H', complexity: 20 } }, {}, tool), hashes: { 'src::f': 'H' } });
     const v1 = { eslint: '1', espree: '1' };
     const v2 = { eslint: '2', espree: '2' };
     assert.deepEqual(redCodes(run({ current, baseline: grown(v1, 'x'), base: old(v1) })), ['growth-vs-base']);
@@ -1265,5 +1266,60 @@ describe('#240: mutacje, runda 2: położenia, zakresy i wyjście programu', () 
     const r = spawnSync(process.execPath, [SCRIPT, `--root=${root}`], { encoding: 'utf8', env: cleanEnv() });
     assert.equal(r.status, 2);
     assert.match(r.stderr, /EISDIR/);
+  });
+});
+
+describe('#240: uwagi recenzji Codexa', () => {
+  test('komentarze `eslint` w kodzie nie obniżają limitów: funkcja z wyłączoną regułą nadal jest mierzona', async () => {
+    const root = makeRoot({
+      'src/D.gs': lines('/* eslint complexity: off */', '/* eslint-disable max-lines-per-function */', 'function f(a) {', '  // eslint-disable-next-line complexity', '  if (a) { return 1; }', '  return 2;', '}')
+    });
+    const cur = await ratchet.measure(root, limitsOf({ complexity: 1, lines: 1 }));
+    assert.deepEqual(cur.functions['src::f'].metrics, { complexity: 2, lines: 4 });
+  });
+
+  describe('względem stanu bazowego', () => {
+    const LIM = limitsOf({ complexity: 10 }, {});
+    const bl = (functions = {}, files = {}, tool) => ({ version: 1, tool, functions, files });
+    const base = (over = {}) => Object.assign({ ref: 'main', baselineMissing: false, baseline: bl(), limits: LIM, hashes: {}, fileHashes: {} }, over);
+    const cur = (fns, allKeys) => ({
+      functions: Object.fromEntries(Object.entries(fns).map(([k, v]) => [k, { hash: v.hash, file: 'src/A.gs', line: 1, metrics: v.metrics }])),
+      allKeys: allKeys || Object.fromEntries(Object.entries(fns).map(([k, v]) => [k, v.hash])),
+      files: {},
+      conflicts: []
+    });
+    const redCodes = r => r.findings.filter(f => f.level === 'red').map(f => f.code);
+    const v1 = { eslint: '1', espree: '1' };
+    const v2 = { eslint: '2', espree: '2' };
+
+    test('migracja narzędzi: wzrost miary przy zmienionym w PR ciele funkcji nie jest migracją, nawet ze starym skrótem we wpisie', () => {
+      const old = base({ baseline: bl({ 'src::f': { hash: 'H', complexity: 20 } }, {}, v1), hashes: { 'src::f': 'H' } });
+      const grown = bl({ 'src::f': { hash: 'H', complexity: 25, uzasadnienie: 'nowy sposób liczenia' } }, {}, v2);
+      const unchanged = cur({ 'src::f': { hash: 'H', metrics: { complexity: 25 } } });
+      const rewritten = cur({ 'src::f': { hash: 'NOWY', metrics: { complexity: 25 } } });
+      assert.deepEqual(redCodes(ratchet.compare({ current: unchanged, baseline: grown, limits: LIM, base: old })), []);
+      assert.deepEqual(redCodes(ratchet.compare({ current: rewritten, baseline: grown, limits: LIM, base: old })), ['growth-vs-base']);
+      const otherBase = base({ baseline: old.baseline, hashes: { 'src::f': 'INNY' } });
+      assert.deepEqual(redCodes(ratchet.compare({ current: unchanged, baseline: grown, limits: LIM, base: otherBase })), ['growth-vs-base']);
+    });
+
+    test('przeniesienie wpisu dotyczy jednej funkcji: kopie usuniętej funkcji pod nowymi nazwami nie powielają długu', () => {
+      const old = base({ baseline: bl({ 'src::stara': { hash: 'H', complexity: 20, lines: 90 } }) });
+      const baseline = bl({ 'src::kopia1': { hash: 'H', complexity: 20, lines: 90 }, 'src::kopia2': { hash: 'H', complexity: 20, lines: 90 } });
+      const current = cur({ 'src::kopia1': { hash: 'H', metrics: { complexity: 20, lines: 90 } }, 'src::kopia2': { hash: 'H', metrics: { complexity: 20, lines: 90 } } });
+      const limits = limitsOf({ complexity: 10, lines: 50 }, {});
+      const result = ratchet.compare({ current, baseline, limits, base: old });
+      const newEntries = result.findings.filter(f => f.code === 'new-entry');
+      assert.deepEqual(newEntries.map(f => f.key), ['src::kopia2', 'src::kopia2']);
+      const single = ratchet.compare({ current: cur({ 'src::kopia1': { hash: 'H', metrics: { complexity: 20, lines: 90 } } }), baseline: bl({ 'src::kopia1': { hash: 'H', complexity: 20, lines: 90 } }), limits, base: old });
+      assert.deepEqual(redCodes(single), []);
+    });
+
+    test('dwa różne stare wpisy o tym samym skrócie przenoszą się po jednym', () => {
+      const old = base({ baseline: bl({ 'src::a': { hash: 'H', complexity: 20 }, 'src::b': { hash: 'H', complexity: 20 } }) });
+      const baseline = bl({ 'src::c': { hash: 'H', complexity: 20 }, 'src::d': { hash: 'H', complexity: 20 } });
+      const current = cur({ 'src::c': { hash: 'H', metrics: { complexity: 20 } }, 'src::d': { hash: 'H', metrics: { complexity: 20 } } });
+      assert.deepEqual(redCodes(ratchet.compare({ current, baseline, limits: LIM, base: old })), []);
+    });
   });
 });
