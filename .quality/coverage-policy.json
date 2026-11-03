@@ -23,6 +23,11 @@
       "rationale": "Przeniesione ze Status.gs bez zmiany ciał (#281); w pełni pokryte."
     },
     {
+      "pattern": "src/RunMarkers.gs",
+      "threshold": 100,
+      "rationale": "Znaczniki wykonań przeniesione ze Status.gs bez zmiany ciał (#275) plus adnotacja wyjątku; w pełni pokryte."
+    },
+    {
       "pattern": "src/Status.gs",
       "threshold": 95,
       "rationale": "New in #39 with full coverage (100%); keep it near-complete."

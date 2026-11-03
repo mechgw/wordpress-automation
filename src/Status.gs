@@ -152,33 +152,41 @@ function recordImportRunLocked_(source, trigger, fn) {
   // Wiersz za porzucone wykonanie przed pracą, jak w recordJobRunLocked_; znacznik
   // schodzi dopiero po wierszu (#221).
   const notes = settleAbandonedRuns_(abandoned, logAbandonedRun_(source)).map(abandonedRunNote_);
+  const ctx = { runId: runId, startedAt: startedAt, notes: notes };
   let result;
 
   try {
     result = fn();
   } catch (e) {
-    const failed = {
-      finishedAt: new Date().toISOString(),
-      ok: false,
-      trigger: Boolean(trigger),
-      error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(notes).join(' | '),
-      durationMs: Date.now() - startedAt
-    };
-    takeOverPendingRuns_({ key: source, run: failed });
-    const record = readJobRecord_(source);
-    record.lastRun = failed;
-    writeJobRecord_(source, record);
-    appendImportLog_(source, record.lastRun);
-    writeImportStatusCell_(source);
-    updateImportIncident_(source, record);
-    // Znacznik schodzi dopiero po zapisaniu skutków: ubicie w trakcie ich zapisu
-    // zostawia go strażnikowi i następnemu przebiegowi (PR #214).
-    clearRunMarker_(source, runId);
+    failImportRun_(source, trigger, ctx, e);
     throw e;
   }
+  return withMarkerAnnotation_(source, runId, () => finishImportRun_(source, trigger, ctx, result));
+}
 
-  const handledAt = Date.now();
-  const summary = result && typeof result === 'object' ? result : {};
+/** Skutki nieudanej pracy importu: rekord, wiersz `BŁĄD`, komórka statusu, incydent; na końcu znacznik. */
+function failImportRun_(source, trigger, ctx, e) {
+  const failed = {
+    finishedAt: new Date().toISOString(),
+    ok: false,
+    trigger: Boolean(trigger),
+    error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(ctx.notes).join(' | '),
+    durationMs: Date.now() - ctx.startedAt
+  };
+  takeOverPendingRuns_({ key: source, run: failed });
+  const record = readJobRecord_(source);
+  record.lastRun = failed;
+  writeJobRecord_(source, record);
+  appendImportLog_(source, record.lastRun);
+  writeImportStatusCell_(source);
+  updateImportIncident_(source, record);
+  // Znacznik schodzi dopiero po zapisaniu skutków: ubicie w trakcie ich zapisu
+  // zostawia go strażnikowi i następnemu przebiegowi (PR #214).
+  clearRunMarker_(source, ctx.runId);
+}
+
+/** Przebieg udanej pracy importu jako wpis rejestru (bez anomalii; ta jest liczona z historii). */
+function importRunEntry_(trigger, ctx, summary) {
   const run = {
     finishedAt: new Date().toISOString(),
     ok: true,
@@ -191,12 +199,19 @@ function recordImportRunLocked_(source, trigger, fn) {
     dataTo: String(summary.dataTo || ''),
     rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
-    warning: [String(summary.warning || '')].concat(notes).filter(Boolean).join(' | '),
-    durationMs: Date.now() - startedAt
+    warning: [String(summary.warning || '')].concat(ctx.notes).filter(Boolean).join(' | '),
+    durationMs: Date.now() - ctx.startedAt
   };
   // Porzucony poprzedni przebieg otwiera incydent `warning` także dla importu
   // (#209); inne ostrzeżenia importu nadal incydentu nie otwierają.
-  if (notes.length) run.abandoned = notes.join(' | ');
+  if (ctx.notes.length) run.abandoned = ctx.notes.join(' | ');
+  return run;
+}
+
+/** Skutki udanej pracy importu; zwraca wynik pracy. Wyjątek stąd adnotuje znacznik (`withMarkerAnnotation_`). */
+function finishImportRun_(source, trigger, ctx, result) {
+  const handledAt = Date.now();
+  const run = importRunEntry_(trigger, ctx, result && typeof result === 'object' ? result : {});
 
   // Wiersze odmów sprzed tego przebiegu trafiają do logu przed jego wierszem.
   takeOverPendingRuns_({ key: source, run: run });
@@ -215,11 +230,11 @@ function recordImportRunLocked_(source, trigger, fn) {
   appendImportLog_(source, run);
   writeImportStatusCell_(source);
   updateImportIncident_(source, record);
-  clearRunMarker_(source, runId);
+  clearRunMarker_(source, ctx.runId);
   // Osobny pomiar: etapy pracy mają własny licznik w importRange_/importGa4Range_.
   // Czas od startu liczony od startu przebiegu, więc nigdy nie maleje (PR #214).
   console.log('[import ' + source + '] obsługa wyniku: ' + (Date.now() - handledAt) +
-    ' ms (osobny pomiar; od startu przebiegu ' + (Date.now() - startedAt) + ' ms)');
+    ' ms (osobny pomiar; od startu przebiegu ' + (Date.now() - ctx.startedAt) + ' ms)');
   return result;
 }
 
@@ -641,142 +656,6 @@ function jobStatusText_(key, now) {
   return text + triggerPart;
 }
 
-// --- Znaczniki wykonań (#189) ------------------------------------------------
-//
-// Wykonanie ubite twardym limitem Apps Script (6 min) nie przechodzi ani przez
-// `catch`, ani przez `finally`, więc bez znacznika nie zostawia żadnego śladu:
-// ani rekordu, ani wiersza w IMPORT LOG, ani maila. 19.09.2026 tak zniknął
-// przebieg pomiaru wydajności — widać go było tylko w rejestrze wykonań.
-
-/** Prefiks Script Property ze znacznikiem trwającego wykonania: `RUNNING_<zadanie>_<runId>`. */
-const RUN_MARKER_PREFIX = 'RUNNING_';
-/**
- * Wiek, po którym znacznik na pewno nie należy do żyjącego wykonania: limit
- * wykonania Apps Script (6 min) plus margines. Młodszy może należeć do wykonania,
- * które wciąż trwa, i nie jest ruszany.
- */
-const RUN_MARKER_STALE_MS = 7 * 60 * 1000;
-/** Ile czekamy na blokadę przy odzysku. Odzysk to diagnostyka i nie może blokować zadania. */
-const RUN_MARKER_LOCK_MS = 3000;
-
-function runMarkerKey_(key, runId) {
-  return RUN_MARKER_PREFIX + key + '_' + runId;
-}
-
-/**
- * Znacznik wykonania to OSOBNA Script Property, a nie pole rekordu zadania.
- * Rekord to jeden JSON, który zapisuje nie tylko `recordJobRun_()`, ale też obsługa
- * incydentów ze swojej kopii (Alerts.gs). Od #204 znacznik powstaje już pod
- * blokadą rejestratora, ale własny klucz nadal dopisuje i usuwa się jedną
- * operacją, niezależnie od zapisów rekordu, więc przetrwa ubicie w dowolnej chwili.
- */
-function startRunMarker_(key, trigger, startedAt) {
-  const runId = Utilities.getUuid();
-  PropertiesService.getScriptProperties().setProperty(runMarkerKey_(key, runId), JSON.stringify({
-    job: key,
-    runId: runId,
-    startedAt: new Date(startedAt).toISOString(),
-    trigger: Boolean(trigger)
-  }));
-  return runId;
-}
-
-/** Usuwa WYŁĄCZNIE znacznik własnego wykonania — cudzy mógłby należeć do żyjącego. */
-function clearRunMarker_(key, runId) {
-  PropertiesService.getScriptProperties().deleteProperty(runMarkerKey_(key, runId));
-}
-
-/**
- * Porzucone znaczniki zadania `key` w bieżącym stanie Script Properties, od najstarszego.
- * Zadanie rozpoznajemy po polu `job`, a nie po prefiksie klucza: prefiks jednego
- * klucza zadania bywa początkiem innego (`SEO_LIVE` i hipotetyczne `SEO_LIVE_X`).
- * Wartość, której nie da się odczytać, nie jest naszym znacznikiem i zostaje nietknięta.
- */
-function abandonedRunMarkers_(key, now) {
-  const all = PropertiesService.getScriptProperties().getProperties();
-  return Object.keys(all)
-    .filter(function (name) { return name.indexOf(RUN_MARKER_PREFIX) === 0; })
-    .map(function (name) {
-      let marker;
-      try { marker = JSON.parse(all[name]); } catch (e) { marker = null; }
-      return { name: name, marker: marker };
-    })
-    .filter(function (found) {
-      return Boolean(found.marker) && found.marker.job === key &&
-        now - Date.parse(found.marker.startedAt) > RUN_MARKER_STALE_MS;
-    })
-    .sort(function (a, b) { return Date.parse(a.marker.startedAt) - Date.parse(b.marker.startedAt); });
-}
-
-/**
- * Porzucone znaczniki zadania do raportu: `{ name, marker }`, od najstarszego.
- * Niczego nie usuwa (#221): znacznik schodzi w `settleAbandonedRuns_`, dopiero
- * po zapisie śladu. Wcześniej odzysk usuwał go od razu i awaria przed zapisem
- * wiersza gubiła porzucony przebieg bez śladu.
- *
- * Wszystkie wywołania biegną pod blokadą rejestratora albo strażnika (#204), więc
- * dwa wykonania nie zgłoszą tego samego znacznika naraz. Bez trzymanej blokady
- * odczyt idzie pod krótką własną, a gdy ta jest zajęta, odzysk czeka na kolejny
- * przebieg. Blokadę bierzemy tylko wtedy, gdy wstępny odczyt w ogóle coś znalazł.
- */
-function reclaimAbandonedRuns_(key, now) {
-  if (!abandonedRunMarkers_(key, now).length) return [];
-  const lock = LockService.getScriptLock();
-  // Wywołanie pod blokadą już trzymaną (jak w `withScriptLock_`) nie może jej zwolnić.
-  const owned = lock.hasLock();
-  if (!owned && !lock.tryLock(RUN_MARKER_LOCK_MS)) return [];
-  try {
-    return abandonedRunMarkers_(key, now);
-  } finally {
-    if (!owned) lock.releaseLock();
-  }
-}
-
-/**
- * Zapisuje ślad każdego porzuconego znacznika (`report(marker)`) i dopiero potem
- * go usuwa (#221). Każdy znacznik osobno, jak wpisy oczekujące w
- * `takeOverPendingRuns_`: błąd zapisu albo usunięcia zostawia znacznik na kolejny
- * odzysk i nie przerywa przebiegu, bo odzysk to diagnostyka. Ubicie między
- * zapisem a usunięciem daje najwyżej zduplikowany wiersz, nie utracony ślad.
- * Zwraca znaczniki, których ślad się zapisał i które zeszły.
- */
-function settleAbandonedRuns_(found, report) {
-  const props = PropertiesService.getScriptProperties();
-  return found.filter(function (item) {
-    try {
-      report(item.marker);
-      props.deleteProperty(item.name);
-      return true;
-    } catch (e) {
-      Logger.log('Porzucony znacznik ' + item.name + ' czeka na kolejny odzysk: ' + (e && e.message ? e.message : e));
-      return false;
-    }
-  }).map(function (item) { return item.marker; });
-}
-
-/** Ślad porzuconego przebiegu zadania `key`: wiersz `BŁĄD` w IMPORT LOG (#221). */
-function logAbandonedRun_(key) {
-  return function (marker) {
-    appendImportLog_(key, abandonedRunEntry_(marker, abandonedRunNote_(marker)));
-  };
-}
-
-/**
- * Treść o porzuconym wykonaniu. Znacznik dowodzi tylko jednego: wykonanie nie
- * przeszło przez kontrolowane zakończenie `recordJobRun_()`. Nie przesądza ani
- * przyczyny, ani losu danych — po #151 i #187 dane zapisują się W TRAKCIE
- * przebiegu, więc ubity przebieg mógł zdążyć zapisać część albo całość.
- */
-function abandonedRunNote_(marker) {
-  return 'poprzedni przebieg (start ' + formatImportTime_(marker.startedAt) + ') nie zakończył się kontrolowanie — ' +
-    'możliwe przerwanie przez limit czasu wykonania Apps Script; zakres zapisanych danych jest niepewny';
-}
-
-/** Przebieg porzucony jako wpis rejestru: czas = start porzuconego, czas trwania nieznany. */
-function abandonedRunEntry_(marker, note) {
-  return { finishedAt: marker.startedAt, ok: false, trigger: marker.trigger, error: note };
-}
-
 /**
  * Czas etapów przebiegu w logu wykonania (#209). Wpis powstaje po każdym
  * zakończonym etapie, więc rejestr wykonań pokazuje je także dla przebiegu
@@ -914,7 +793,6 @@ function recordJobRun_(key, trigger, fn) {
 
 function recordJobRunLocked_(key, trigger, fn) {
   const startedAt = Date.now();
-  const job = scheduledJob_(key);
   // Najpierw odzysk cudzych porzuconych znaczników, dopiero potem własny.
   const abandoned = reclaimAbandonedRuns_(key, startedAt);
   const runId = startRunMarker_(key, trigger, startedAt);
@@ -923,29 +801,39 @@ function recordJobRunLocked_(key, trigger, fn) {
   // czas trwania nieznany. Także dla zadań bez `log` (#221): nota w `lastRun`
   // znika przy kolejnym przebiegu, więc nie jest trwałym śladem.
   const notes = settleAbandonedRuns_(abandoned, logAbandonedRun_(key)).map(abandonedRunNote_);
+  const ctx = { runId: runId, startedAt: startedAt, notes: notes };
   let result;
 
   try {
     result = fn();
   } catch (e) {
-    const failed = {
-      finishedAt: new Date().toISOString(),
-      ok: false,
-      trigger: Boolean(trigger),
-      // Treść o porzuconym poprzednim przebiegu dołącza do błędu bieżącego (#189).
-      error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(notes).join(' | '),
-      durationMs: Date.now() - startedAt
-    };
-    takeOverPendingRuns_({ key: key, run: failed });
-    const record = readJobRecord_(key);
-    record.lastRun = failed;
-    writeJobRecord_(key, record);
-    if (job.log) appendImportLog_(key, record.lastRun);
-    updateImportIncident_(key, record);
-    clearRunMarker_(key, runId);
+    failJobRun_(key, trigger, ctx, e);
     throw e;
   }
+  return withMarkerAnnotation_(key, runId, () => finishJobRun_(key, trigger, ctx, result));
+}
 
+/** Skutki nieudanej pracy zadania: rekord, ślad w logu (`log: true`), incydent; na końcu znacznik. */
+function failJobRun_(key, trigger, ctx, e) {
+  const failed = {
+    finishedAt: new Date().toISOString(),
+    ok: false,
+    trigger: Boolean(trigger),
+    // Treść o porzuconym poprzednim przebiegu dołącza do błędu bieżącego (#189).
+    error: [String(e && e.message ? e.message : e).replace(/\s+/g, ' ').slice(0, 300)].concat(ctx.notes).join(' | '),
+    durationMs: Date.now() - ctx.startedAt
+  };
+  takeOverPendingRuns_({ key: key, run: failed });
+  const record = readJobRecord_(key);
+  record.lastRun = failed;
+  writeJobRecord_(key, record);
+  if (scheduledJob_(key).log) appendImportLog_(key, record.lastRun);
+  updateImportIncident_(key, record);
+  clearRunMarker_(key, ctx.runId);
+}
+
+/** Skutki udanej pracy zadania; zwraca wynik pracy. Wyjątek stąd adnotuje znacznik (`withMarkerAnnotation_`). */
+function finishJobRun_(key, trigger, ctx, result) {
   const summary = result && typeof result === 'object' ? result : {};
   const run = {
     finishedAt: new Date().toISOString(),
@@ -954,11 +842,11 @@ function recordJobRunLocked_(key, trigger, fn) {
     rows: Number(summary.rows) || 0,
     detail: String(summary.detail || ''),
     // Ostrzeżenie zadania: przebieg się udał, ale coś w nim wymaga uwagi.
-    // Otwiera incydent `warning` (Alerts.gs), a nie błąd — dane są zapisane.
+    // Otwiera incydent `warning` (Alerts.gs), a nie błąd - dane są zapisane.
     // Porzucony poprzedni przebieg też jest takim ostrzeżeniem (#189): bieżący
     // się udał, a osobny incydent `error` dałby otwarcie i zamknięcie w kilka minut.
-    warning: [String(summary.warning || '')].concat(notes).filter(Boolean).join(' | '),
-    durationMs: Date.now() - startedAt
+    warning: [String(summary.warning || '')].concat(ctx.notes).filter(Boolean).join(' | '),
+    durationMs: Date.now() - ctx.startedAt
   };
   takeOverPendingRuns_({ key: key, run: run });
   const record = readJobRecord_(key);
@@ -970,11 +858,11 @@ function recordJobRunLocked_(key, trigger, fn) {
   writeJobRecord_(key, record);
   // Ślad przebiegu dla zadań, które go potrzebują (#179): przy otwartym
   // incydencie kolejne awarie milkną, więc bez wpisu w logu znikają bez śladu.
-  if (job.log) appendImportLog_(key, record.lastRun);
+  if (scheduledJob_(key).log) appendImportLog_(key, record.lastRun);
   updateImportIncident_(key, record);
   // Kontrolowane zakończenie: znacznik znika dopiero po zapisaniu skutków. Ubicie
   // w trakcie ich zapisu zostawia go do odzysku (PR #214).
-  clearRunMarker_(key, runId);
+  clearRunMarker_(key, ctx.runId);
   return result;
 }
 
