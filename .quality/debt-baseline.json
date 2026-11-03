@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "tool": {
+    "eslint": "10.14.0",
+    "espree": "11.2.0"
+  },
+  "functions": {},
+  "files": {}
+}

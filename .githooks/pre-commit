@@ -8,7 +8,8 @@
 # Gates, in order:
 #   1. forbidden artifacts   – credentials and build output never enter the index
 #   2. ESLint (staged)       – src/*.gs, test/**/*.js, scripts/**/*.js, eslint.config.js
-#   3. unit tests + coverage – per-file thresholds and 100% of staged src/*.gs lines
+#   3. debt ratchet (report) – size/complexity debt may only shrink (#240, does not block yet)
+#   4. unit tests + coverage – per-file thresholds and 100% of staged src/*.gs lines
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -35,7 +36,16 @@ if [ -n "$lintable" ]; then
   npx eslint $lintable
 fi
 
-# --- 3. tests + coverage gate --------------------------------------------------
+# --- 3. debt ratchet (report only) --------------------------------------------
+debt_scope="$(printf '%s\n' "$staged" | grep -E '(^src/[^/]+\.gs$|^scripts/quality/|^\.quality/debt-)' || true)"
+if [ -n "$debt_scope" ]; then
+  step "Debt ratchet (report, does not block)"
+  base_arg="--base=none"
+  if git rev-parse --verify -q origin/main >/dev/null 2>&1; then base_arg="--base=origin/main"; fi
+  node scripts/quality/debt-ratchet.js --mode=report "$base_arg"
+fi
+
+# --- 4. tests + coverage gate --------------------------------------------------
 sources_or_tests="$(printf '%s\n' "$staged" | grep -E '(^src/[^/]+\.gs$|^test/|^eslint\.config\.js$|^package(-lock)?\.json$|^\.quality/)' || true)"
 if [ -n "$sources_or_tests" ]; then
   step "Unit tests + coverage gate (staged lines must be 100% covered)"
