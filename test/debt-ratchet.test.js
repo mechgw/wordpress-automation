@@ -1495,3 +1495,65 @@ describe('#244: limit długości funkcji (40 linii kodu bez pustych i komentarzy
     assert.equal(cur.functions['src::ponad'].metrics.lines, 41);
   });
 });
+
+describe('#245: limit rozmiaru pliku (400 linii kodu bez pustych i komentarzy)', () => {
+  const REPO = path.join(__dirname, '..');
+  const readJson = rel => JSON.parse(fs.readFileSync(path.join(REPO, rel), 'utf8'));
+  const fileOf = codeLines => lines('/**', ' * Opis pliku (komentarz nie liczy się)', ' */', '', ...Array.from({ length: codeLines }, (_, i) => `var v${i} = ${i}; // komentarz końcowy nie wyłącza linii`));
+
+  test('próg 400 jest zapisany tylko w pliku limitów, dla obu zakresów', () => {
+    const limits = ratchet.validateLimits(readJson('.quality/debt-limits.json'));
+    assert.equal(limits.scopes.src.limits.fileLines, 400);
+    assert.equal(limits.scopes.scripts.limits.fileLines, 400);
+    for (const rel of ['.github/workflows/ci.yml', '.githooks/pre-commit']) {
+      assert.doesNotMatch(fs.readFileSync(path.join(REPO, rel), 'utf8'), /max-lines\b|fileLines\s*[:=]\s*400/, `${rel} nie powinien powielać progu`);
+    }
+  });
+
+  test('kontrola graniczna: plik 400 linii kodu przechodzi, 401 jest zgłoszony; komentarze i puste linie nie liczą się', async () => {
+    const root = makeRoot({ 'src/Na400.gs': fileOf(400), 'src/Ponad.gs': fileOf(401) });
+    const cur = await ratchet.measure(root, readJson('.quality/debt-limits.json'));
+    assert.deepEqual(cur.files['src/Na400.gs'].metrics, {});
+    assert.deepEqual(cur.files['src/Ponad.gs'].metrics, { fileLines: 401 });
+  });
+
+  describe('na tymczasowym repozytorium z gitem', () => {
+    const limits = JSON.stringify(limitsOf({ fileLines: 400 }, {}), null, 2);
+
+    async function repo() {
+      const root = makeRoot({ '.quality/debt-limits.json': limits, 'src/Stary.gs': fileOf(450), 'src/Maly.gs': fileOf(10) });
+      await ratchet.main([`--root=${root}`, 'write-baseline'], collect());
+      git(root, 'init', '-q', '-b', 'main');
+      git(root, 'add', '-A');
+      git(root, 'commit', '-q', '-m', 'baza');
+      return root;
+    }
+
+    async function check(root) {
+      const io = collect();
+      const code = await ratchet.main([`--root=${root}`, '--base=main', '--ci'], io);
+      return { code, text: io.out.join('\n') };
+    }
+
+    test('wzrost starego pliku o jedną linię jest czerwony, spadek wymaga obniżenia wpisu (CI)', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/Stary.gs': fileOf(451) });
+      const grown = await check(root);
+      assert.equal(grown.code, 1, grown.text);
+      assert.match(grown.text, /RED file-growth src\/Stary\.gs: fileLines rośnie: 450 -> 451/);
+      writeFiles(root, { 'src/Stary.gs': fileOf(449) });
+      const shrunk = await check(root);
+      assert.equal(shrunk.code, 1, shrunk.text);
+      assert.match(shrunk.text, /RED file-shrink src\/Stary\.gs: fileLines spadło: 450 -> 449/);
+    });
+
+    test('nowy plik ponad limit z dopisanym wpisem w tym samym PR jest czerwony; dotknięcie funkcji w starym pliku nie wymaga spłaty pliku', async () => {
+      const root = await repo();
+      writeFiles(root, { 'src/Nowy.gs': fileOf(420) });
+      await ratchet.main([`--root=${root}`, 'write-baseline'], collect());
+      const added = await check(root);
+      assert.equal(added.code, 1, added.text);
+      assert.match(added.text, /RED new-file-entry src\/Nowy\.gs: nowy wpis fileLines=420/);
+    });
+  });
+});
