@@ -1472,3 +1472,26 @@ describe('#241: funkcja zmieniona w PR musi spełniać pełne limity (dotknięta
     });
   });
 });
+
+describe('#244: limit długości funkcji (40 linii kodu bez pustych i komentarzy)', () => {
+  const REPO = path.join(__dirname, '..');
+  const readJson = rel => JSON.parse(fs.readFileSync(path.join(REPO, rel), 'utf8'));
+
+  test('próg 40 jest zapisany tylko w pliku limitów, dla obu zakresów', () => {
+    const limits = ratchet.validateLimits(readJson('.quality/debt-limits.json'));
+    assert.equal(limits.scopes.src.limits.lines, 40);
+    assert.equal(limits.scopes.scripts.limits.lines, 40);
+    for (const rel of ['.github/workflows/ci.yml', '.githooks/pre-commit']) {
+      assert.doesNotMatch(fs.readFileSync(path.join(REPO, rel), 'utf8'), /max-lines-per-function|lines\s*[:=]\s*40/, `${rel} nie powinien powielać progu`);
+    }
+  });
+
+  test('kontrola graniczna: 40 linii kodu przechodzi, 41 jest zgłoszone; puste linie i komentarze nie liczą się', async () => {
+    const body = n => Array.from({ length: n }, (_, i) => `  const v${i} = ${i};`);
+    const fn = (name, codeLines) => lines(`function ${name}() {`, ...body(codeLines - 3), '', '  // komentarz nie liczy się', '  return 0;', '}');
+    const root = makeRoot({ 'src/Len.gs': fn('naProgu', 40) + fn('ponad', 41) });
+    const cur = await ratchet.measure(root, readJson('.quality/debt-limits.json'));
+    assert.deepEqual(Object.keys(cur.functions), ['src::ponad']);
+    assert.equal(cur.functions['src::ponad'].metrics.lines, 41);
+  });
+});

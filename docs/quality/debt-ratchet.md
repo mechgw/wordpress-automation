@@ -39,8 +39,9 @@ formatu zaczerwieni testy zamiast cicho zmienić wynik.
 | Miara | Próg | Zakres | Zgłoszenie | Dług w dniu wprowadzenia |
 | --- | --- | --- | --- | --- |
 | `complexity` | 12 | `src/*.gs` i `scripts/quality/*.js` | #243 | 29 funkcji w `src/*.gs` (maksimum 28, `updateImportIncident_`), 13 w `scripts/quality/*.js` (maksimum 31, `compare`; sześć z nich istniało przed silnikiem, siedem to funkcje samego silnika z #240) |
+| `lines` | 40 | `src/*.gs` i `scripts/quality/*.js` | #244 | 52 funkcje w `src/*.gs` (maksimum 224 linie kodu, `importGa4Range_`), 4 w `scripts/quality/*.js` (maksimum 90, `fetchInput`; trzy istniały przed silnikiem, `compare` z #240) |
 
-Próg jest tylko w `.quality/debt-limits.json`, nie w CI ani w hooku. ESLint liczy też operatory logiczne i `?:`
+Progi są tylko w `.quality/debt-limits.json`, nie w CI ani w hooku. ESLint liczy też operatory logiczne i `?:`
 (reguła `complexity`), więc ten sam próg jest surowszy niż `C901` z `ruff`.
 
 Dodanie miary: jeden klucz w `limits` zakresu (np. `"complexity": 12`) i `node scripts/quality/debt-ratchet.js
