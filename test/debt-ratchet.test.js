@@ -29,6 +29,8 @@ let allTestsDone = false;
 after(() => { allTestsDone = true; });
 process.on('exit', () => { if (!allTestsDone) process.exitCode = 1; });
 
+// Silnik domyślnie przyjmuje tryb CI z GITHUB_ACTIONS; testy ustawiają `--ci` jawnie, więc zmiennej nie dziedziczą.
+delete process.env.GITHUB_ACTIONS;
 const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
 
 function makeRoot(files) {
