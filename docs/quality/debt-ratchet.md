@@ -34,6 +34,15 @@ Format komunikatów jest przypięty wersją ESLint w `package-lock.json`, a test
 (`miary z komunikatów ESLint`) uruchamia prawdziwy ESLint na kodzie o znanych wartościach, więc zmiana
 formatu zaczerwieni testy zamiast cicho zmienić wynik.
 
+### Aktywne miary
+
+| Miara | Próg | Zakres | Zgłoszenie | Dług w dniu wprowadzenia |
+| --- | --- | --- | --- | --- |
+| `complexity` | 12 | `src/*.gs` i `scripts/quality/*.js` | #243 | 29 funkcji w `src/*.gs` (maksimum 28, `updateImportIncident_`), 13 w `scripts/quality/*.js` (maksimum 31, `compare`; sześć z nich istniało przed silnikiem, siedem to funkcje samego silnika z #240) |
+
+Próg jest tylko w `.quality/debt-limits.json`, nie w CI ani w hooku. ESLint liczy też operatory logiczne i `?:`
+(reguła `complexity`), więc ten sam próg jest surowszy niż `C901` z `ruff`.
+
 Dodanie miary: jeden klucz w `limits` zakresu (np. `"complexity": 12`) i `node scripts/quality/debt-ratchet.js
 write-baseline`; PR zawiera wynik w bazie. Miara spoza tabeli (np. liczba funkcji w pliku) wymaga rozszerzenia
 `METRICS` w silniku i testu.
