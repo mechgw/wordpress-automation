@@ -118,13 +118,16 @@ function readJson(file, what) {
 
 /** Waliduje plik limitów; błąd konfiguracji to kod 2, nie zielony wynik. */
 function validateLimits(limits) {
-  if (!limits || limits.version !== FORMAT_VERSION || typeof limits.scopes !== 'object' || limits.scopes === null) {
+  if (!limits || limits.version !== FORMAT_VERSION || !isObject(limits.scopes)) {
     throw new UsageError(`${LIMITS_FILE}: oczekiwano { "version": ${FORMAT_VERSION}, "scopes": {...} }`);
   }
   for (const [id, scope] of Object.entries(limits.scopes)) {
     const at = `${LIMITS_FILE}: zakres ${id}`;
     if (!Array.isArray(scope.files) || scope.files.length === 0 || !scope.files.every(f => typeof f === 'string')) {
       throw new UsageError(`${at}: "files" musi być niepustą listą wzorców`);
+    }
+    if (!scope.files.every(f => /\.[A-Za-z0-9]+$/.test(f))) {
+      throw new UsageError(`${at}: każdy wzorzec "files" musi kończyć się rozszerzeniem pliku (ESLint inaczej pomija plik)`);
     }
     if (!SOURCE_TYPES.includes(scope.sourceType)) throw new UsageError(`${at}: "sourceType" to ${SOURCE_TYPES.join(', ')}`);
     if (!KEY_MODES.includes(scope.keyMode)) throw new UsageError(`${at}: "keyMode" to ${KEY_MODES.join(', ')}`);
@@ -140,6 +143,7 @@ function loadLimits(root) {
   return validateLimits(readJson(path.join(root, LIMITS_FILE), 'plik limitów'));
 }
 
+const isObject = value => typeof value === 'object' && value !== null;
 const normalizeSource = text => text.replace(/\r\n/g, '\n');
 const sha1 = text => crypto.createHash('sha1').update(text).digest('hex');
 
@@ -155,19 +159,18 @@ function keyName(member) {
 
 /**
  * Nazwa funkcji: własna, z deklaracji zmiennej albo metody klasy; inaczej anonimowa (null). Funkcje przypisane do
- * właściwości obiektu lub do pola są anonimowe (klucz ze skrótu ciała), bo ta sama nazwa właściwości powtarza się
+ * właściwości literału obiektu są anonimowe (klucz ze skrótu ciała), bo ta sama nazwa właściwości powtarza się
  * w wielu literałach obiektów i dawałaby konflikty kluczy.
  */
 function functionName(node, parent) {
   if (node.id) return node.id.name;
-  if (!parent) return null;
-  if (parent.type === 'VariableDeclarator') return parent.init === node && parent.id.type === 'Identifier' ? parent.id.name : null;
-  if (parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') return parent.value === node ? keyName(parent) : null;
+  if (parent.type === 'VariableDeclarator') return parent.id.type === 'Identifier' ? parent.id.name : null;
+  if (parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') return keyName(parent);
   return null;
 }
 
 const astReplacer = (key, value) => {
-  if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') return undefined;
+  if (key === 'range' || key === 'start' || key === 'end') return undefined; // `loc` zawiera tylko `start` i `end`
   return typeof value === 'bigint' ? value.toString() : value;
 };
 const bodyHash = body => sha1(JSON.stringify(body, astReplacer));
@@ -183,7 +186,9 @@ function listFunctions(source, sourceType) {
     if (FUNCTION_TYPES.has(node.type)) {
       const name = functionName(node, parent);
       const hash = bodyHash(node.body);
-      out.push({ name, hash, range: node.range, line: node.loc.start.line, rawKey: chain.concat(name || `#${hash.slice(0, 8)}`).join('>') });
+      // ESLint raportuje metody i właściwości od początku definicji (klucza), nie od nawiasu funkcji.
+      const head = parent.value === node ? parent : node; // metoda, właściwość albo pole klasy
+      out.push({ name, hash, range: [head.range[0], node.range[1]], line: node.loc.start.line, rawKey: chain.concat(name || `#${hash.slice(0, 8)}`).join('>') });
       if (name) next = chain.concat(name);
     }
     for (const field of Object.keys(node)) {
@@ -226,7 +231,7 @@ function analyseScope(scopeId, scope, sources) {
   const byBase = {};
   for (const fn of functions) (byBase[fn.base] = byBase[fn.base] || []).push(fn);
   for (const [base, group] of Object.entries(byBase)) {
-    if (group.length > 1 && group[0].name && new Set(group.map(f => f.hash)).size > 1) {
+    if (new Set(group.map(f => f.hash)).size > 1) {
       conflicts.push(`${base}: ${group.length} funkcji o tej samej nazwie i różnych ciałach (${group.map(f => `${f.rel}:${f.line}`).join(', ')})`);
     }
   }
@@ -247,8 +252,9 @@ function lineStarts(source) {
 function innermostFunction(functions, starts, line, column) {
   const offset = starts[line - 1] + column - 1;
   let best = null;
+  // Funkcje są w kolejności przejścia wgłąb (zewnętrzna przed wewnętrzną), więc ostatnia zawierająca pozycję jest najwęższa.
   for (const fn of functions) {
-    if (fn.range[0] <= offset && offset < fn.range[1] && (!best || fn.range[1] - fn.range[0] < best.range[1] - best.range[0])) best = fn;
+    if (fn.range[0] <= offset && offset < fn.range[1]) best = fn;
   }
   return best;
 }
@@ -293,7 +299,7 @@ async function measure(root, limits) {
       const starts = lineStarts(bySource[rel].source);
       for (const message of result.messages) {
         const metric = byRule[message.ruleId];
-        if (message.fatal || (!metric && message.severity === 2 && message.ruleId === null)) {
+        if (message.fatal || (!metric && message.ruleId === null)) {
           throw new UsageError(`${rel}: ${message.message}`);
         }
         if (!metric) continue;
@@ -337,7 +343,7 @@ function buildBaseline(current) {
 }
 
 function validateBaseline(baseline) {
-  if (!baseline || baseline.version !== FORMAT_VERSION || typeof baseline.functions !== 'object' || typeof baseline.files !== 'object') {
+  if (!baseline || baseline.version !== FORMAT_VERSION || !isObject(baseline.functions) || !isObject(baseline.files)) {
     throw new UsageError(`${BASELINE_FILE}: oczekiwano { "version": ${FORMAT_VERSION}, "functions": {...}, "files": {...} }`);
   }
   for (const [key, entry] of Object.entries(baseline.functions)) {
@@ -391,9 +397,9 @@ function loadBase(root, ref, limits) {
     hashes: {},
     fileHashes: {}
   };
-  const tracked = git(root, ['ls-tree', '-r', '--name-only', ref]).split('\n').filter(Boolean);
+  const tracked = git(root, ['ls-tree', '-r', '--name-only', ref]).split('\n');
   for (const [scopeId, scope] of Object.entries(limits.scopes)) {
-    const sources = tracked.filter(rel => matchesScope(scope, rel)).map(rel => ({ rel, source: show(rel) })).filter(s => s.source !== null);
+    const sources = tracked.filter(rel => matchesScope(scope, rel)).map(rel => ({ rel, source: show(rel) }));
     const model = analyseScope(scopeId, scope, sources);
     Object.assign(base.hashes, model.hashes);
     Object.assign(base.fileHashes, model.fileHashes);
@@ -510,7 +516,7 @@ function compareWithBase({ baseline, limits, base, current, red }) {
         continue;
       }
       const unchanged = introduced(limits, base, scopeOfKey(key), metric) && base.hashes[key] === entry.hash && current.allKeys[key] === entry.hash;
-      const moved = Object.entries(oldFunctions).some(([k, e]) => !(k in baseline.functions) && e.hash === entry.hash && e[metric] !== undefined && e[metric] >= entry[metric]);
+      const moved = Object.entries(oldFunctions).some(([k, e]) => !(k in baseline.functions) && e.hash === entry.hash && e[metric] >= entry[metric]);
       if (!unchanged && !moved) red('new-entry', key, `nowy wpis ${metric}=${entry[metric]} względem ${base.ref}: dług nie wchodzi przez dopisanie wpisu (nowa lub zmieniona funkcja musi mieścić się w limicie)`);
     }
   }
@@ -581,6 +587,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  METRICS, UsageError, analyseScope, buildBaseline, compare, globToRegExp, listFunctions, loadBase, loadBaseline, loadLimits,
+  METRICS, UsageError, analyseScope, buildBaseline, cleanGitEnv, compare, git, globToRegExp, listFunctions, loadBase, loadBaseline, loadLimits,
   main, measure, parseArgs, validateBaseline, validateLimits
 };

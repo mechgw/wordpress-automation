@@ -126,4 +126,7 @@ a spadek miary i spłacony dług są czerwone.
 - Silnik widzi funkcje po składni (`espree`); funkcje tworzone dynamicznie (`new Function`) nie są mierzone.
 - Tożsamość funkcji anonimowych opiera się na skrócie ciała: zmiana ciała lambdy zmienia jej klucz (wpis bez funkcji
   i nowa funkcja ponad limit), czyli wymaga spłaty albo zmieszczenia się w limicie.
-- `files` zakresu musi kończyć się rozszerzeniem pliku (reguła konfiguracji ESLint, nie silnika).
+- `files` zakresu musi kończyć się rozszerzeniem pliku: ESLint inaczej pomija plik. Silnik odrzuca taki wzorzec (kod 2),
+  a każdy komunikat ESLint bez reguły (plik pominięty, błąd składni, błąd konfiguracji) jest błędem użycia, nie zielonym wynikiem.
+- Metody klas, gettery i funkcje we właściwościach są przypisywane po początku definicji (tam ESLint raportuje miarę),
+  nie po nawiasie parametrów.
