@@ -551,29 +551,65 @@ function parseArgs(argv) {
   return opts;
 }
 
+/**
+ * Reguła dotkniętej funkcji (#241): funkcja zmieniona albo nowa w PR (jej skrót nie występuje na `main`) musi spełniać
+ * pełne limity, także gdy ma wpis w bazie. Wpis jest tylko dolną zapadką i nie zwalnia z limitów; po spełnieniu limitów
+ * wpis trzeba usunąć (`repaid`). Funkcja przeniesiona bez zmiany (ten sam skrót) nie jest dotknięta. Brak wpisu pokrywa
+ * `over-limit-no-entry`, więc tu nie dublujemy.
+ */
+function compareTouched({ current, baseline, base }) {
+  const known = new Set(Object.values(base.hashes));
+  const findings = [];
+  for (const [key, fn] of Object.entries(current.functions)) {
+    if (known.has(fn.hash) || !baseline.functions[key]) continue;
+    const over = Object.entries(fn.metrics).map(([metric, value]) => `${metric}=${value}`).join(', ');
+    findings.push({
+      level: 'red',
+      code: 'touched-over-limit',
+      key,
+      message: `funkcja zmieniona w tym PR musi spełniać pełne limity (${over}, ${fn.file}:${fn.line}); wpis w bazie nie zwalnia, po poprawie usuń wpis`
+    });
+  }
+  return findings;
+}
+
+function writeBaseline(root, current, out) {
+  const baseline = buildBaseline(current);
+  fs.writeFileSync(path.join(root, BASELINE_FILE), `${JSON.stringify(baseline, null, 2)}\n`);
+  out.log(`[debt-ratchet] zapisano ${BASELINE_FILE}: ${Object.keys(baseline.functions).length} funkcji, ${Object.keys(baseline.files).length} plików`);
+  return 0;
+}
+
+function printFindings(out, opts, findings) {
+  for (const f of findings) {
+    out.log(`[debt-ratchet] ${f.level.toUpperCase()} ${f.code} ${f.key}: ${f.message}`);
+    if (opts.ci && f.level === 'red') out.log(`::${opts.mode === 'enforce' ? 'error' : 'warning'} title=debt-ratchet ${f.code}::${f.key}: ${f.message}`);
+  }
+}
+
+function summaryLine(opts, limits, current, violations) {
+  const active = Object.values(limits.scopes).reduce((n, s) => n + Object.keys(s.limits || {}).length, 0);
+  const files = Object.values(current.files).filter(f => Object.keys(f.metrics).length > 0).length;
+  const note = opts.mode === 'report' ? ' (tryb raportu, nie blokuje)' : '';
+  return `[debt-ratchet] ${violations === 0 ? 'OK' : 'CZERWONE'}: ${active} aktywnych miar, ${Object.keys(current.functions).length} funkcji i ${files} plików ponad limit, ${violations} naruszeń${note}`;
+}
+
+function check(opts, limits, current, out) {
+  const baseline = loadBaseline(opts.root);
+  const base = opts.base === 'none' ? null : loadBase(opts.root, opts.base, limits);
+  const findings = compare({ current, baseline, limits, base, ci: opts.ci }).findings.concat(base ? compareTouched({ current, baseline, base }) : []);
+  printFindings(out, opts, findings);
+  const reds = findings.filter(f => f.level === 'red').length;
+  out.log(summaryLine(opts, limits, current, reds));
+  return reds > 0 && opts.mode === 'enforce' ? 1 : 0;
+}
+
 async function main(argv, out = console) {
-  let opts;
   try {
-    opts = parseArgs(argv);
+    const opts = parseArgs(argv);
     const limits = loadLimits(opts.root);
     const current = await measure(opts.root, limits);
-    if (opts.command === 'write-baseline') {
-      const baseline = buildBaseline(current);
-      fs.writeFileSync(path.join(opts.root, BASELINE_FILE), `${JSON.stringify(baseline, null, 2)}\n`);
-      out.log(`[debt-ratchet] zapisano ${BASELINE_FILE}: ${Object.keys(baseline.functions).length} funkcji, ${Object.keys(baseline.files).length} plików`);
-      return 0;
-    }
-    const baseline = loadBaseline(opts.root);
-    const base = opts.base === 'none' ? null : loadBase(opts.root, opts.base, limits);
-    const { findings } = compare({ current, baseline, limits, base, ci: opts.ci });
-    const reds = findings.filter(f => f.level === 'red');
-    for (const f of findings) {
-      out.log(`[debt-ratchet] ${f.level.toUpperCase()} ${f.code} ${f.key}: ${f.message}`);
-      if (opts.ci && f.level === 'red') out.log(`::${opts.mode === 'enforce' ? 'error' : 'warning'} title=debt-ratchet ${f.code}::${f.key}: ${f.message}`);
-    }
-    const active = Object.values(limits.scopes).reduce((n, s) => n + Object.keys(s.limits || {}).length, 0);
-    out.log(`[debt-ratchet] ${reds.length === 0 ? 'OK' : 'CZERWONE'}: ${active} aktywnych miar, ${Object.keys(current.functions).length} funkcji i ${Object.values(current.files).filter(f => Object.keys(f.metrics).length > 0).length} plików ponad limit, ${reds.length} naruszeń${opts.mode === 'report' ? ' (tryb raportu, nie blokuje)' : ''}`);
-    return reds.length > 0 && opts.mode === 'enforce' ? 1 : 0;
+    return opts.command === 'write-baseline' ? writeBaseline(opts.root, current, out) : check(opts, limits, current, out);
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
     out.error(`[debt-ratchet] BŁĄD: ${e.message}`);
@@ -586,6 +622,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  METRICS, UsageError, analyseScope, buildBaseline, cleanGitEnv, compare, git, globToRegExp, listFunctions, loadBase, loadBaseline, loadLimits,
+  METRICS, UsageError, analyseScope, buildBaseline, cleanGitEnv, compare, compareTouched, git, globToRegExp, listFunctions, loadBase, loadBaseline, loadLimits,
   main, measure, parseArgs, validateBaseline, validateLimits
 };

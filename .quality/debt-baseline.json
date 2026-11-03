@@ -25,10 +25,6 @@
       "hash": "c1fe345483cb404d564997f095749f7aad4ca69e",
       "complexity": 27
     },
-    "scripts::scripts/quality/debt-ratchet.js::main": {
-      "hash": "8d89342f6876a8ec38ed743f621d926d0405a49b",
-      "complexity": 14
-    },
     "scripts::scripts/quality/debt-ratchet.js::measure": {
       "hash": "ce7bb130b822989ad7660d53c309e7d5b5953fb0",
       "complexity": 17
