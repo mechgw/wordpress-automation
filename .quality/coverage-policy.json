@@ -13,6 +13,11 @@
       "rationale": "Tiny, fully covered (#52): acquire, release on success and on error, refusal."
     },
     {
+      "pattern": "src/Dates.gs",
+      "threshold": 100,
+      "rationale": "Mały pomocnik pamięci dat (#229), w pełni pokryty: pamięć, NaN, brak pamięci między wywołaniami."
+    },
+    {
       "pattern": "src/Status.gs",
       "threshold": 95,
       "rationale": "New in #39 with full coverage (100%); keep it near-complete."

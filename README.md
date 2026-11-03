@@ -23,6 +23,7 @@ Merge do `main` **niczego nie wdraża**. Publikacja wydania w GitHubie uruchamia
 - `RecrawlQueue.gs` — kolejka stron, które Google powinien odwiedzić ponownie: klasyfikacja w arkuszu `RECRAWL QUEUE` i e-mail o nowych rekomendacjach.
 - `Diagnostics.gs` — smoke test z menu, wyłącznie odczyt: Script Properties, zakładki, dostęp do GSC / GA4 / WordPressa, triggery, konfiguracja alertów, jedna linia raportu na krok.
 - `SheetCatalog.gs` — katalog arkuszy tworzonych przez skrypt: kolory zakładek, kolejność, generowany spis `START` i ukrywanie zakładek z danymi surowymi.
+- `Dates.gs` — `cachedFormatDate_`: formatowanie `Date` z pamięcią po `getTime()` dla pętli po dużych kolumnach dat (#229).
 - `Version.gs` — same placeholdery; workflow deployu nadpisuje go tagiem wydania, commitem i czasem przed `clasp push`, a arkusz pokazuje ten tag jako menu (*Szczegóły wdrożenia*). Drift check ignoruje ten plik.
 - `eslint.config.js` — reguły lintu z globalnymi symbolami Apps Script.
 - `.claspignore` — do Apps Script trafiają wyłącznie `*.gs` i `appsscript.json`.
@@ -321,6 +322,8 @@ Każdy inny stan, w tym brak właściwości albo zły JSON, to zapis całej zak�
 **Czas etapów.** Importy GSC i GA4 zapisują w logu wykonania czas każdego etapu, np. `[import GSC] zapytania API (452 wierszy): 12345 ms (od startu 12345 ms)`, potem rozpoznanie K–L, odczyt, usunięcie albo czyszczenie, zapis, formaty i obsługę wyniku. Wpis powstaje po zakończeniu etapu, więc rejestr wykonań Apps Script pokazuje go także dla przebiegu ubitego limitem, do ostatniego etapu, który się skończył.
 
 Import GSC mierzy osobno odczyt kolumny A i pętlę po jej wierszach, zarówno przy wyznaczaniu zakresu („odczyt kolumny A do zakresu”, „ostatni dzień z danymi … w tym N dat”), jak i przy zapisie („rozpoznanie importowanych dni”, „usunięcie wierszy importowanych dni”). 13.10.2026 przebieg ubito przed końcem pierwszego etapu i z logu nie dało się ustalić, który krok trwał (#220). Funkcja `diagnozaDatGsc` uruchomiona z edytora Apps Script mierzy to samo poza importem: pierwszy i drugi odczyt kolumny A oraz pętlę z `Utilities.formatDate` dla każdej daty wobec pętli z pamięcią po wartości daty. Niczego nie zapisuje.
+
+Pętle po kolumnie A (`gscLastDataDay_`, `appendGscDays_`, `replaceRange_`) formatują każdą różną chwilę raz: `cachedFormatDate_` (`Dates.gs`) trzyma pamięć kluczowaną `getTime()` w domknięciu jednego użycia i niczego nie przenosi między wywołaniami ani przebiegami (#229). Liczba kosztownych wywołań `Utilities.formatDate` zależy więc od liczby różnych chwil (kilkadziesiąt), a nie od liczby wierszy; iteracja po kolumnie nadal ma koszt proporcjonalny do liczby wierszy. `diagnozaDatGsc` liczy wariant z pamięcią tym samym pomocnikiem, więc mierzy kod produkcyjny.
 
 ### Alerty e-mail (model incydentu)
 
