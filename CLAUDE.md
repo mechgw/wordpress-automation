@@ -116,6 +116,10 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 
 - `npm run lint` — ESLint dla `src/*.gs` (globalne symbole Apps Script + funkcje między plikami),
   `test/`, `scripts/`; w tym `eol-last` (znak nowej linii na końcu pliku, Apps Script go wymaga).
+- `npm run quality:debt` — zapadka długu rozmiaru i złożoności (#240, `scripts/quality/debt-ratchet.js`,
+  limity w `.quality/debt-limits.json`, baza długu w `.quality/debt-baseline.json`, opis w
+  [docs/quality/debt-ratchet.md](docs/quality/debt-ratchet.md)). Dług może tylko maleć; na razie tryb
+  raportu (nie blokuje), miary dołączają osobne zgłoszenia.
 - `npm test` — testy jednostkowe Node; pliki `.gs` działają w VM z zastubowanymi usługami Google
   (`test/helpers/gas.js`). Stub `Utilities.formatDate` formatuje w strefie maszyny: przed pushem
   uruchom też `TZ=UTC npm test`. `test/order-analytics-php.test.js` wykonuje wygenerowany most

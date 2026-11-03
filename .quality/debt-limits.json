@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "scopes": {
+    "src": {
+      "files": [
+        "src/*.gs"
+      ],
+      "sourceType": "script",
+      "keyMode": "global",
+      "limits": {}
+    },
+    "scripts": {
+      "files": [
+        "scripts/quality/*.js"
+      ],
+      "sourceType": "commonjs",
+      "keyMode": "file",
+      "limits": {}
+    }
+  }
+}
