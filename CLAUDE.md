@@ -120,6 +120,10 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
   limity w `.quality/debt-limits.json`, baza długu w `.quality/debt-baseline.json`, opis w
   [docs/quality/debt-ratchet.md](docs/quality/debt-ratchet.md)). Dług może tylko maleć; na razie tryb
   raportu (nie blokuje), miary dołączają osobne zgłoszenia.
+- Job `quality-gate` w `.github/workflows/ci.yml` (#242) — agregat kontroli CI: zielony tylko, gdy każdy job z listy
+  wymaganych (`scripts/quality/quality-gate.js`, `REQUIRED_JOBS`) ma wynik `success` (pominięty, anulowany i brakujący
+  dają czerwony). Nowy job kontrolny dopisujesz w `ci.yml` (`needs` jobu) i do listy; test zgodności pilnuje obu miejsc.
+  Wymaganie go przez ochronę `main` zamiast `validate` i `secret-scan` zmienia właściciel po zielonym przebiegu próbnym.
 - `npm test` — testy jednostkowe Node; pliki `.gs` działają w VM z zastubowanymi usługami Google
   (`test/helpers/gas.js`). Stub `Utilities.formatDate` formatuje w strefie maszyny: przed pushem
   uruchom też `TZ=UTC npm test`. `test/order-analytics-php.test.js` wykonuje wygenerowany most

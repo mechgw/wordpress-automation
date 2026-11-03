@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # ready_for_review: po zmianie z Draft na Ready powstaje świeży przebieg na bieżącym HEAD (quality-gate, #242).
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -127,3 +129,24 @@ jobs:
             scope="${BASE_SHA}..${HEAD_SHA}"
           fi
           "$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts="--diff-merges=first-parent $scope" .
+
+  # Job zbiorczy (#242): jedna kontrola wymagana przez `main`. Zielony tylko, gdy każdy job z listy wymaganych ma wynik
+  # `success` (pominięty, anulowany i brakujący dają czerwony); lista jest w scripts/quality/quality-gate.js, a test
+  # pilnuje jej zgodności z tym plikiem. `needs` działa tylko w obrębie tego workflow, więc nowe joby kontrolne
+  # (np. mutation, #254) dopisujemy tutaj. Ochronę `main` (wymaganie `quality-gate` zamiast `validate` i `secret-scan`)
+  # zmienia właściciel, po zielonym przebiegu na gałęzi próbnej.
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs: [validate, secret-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Evaluate required jobs
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: node scripts/quality/quality-gate.js
