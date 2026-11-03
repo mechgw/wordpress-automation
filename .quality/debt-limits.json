@@ -7,7 +7,9 @@
       ],
       "sourceType": "script",
       "keyMode": "global",
-      "limits": {}
+      "limits": {
+        "complexity": 12
+      }
     },
     "scripts": {
       "files": [
@@ -15,7 +17,9 @@
       ],
       "sourceType": "commonjs",
       "keyMode": "file",
-      "limits": {}
+      "limits": {
+        "complexity": 12
+      }
     }
   }
 }

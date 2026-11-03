@@ -4,6 +4,175 @@
     "eslint": "10.14.0",
     "espree": "11.2.0"
   },
-  "functions": {},
+  "functions": {
+    "scripts::scripts/quality/coverage-gate.js::changedLines": {
+      "hash": "3f5ed544d7a421f4cd8b75f216f125ae8d69cd66",
+      "complexity": 16
+    },
+    "scripts::scripts/quality/coverage-gate.js::main": {
+      "hash": "3844425c937c4bf8970eff11bc956c2f7a58c305",
+      "complexity": 21
+    },
+    "scripts::scripts/quality/debt-ratchet.js::analyseScope": {
+      "hash": "9ad5442af30d0bd0835839ae635ac4846aac52a2",
+      "complexity": 13
+    },
+    "scripts::scripts/quality/debt-ratchet.js::compare": {
+      "hash": "de2bbda6f1d25d8fd385b9bb833ee19b34fe499e",
+      "complexity": 31
+    },
+    "scripts::scripts/quality/debt-ratchet.js::compareWithBase": {
+      "hash": "c1fe345483cb404d564997f095749f7aad4ca69e",
+      "complexity": 27
+    },
+    "scripts::scripts/quality/debt-ratchet.js::main": {
+      "hash": "8d89342f6876a8ec38ed743f621d926d0405a49b",
+      "complexity": 14
+    },
+    "scripts::scripts/quality/debt-ratchet.js::measure": {
+      "hash": "ce7bb130b822989ad7660d53c309e7d5b5953fb0",
+      "complexity": 17
+    },
+    "scripts::scripts/quality/debt-ratchet.js::validateBaseline": {
+      "hash": "f3ff2946d5ede09b57256e40c76bf652b113bf56",
+      "complexity": 16
+    },
+    "scripts::scripts/quality/debt-ratchet.js::validateLimits": {
+      "hash": "c759ce8d6e0572ae5768fc908b8b896d0acd4c86",
+      "complexity": 16
+    },
+    "scripts::scripts/quality/issue-audit-gate.js::main": {
+      "hash": "c9ecb39e45e973d8e50e8f93ceb3494367893df5",
+      "complexity": 18
+    },
+    "scripts::scripts/quality/issue-audit-gate.js::reconcile": {
+      "hash": "c9e4fa1b4b34c3b67d47011604c704720e3afb98",
+      "complexity": 14
+    },
+    "scripts::scripts/quality/issue-audit-gate.js::reconcileTriage": {
+      "hash": "3a41e3a87acdb7c9ff42198ee2cb544e5547a61e",
+      "complexity": 15
+    },
+    "scripts::scripts/quality/review-ack.js::evaluate": {
+      "hash": "1f59ad23f42f5487f172d425d705a1cd955ef4de",
+      "complexity": 13
+    },
+    "src::appendImportLog_": {
+      "hash": "caaf1ea393787ae3ef6f7781b14d21d7359619e2",
+      "complexity": 14
+    },
+    "src::classifyRecrawl_": {
+      "hash": "02e549af0748fe73220bcf4400b78f038782a191",
+      "complexity": 16
+    },
+    "src::createPageDraft_": {
+      "hash": "fab087a73874f4871aa2927145e97988e1ea3067",
+      "complexity": 20
+    },
+    "src::cruxRequest_": {
+      "hash": "4bdd1a85ca65d902fc37958d00ea4fcee877c05b",
+      "complexity": 15
+    },
+    "src::findSnapshot_": {
+      "hash": "7b400a3646019d5c481ce1cc480b708412ba0c00",
+      "complexity": 21
+    },
+    "src::importAnomaly_": {
+      "hash": "900b40618213809d9765fceac314ed41c3c476ee",
+      "complexity": 13
+    },
+    "src::prepareGlobalFooterLoader>#81d5404b": {
+      "hash": "81d5404b7819601107439fe277f797c7cbc3d9a5",
+      "complexity": 14
+    },
+    "src::prepareOrderAnalyticsBridge>#0d3814e4": {
+      "hash": "0d3814e4f6e3dd7eae389229ef03f498a97cad4c",
+      "complexity": 17
+    },
+    "src::processOneWpCommand_": {
+      "hash": "6eadb6c7ae210bcae9b0fe6d57759046f7eb7159",
+      "complexity": 24
+    },
+    "src::psiLcpNode_": {
+      "hash": "cfa722eccad022d7320176b9af23f1dea5ee3225",
+      "complexity": 14
+    },
+    "src::publishPage_": {
+      "hash": "2d519de2e526cb6317ae02c3812abf184a9d5c70",
+      "complexity": 20
+    },
+    "src::recordImportRunLocked_": {
+      "hash": "3560aca1d079b07e6d6d590f5cb71eb6a1572285",
+      "complexity": 14
+    },
+    "src::refreshRecrawlQueue_>#7f7a7181": {
+      "hash": "7f7a71810d37bd91ce2a7f0b3fe904ce782435fb",
+      "complexity": 21
+    },
+    "src::replaceGa4Range_": {
+      "hash": "470f1ab675a5ee73ccd5ceb79a4464cb90556a39",
+      "complexity": 14
+    },
+    "src::replacePageContentText_": {
+      "hash": "bcbca9e64002072f6a7095b4a1973d07e60353d4",
+      "complexity": 14
+    },
+    "src::restoreSnapshot_": {
+      "hash": "011a311de425d3ba188a115f6ffaefc6ffe5964f",
+      "complexity": 15
+    },
+    "src::runFreshnessGuard_>#86b276b6": {
+      "hash": "86b276b673ea17e5f3cf093f4b538f53687d19d5",
+      "complexity": 18
+    },
+    "src::runPsiMeasurement_": {
+      "hash": "5ff7adca8c5b96004abea767553a6300b473834d",
+      "complexity": 18
+    },
+    "src::runSeoLiveCheck_>#1a1fe1fb": {
+      "hash": "1a1fe1fb8032471582e6bc27a0029d4312b0472c",
+      "complexity": 20
+    },
+    "src::saveCodeSnippetSnapshot_": {
+      "hash": "ea8b3183beed0c8fcc4875d222779ad3eeb3faf8",
+      "complexity": 20
+    },
+    "src::saveMediaResult_": {
+      "hash": "6c1a8ec20fdb504d38d4b8ea4268a80d87b732ad",
+      "complexity": 15
+    },
+    "src::savePageLayoutResult_": {
+      "hash": "318fbaef025a8cdced1c6b9015ca32162dc8ee9e",
+      "complexity": 23
+    },
+    "src::seoLiveCompare_": {
+      "hash": "eff68858f3ade15fde3a0b829d97e53f8b4b3880",
+      "complexity": 20
+    },
+    "src::sitemapRow_": {
+      "hash": "d71773d0912058847ba7a20356c1e29aec501773",
+      "complexity": 17
+    },
+    "src::takeOverPendingRuns_>#2698a1d6": {
+      "hash": "2698a1d6cc0a546a2700a81acb7cc0ea8885f543",
+      "complexity": 22
+    },
+    "src::updateImportIncident_": {
+      "hash": "6c183c48ba9bc229e213e22dd9af20a89a052b5e",
+      "complexity": 28
+    },
+    "src::updateRankMathField_": {
+      "hash": "9d1e59a1ce186cf3e73f75b8a20a5ecb0bb98001",
+      "complexity": 19
+    },
+    "src::urlInspectionRow_": {
+      "hash": "d84f976e373ec33aeecfe89c3ec24adfc252f689",
+      "complexity": 15
+    },
+    "src::verifyRobotsOnPage_": {
+      "hash": "b32552c3dd20f3416c1203bb55407ed429c57593",
+      "complexity": 13
+    }
+  },
   "files": {}
 }

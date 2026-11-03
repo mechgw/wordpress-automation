@@ -1356,3 +1356,26 @@ describe('#240: uwagi recenzji Codexa', () => {
     assert.deepEqual(reds('INNY'), ['new-entry']);
   });
 });
+
+describe('#243: limit złożoności cyklomatycznej funkcji (12)', () => {
+  const REPO = path.join(__dirname, '..');
+  const readJson = rel => JSON.parse(fs.readFileSync(path.join(REPO, rel), 'utf8'));
+
+  test('próg 12 jest zapisany tylko w pliku limitów, dla obu zakresów, i plik limitów jest poprawny', () => {
+    const limits = ratchet.validateLimits(readJson('.quality/debt-limits.json'));
+    assert.equal(limits.scopes.src.limits.complexity, 12);
+    assert.equal(limits.scopes.scripts.limits.complexity, 12);
+    for (const rel of ['.github/workflows/ci.yml', '.githooks/pre-commit']) {
+      assert.doesNotMatch(fs.readFileSync(path.join(REPO, rel), 'utf8'), /complexity\s*[:=]\s*\d+|max-complexity|--max\b/, `${rel} nie powinien powielać progu`);
+    }
+  });
+
+  test('kontrola graniczna: funkcja o złożoności 12 przechodzi, o złożoności 13 jest zgłoszona', async () => {
+    const ifs = n => Array.from({ length: n }, (_, i) => `  if (a === ${i}) { return ${i}; }`);
+    const fn = (name, branches) => lines(`function ${name}(a) {`, ...ifs(branches), '  return -1;', '}');
+    const root = makeRoot({ 'src/Edge.gs': fn('naProgu', 11) + fn('ponad', 12) });
+    const cur = await ratchet.measure(root, readJson('.quality/debt-limits.json'));
+    assert.deepEqual(Object.keys(cur.functions), ['src::ponad']);
+    assert.equal(cur.functions['src::ponad'].metrics.complexity, 13);
+  });
+});
