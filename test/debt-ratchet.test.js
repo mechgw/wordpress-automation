@@ -1322,4 +1322,34 @@ describe('#240: uwagi recenzji Codexa', () => {
       assert.deepEqual(redCodes(ratchet.compare({ current, baseline, limits: LIM, base: old })), []);
     });
   });
+
+  test('skrót funkcji obejmuje parametry: dopisanie parametru zmienia skrót, zmiana tylko komentarza nie', () => {
+    const hashOf = source => ratchet.listFunctions(source, 'script')[0].hash;
+    assert.notEqual(hashOf('function f(a) { return a; }'), hashOf('function f(a, b, c) { return a; }'));
+    assert.equal(hashOf('function f(a) { return a; }'), hashOf('function f(a /* x */) { return a; } // y'));
+  });
+
+  test('miara params wprowadzona w PR razem z dopisanymi parametrami: wpis dla zmienionej funkcji jest czerwony', async () => {
+    const LIMITS_EMPTY = JSON.stringify(limitsOf({}, {}), null, 2);
+    const root = makeRoot({ '.quality/debt-baseline.json': '{ "version": 1, "functions": {}, "files": {} }', '.quality/debt-limits.json': LIMITS_EMPTY, 'src/A.gs': 'function f(a) { return a; }\n' });
+    git(root, 'init', '-q', '-b', 'main');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'baza');
+    writeFiles(root, { '.quality/debt-limits.json': JSON.stringify(limitsOf({ params: 2 }, {}), null, 2), 'src/A.gs': 'function f(a, b, c) { return a; }\n' });
+    await ratchet.main([`--root=${root}`, 'write-baseline'], collect());
+    const io = collect();
+    const code = await ratchet.main([`--root=${root}`, '--base=main'], io);
+    assert.equal(code, 1);
+    assert.ok(io.out.some(l => l.startsWith('[debt-ratchet] RED new-entry src::f: nowy wpis params=3')), io.out.join('\n'));
+  });
+
+  test('przeniesienie wpisu wymaga, by funkcja pod nowym kluczem miała w kodzie ten sam skrót', () => {
+    const LIM = limitsOf({ complexity: 10 }, {});
+    const old = { ref: 'main', baselineMissing: false, baseline: { version: 1, functions: { 'src::stara': { hash: 'H', complexity: 20 } }, files: {} }, limits: LIM, hashes: {}, fileHashes: {} };
+    const baseline = { version: 1, functions: { 'src::nowa': { hash: 'H', complexity: 20 } }, files: {} };
+    const at = hash => ({ functions: { 'src::nowa': { hash, file: 'src/A.gs', line: 1, metrics: { complexity: 20 } } }, allKeys: { 'src::nowa': hash }, files: {}, conflicts: [] });
+    const reds = hash => ratchet.compare({ current: at(hash), baseline, limits: LIM, base: old }).findings.filter(f => f.level === 'red').map(f => f.code);
+    assert.deepEqual(reds('H'), []);
+    assert.deepEqual(reds('INNY'), ['new-entry']);
+  });
 });

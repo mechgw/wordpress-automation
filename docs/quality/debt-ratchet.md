@@ -53,7 +53,7 @@ klucza dochodzi ścieżka pliku. Dalej:
 - identyczne klucze w jednym miejscu dostają sufiks `~2`, `~3` w kolejności położenia; funkcje o tej samej nazwie
   i różnych ciałach są dodatkowo zgłaszane jako `key-conflict` (informacja).
 
-Skrót to SHA-1 z AST ciała bez pozycji (`espree`, wersja przypięta lockiem, jawna zależność deweloperska).
+Skrót to SHA-1 z AST parametrów i ciała bez pozycji (`espree`, wersja przypięta lockiem, jawna zależność deweloperska).
 Komentarze, odstępy i położenie go nie zmieniają. **Zmiana wersji `espree` albo ESLint to migracja bazy** (patrz niżej).
 
 ## Reguły
@@ -82,7 +82,7 @@ dozwolona tylko gdy:
 1. na `ref` nie ma bazy (jednorazowy import; silnik pisze `INFO import`), albo
 2. miara jest **nowa lub zaostrzona w tym PR** (porównanie limitów z `ref`) **i** funkcja (plik) jest niezmieniona
    względem `ref`: ten sam skrót w bazie, na `ref` i w bieżącym kodzie, albo
-3. wpis jest **przeniesieniem** istniejącego wpisu pod nowy klucz (ten sam skrót, stary klucz usunięty, wartość nie
+3. wpis jest **przeniesieniem** istniejącego wpisu pod nowy klucz (ten sam skrót we wpisie i w kodzie, stary klucz usunięty, wartość nie
    większa); każdy stary wpis przenosi się najwyżej raz, więc kopie usuniętej funkcji pod nowymi nazwami nie powielają długu.
 
 Czyli nowa funkcja ponad limit z dopisanym wpisem jest czerwona, podobnie funkcja zmieniona w PR, która przy

@@ -173,7 +173,8 @@ const astReplacer = (key, value) => {
   if (key === 'range' || key === 'start' || key === 'end') return undefined; // `loc` zawiera tylko `start` i `end`
   return typeof value === 'bigint' ? value.toString() : value;
 };
-const bodyHash = body => sha1(JSON.stringify(body, astReplacer));
+// Skrót obejmuje parametry i ciało: dopisanie parametru zmienia funkcję (miara `params`), więc nie jest „niezmieniona”.
+const functionHash = node => sha1(JSON.stringify({ params: node.params, body: node.body }, astReplacer));
 
 /** Wszystkie funkcje pliku z surowym kluczem (bez przedrostka zakresu i bez sufiksu powtórzeń). */
 function listFunctions(source, sourceType) {
@@ -185,7 +186,7 @@ function listFunctions(source, sourceType) {
     let next = chain;
     if (FUNCTION_TYPES.has(node.type)) {
       const name = functionName(node, parent);
-      const hash = bodyHash(node.body);
+      const hash = functionHash(node);
       // ESLint raportuje metody i właściwości od początku definicji (klucza), nie od nawiasu funkcji.
       const head = parent.value === node ? parent : node; // metoda, właściwość albo pole klasy
       out.push({ name, hash, range: [head.range[0], node.range[1]], line: node.loc.start.line, rawKey: chain.concat(name || `#${hash.slice(0, 8)}`).join('>') });
@@ -500,7 +501,7 @@ function introduced(limits, base, scopeId, metric) {
 /**
  * Dług nie wchodzi przez dopisanie wpisu. Nowa para (klucz, miara) jest dozwolona tylko dla miary wprowadzonej lub
  * zaostrzonej w tym PR i tylko dla funkcji (pliku) niezmienionej względem `main` (ten sam skrót), albo jako
- * przeniesienie istniejącego wpisu pod nowy klucz. Wzrost wpisu względem `main` jest czerwony; wyjątek: migracja po
+ * przeniesienie istniejącego wpisu pod nowy klucz funkcji o tym samym skrócie w kodzie. Wzrost wpisu względem `main` jest czerwony; wyjątek: migracja po
  * zmianie wersji narzędzia, z uzasadnieniem, dla funkcji niezmienionej (ten sam skrót we wpisie, na `main` i w kodzie).
  * Wpis stanu bazowego przenosi się najwyżej raz: kopie tej samej funkcji pod nowymi nazwami dłużej nie powielają długu.
  */
@@ -519,7 +520,7 @@ function compareWithBase({ baseline, limits, base, current, red }) {
         continue;
       }
       const unchanged = introduced(limits, base, scopeOfKey(key), metric) && base.hashes[key] === entry.hash && current.allKeys[key] === entry.hash;
-      const source = unchanged ? null : Object.entries(oldFunctions).find(([k, e]) => !claimed.has(`${k}|${metric}`) && !(k in baseline.functions) && e.hash === entry.hash && e[metric] >= entry[metric]);
+      const source = unchanged ? null : Object.entries(oldFunctions).find(([k, e]) => !claimed.has(`${k}|${metric}`) && !(k in baseline.functions) && e.hash === entry.hash && e[metric] >= entry[metric] && current.allKeys[key] === entry.hash);
       if (source) claimed.add(`${source[0]}|${metric}`);
       if (!unchanged && !source) red('new-entry', key, `nowy wpis ${metric}=${entry[metric]} względem ${base.ref}: dług nie wchodzi przez dopisanie wpisu (nowa lub zmieniona funkcja musi mieścić się w limicie)`);
     }
