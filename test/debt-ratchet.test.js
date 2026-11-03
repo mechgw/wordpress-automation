@@ -1243,11 +1243,14 @@ describe('#240: mutacje, runda 2: położenia, zakresy i wyjście programu', () 
     }
   });
 
-  test('git nie przekazuje wejścia ani nie przechwytuje stderr w błędzie (stderr wyciszony)', () => {
+  test('git: wejście i stderr są wyłączone (`ignore`), standardowe wyjście wraca jako napis', () => {
     const root = makeRoot({ 'a.txt': 'x' });
     git(root, 'init', '-q', '-b', 'main');
-    assert.throws(() => ratchet.git(root, ['show', 'main:nie-ma-takiego']), e => e.stderr === null || e.stderr === undefined);
-    assert.equal(typeof ratchet.git(root, ['rev-parse', '--git-dir']), 'string');
+    // `ignore` daje `null` w polach błędu; pusty napis w tablicy `stdio` dałby `undefined` (inny tryb niż udokumentowany)
+    assert.throws(() => ratchet.git(root, ['show', 'main:nie-ma-takiego']), e => e.stderr === null && e.stdout === '');
+    const out = ratchet.git(root, ['rev-parse', '--git-dir']);
+    assert.equal(typeof out, 'string');
+    assert.equal(out.trim(), '.git');
   });
 
   test('podsumowanie liczy pliki ponad limit', async () => {
