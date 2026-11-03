@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # ready_for_review: po zmianie z Draft na Ready powstaje świeży przebieg na bieżącym HEAD (quality-gate, #242).
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -60,6 +62,22 @@ jobs:
       - name: Lint Apps Script sources
         run: npm run lint
 
+      # Zapadka długu rozmiaru i złożoności (#240): dług może tylko maleć. W tym kroku tylko raport
+      # (nie blokuje); miary dołączają osobne zgłoszenia, blokada włącza się osobnym PR.
+      # Baza z PR jest porównywana ze stanem bazowym PR (pełna historia z fetch-depth: 0).
+      - name: Debt ratchet (report)
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            node scripts/quality/debt-ratchet.js --mode=report --base="$BASE_SHA"
+          else
+            node scripts/quality/debt-ratchet.js --mode=report --base=none
+          fi
+
       # Unit tests load the .gs files into a VM with stubbed Google services
       # (see test/helpers/gas.js). The gate then enforces per-file thresholds
       # (.quality/coverage-policy.json) and 100% coverage of the *.gs lines
@@ -84,7 +102,51 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v3
+      # gitleaks-action w organizacji wymaga licencji (GITLEAKS_LICENSE); sam skaner jej nie wymaga.
+      # Wersja, SHA-256 i oba kroki jak w CityCouriers/nexus (.github/workflows/secret-scan.yml)
+      # i CityCouriers/tools (`[tool.gate.gitleaks]`), zgodne z gitleaks_8.30.1_checksums.txt wydania.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+
+      - name: Gitleaks
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Bez --first-parent i --no-merges, bo pomijają commity boczne i zmiany w samym merge'u.
+          # --diff-merges=first-parent pokazuje merge wobec pierwszego rodzica, także rozwiązanie konfliktu.
+          scope=--all
+          if [ "$EVENT_NAME" = pull_request ]; then
+            scope="${BASE_SHA}..${HEAD_SHA}"
+          fi
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts="--diff-merges=first-parent $scope" .
+
+  # Job zbiorczy (#242): jedna kontrola wymagana przez `main`. Zielony tylko, gdy każdy job z listy wymaganych ma wynik
+  # `success` (pominięty, anulowany i brakujący dają czerwony); lista jest w scripts/quality/quality-gate.js, a test
+  # pilnuje jej zgodności z tym plikiem. `needs` działa tylko w obrębie tego workflow, więc nowe joby kontrolne
+  # (np. mutation, #254) dopisujemy tutaj. Ochronę `main` (wymaganie `quality-gate` zamiast `validate` i `secret-scan`)
+  # zmienia właściciel, po zielonym przebiegu na gałęzi próbnej.
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs: [validate, secret-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Evaluate required jobs
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: node scripts/quality/quality-gate.js

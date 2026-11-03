@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "scopes": {
+    "src": {
+      "files": [
+        "src/*.gs"
+      ],
+      "sourceType": "script",
+      "keyMode": "global",
+      "limits": {
+        "complexity": 12,
+        "lines": 40,
+        "fileLines": 400
+      }
+    },
+    "scripts": {
+      "files": [
+        "scripts/quality/*.js"
+      ],
+      "sourceType": "commonjs",
+      "keyMode": "file",
+      "limits": {
+        "complexity": 12,
+        "lines": 40,
+        "fileLines": 400
+      }
+    }
+  }
+}

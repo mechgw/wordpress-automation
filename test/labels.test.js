@@ -10,7 +10,7 @@ const manifest = JSON.parse(
 );
 
 test('label manifest targets this repository and never prunes implicitly', () => {
-  assert.equal(manifest.repo, 'mechgw/wordpress-automation');
+  assert.equal(manifest.repo, 'CityCouriers/wordpress-automation');
   assert.equal(manifest.prune, false);
   assert.ok(Array.isArray(manifest.labels));
   assert.ok(manifest.labels.length > 0);

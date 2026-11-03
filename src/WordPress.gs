@@ -1581,7 +1581,7 @@ function replacePageContentText_(command) {
     ? String(before.content.raw)
     : '';
 
-  const occurrences = content.split(findText).length - 1;
+  const occurrences = countOverlappingOccurrences_(content, findText);
   if (occurrences !== 1) {
     throw new Error(
       'Nie wykonano podmiany. Fragment musi występować dokładnie raz; znaleziono: ' +
@@ -1590,7 +1590,9 @@ function replacePageContentText_(command) {
   }
 
   const snapshot = saveSnapshot_(before, command.id);
-  const updatedContent = content.replace(findText, replacement);
+  // Nie String.replace: przy argumencie tekstowym interpretuje on $&, $', $$ w zamienniku.
+  const index = content.indexOf(findText);
+  const updatedContent = content.slice(0, index) + replacement + content.slice(index + findText.length);
 
   const response = wpFetch_(
     '/wp-json/wp/v2/pages/' + encodeURIComponent(command.target),
@@ -1609,9 +1611,11 @@ function replacePageContentText_(command) {
     ? String(after.content.raw)
     : '';
 
-  if (!afterContent.includes(replacement) || afterContent.includes(findText)) {
+  if (!replacementConfirmed_(afterContent, updatedContent, findText, replacement)) {
     throw new Error(
-      'WordPress odpowiedział poprawnie, ale odczyt kontrolny nie potwierdził dokładnej podmiany treści.'
+      'WordPress odpowiedział poprawnie, ale odczyt kontrolny nie potwierdził dokładnej podmiany treści. ' +
+      'Zapis mógł się udać (np. filtr WordPressa zmienił treść): sprawdź stronę ID ' + command.target +
+      ' i nie uruchamiaj polecenia ponownie na ślepo, bo zamiennik mógłby trafić na stronę drugi raz.'
     );
   }
 
@@ -1622,6 +1626,38 @@ function replacePageContentText_(command) {
     '. Snapshot przed zmianą: ' + snapshot.snapshotId + snapshotWarningText_(snapshot);
 
   return saved;
+}
+
+/**
+ * Liczba wystąpień z nakładaniem (krok 1 znak): `aa` w `aaa` to 2, a nie 1,
+ * bo podmiana takiego fragmentu byłaby niejednoznaczna.
+ */
+function countOverlappingOccurrences_(text, fragment) {
+  let count = 0;
+  let from = text.indexOf(fragment);
+  while (from !== -1) {
+    count++;
+    from = text.indexOf(fragment, from + 1);
+  }
+  return count;
+}
+
+/**
+ * Czy odczyt po zapisie potwierdza podmianę (#237).
+ *
+ * Dokładna równość z oczekiwaną treścią (po normalizacji końców linii) potwierdza
+ * zawsze. Gdy zamiennik zawiera szukany tekst, tylko ona jest rozstrzygająca: strona
+ * bez zmian i strona po zapisie mają wtedy to samo wystąpienie szukanego tekstu, a
+ * dotychczasowa kontrola poniżej jest wtedy zawsze fałszywa (zamiennik w odczycie
+ * oznacza też szukany tekst w odczycie). Dla zwykłej podmiany zostaje ta dotychczasowa
+ * kontrola (zamiennik jest, szukanego tekstu nie ma), żeby filtr WordPressa zmieniający
+ * niezwiązany fragment strony nie dawał fałszywego błędu.
+ */
+function replacementConfirmed_(afterContent, updatedContent, findText, replacement) {
+  if (normalizeContentForCompare_(afterContent) === normalizeContentForCompare_(updatedContent)) {
+    return true;
+  }
+  return afterContent.includes(replacement) && !afterContent.includes(findText);
 }
 
 function saveSnapshot_(page, commandId) {
