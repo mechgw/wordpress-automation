@@ -1,0 +1,231 @@
+'use strict';
+
+/**
+ * #275: funkcje znaczników wykonań w pełni zabijają mutanty Strykera.
+ *
+ * `RunMarkers.gs` (znaczniki przeniesione ze Status.gs plus adnotacja wyjątku) ma
+ * zbiegłe mutanty z pilotażu #234: filtr prefiksu, granica wieku, sortowanie,
+ * zwolnienie blokady, komunikaty logu, redakcja wiadomości. Testy wołają funkcje
+ * wprost i sprawdzają dokładne wyniki.
+ */
+
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const { loadProject, plain } = require('./helpers/gas');
+
+const MIN = 60 * 1000;
+const STALE = 7 * MIN;
+const NOW = Date.parse('2026-10-20T10:00:00Z');
+const projekt = () => loadProject({});
+const znacznik = (gas, nazwa, job, wiekMs, extra = {}) => {
+  gas.$properties[nazwa] = JSON.stringify(Object.assign({ job, runId: nazwa, startedAt: new Date(NOW - wiekMs).toISOString(), trigger: true }, extra));
+};
+const logger = gas => {
+  const wpisy = [];
+  gas.Logger = { log: m => wpisy.push(m) };
+  return wpisy;
+};
+const nazwy = lista => plain(lista.map(f => f.name));
+const wywolaniaBlokady = gas => plain(gas.$lock.filter(c => Array.isArray(c)));
+
+describe('#275: abandonedRunMarkers_', () => {
+  test('tylko właściwości z prefiksem RUNNING_; inne z podobną treścią są ignorowane', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_a', 'GSC', 10 * MIN);
+    znacznik(gas, 'INNA_WLASCIWOSC', 'GSC', 10 * MIN);
+    znacznik(gas, 'XRUNNING_GSC_b', 'GSC', 10 * MIN);
+
+    assert.deepEqual(nazwy(gas.abandonedRunMarkers_('GSC', NOW)), ['RUNNING_GSC_a']);
+  });
+
+  test('nieczytelna wartość i znacznik innego zadania nie są zwracane', () => {
+    const gas = projekt();
+    gas.$properties.RUNNING_GSC_zly = '{niepoprawny json';
+    znacznik(gas, 'RUNNING_GA4_a', 'GA4', 10 * MIN);
+    znacznik(gas, 'RUNNING_GSC_ok', 'GSC', 10 * MIN);
+
+    assert.deepEqual(nazwy(gas.abandonedRunMarkers_('GSC', NOW)), ['RUNNING_GSC_ok']);
+  });
+
+  test('wiek: dokładnie 7 minut jeszcze żyje, 7 minut i milisekunda to porzucony', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_granica', 'GSC', STALE);
+    znacznik(gas, 'RUNNING_GSC_starszy', 'GSC', STALE + 1);
+
+    assert.deepEqual(nazwy(gas.abandonedRunMarkers_('GSC', NOW)), ['RUNNING_GSC_starszy']);
+  });
+
+  test('od najstarszego, niezależnie od kolejności właściwości', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_srodek', 'GSC', 20 * MIN);
+    znacznik(gas, 'RUNNING_GSC_najnowszy', 'GSC', 10 * MIN);
+    znacznik(gas, 'RUNNING_GSC_najstarszy', 'GSC', 30 * MIN);
+
+    assert.deepEqual(nazwy(gas.abandonedRunMarkers_('GSC', NOW)), ['RUNNING_GSC_najstarszy', 'RUNNING_GSC_srodek', 'RUNNING_GSC_najnowszy']);
+  });
+});
+
+describe('#275: reclaimAbandonedRuns_', () => {
+  test('bez porzuconych znaczników nie bierze blokady', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_zywy', 'GSC', MIN);
+
+    assert.deepEqual(plain(gas.reclaimAbandonedRuns_('GSC', NOW)), []);
+    assert.deepEqual(wywolaniaBlokady(gas), []);
+  });
+
+  test('bez trzymanej blokady: bierze ją na 3 s, czyta i zwalnia', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_a', 'GSC', 10 * MIN);
+
+    const out = gas.reclaimAbandonedRuns_('GSC', NOW);
+
+    assert.deepEqual(nazwy(out), ['RUNNING_GSC_a']);
+    assert.deepEqual(wywolaniaBlokady(gas), [['tryLock', 3000], ['releaseLock']]);
+  });
+
+  test('blokada już trzymana przez to wykonanie: nie bierze jej ponownie i nie zwalnia', () => {
+    const gas = projekt();
+    znacznik(gas, 'RUNNING_GSC_a', 'GSC', 10 * MIN);
+    gas.$lock.held = true;
+
+    const out = gas.reclaimAbandonedRuns_('GSC', NOW);
+
+    assert.deepEqual(nazwy(out), ['RUNNING_GSC_a']);
+    assert.deepEqual(wywolaniaBlokady(gas), []);
+    assert.equal(gas.$lock.held, true);
+  });
+
+  test('blokada zajęta przez inne wykonanie: pusta lista, bez zwalniania', () => {
+    const gas = loadProject({ lockHeld: true });
+    znacznik(gas, 'RUNNING_GSC_a', 'GSC', 10 * MIN);
+
+    assert.deepEqual(plain(gas.reclaimAbandonedRuns_('GSC', NOW)), []);
+    assert.deepEqual(wywolaniaBlokady(gas), [['tryLock', 3000]]);
+  });
+});
+
+describe('#275: settleAbandonedRuns_ i abandonedRunNote_', () => {
+  const znaleziony = nazwa => ({ name: nazwa, marker: { job: 'GSC', startedAt: new Date(NOW - 10 * MIN).toISOString(), trigger: true } });
+
+  test('błąd zapisu śladu zostawia znacznik i loguje wiadomość wyjątku', () => {
+    const gas = projekt();
+    const wpisy = logger(gas);
+    gas.$properties.RUNNING_GSC_a = '{}';
+
+    const out = gas.settleAbandonedRuns_([znaleziony('RUNNING_GSC_a')], () => { throw new Error('boom'); });
+
+    assert.deepEqual(plain(out), []);
+    assert.ok('RUNNING_GSC_a' in gas.$properties, 'znacznik zostaje');
+    assert.deepEqual(wpisy, ['Porzucony znacznik RUNNING_GSC_a czeka na kolejny odzysk: boom']);
+  });
+
+  test('wyjątek bez message (napis, null, obiekt) jest logowany w całości albo przez message', () => {
+    const gas = projekt();
+    const wpisy = logger(gas);
+    gas.$properties.RUNNING_GSC_a = '{}';
+    const f = znaleziony('RUNNING_GSC_a');
+
+    gas.settleAbandonedRuns_([f], () => { throw 'napis'; });
+    gas.settleAbandonedRuns_([f], () => { throw null; });
+    gas.settleAbandonedRuns_([f], () => { throw { message: 'wiadomosc' }; });
+
+    assert.deepEqual(wpisy, [
+      'Porzucony znacznik RUNNING_GSC_a czeka na kolejny odzysk: napis',
+      'Porzucony znacznik RUNNING_GSC_a czeka na kolejny odzysk: null',
+      'Porzucony znacznik RUNNING_GSC_a czeka na kolejny odzysk: wiadomosc'
+    ]);
+  });
+
+  test('abandonedRunNote_: adnotacja bez tekstu (inny typ) nie udaje przyczyny', () => {
+    const gas = projekt();
+    const start = new Date(NOW - 10 * MIN).toISOString();
+
+    assert.match(gas.abandonedRunNote_({ startedAt: start, failure: {} }), /możliwe przerwanie przez limit czasu/);
+    assert.match(gas.abandonedRunNote_({ startedAt: start, failure: { message: 42 } }), /możliwe przerwanie przez limit czasu/);
+    assert.match(gas.abandonedRunNote_({ startedAt: start, failure: { message: 'przyczyna' } }), /obsługa wyniku przerwana wyjątkiem: przyczyna; praca zakończona/);
+  });
+});
+
+describe('#275: markerFailureText_ - redakcja i ucięcie', () => {
+  test('znak DEL jest zastępowany spacją', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('a\u007fb')), 'a b');
+  });
+
+  test('spacje na początku nie liczą się do limitu 200 znaków', () => {
+    const gas = projekt();
+
+    const baza = 'ab '.repeat(100);
+
+    const tekst = gas.markerFailureText_(new Error(' ' + baza));
+
+    assert.equal(tekst, baza.slice(0, 200).trim());
+    assert.equal(tekst.length, 200, 'bez spacji z przodu wszystkie 200 znaków limitu to treść');
+  });
+
+  test('para nazwa = wartość ze spacjami wokół znaku równości', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('token = abc123 koniec')), 'token=[ukryto] koniec');
+    assert.equal(gas.markerFailureText_(new Error('password : tajne1 koniec')), 'password=[ukryto] koniec');
+  });
+
+  test('adres http (bez s) z zapytaniem też jest redagowany', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('GET http://example.com/a/b?id=7&x=1 odrzucony')), 'GET http://example.com/a/b?[ukryto] odrzucony');
+    assert.equal(gas.markerFailureText_(new Error('GET https://example.com/a?id=7 odrzucony')), 'GET https://example.com/a?[ukryto] odrzucony');
+  });
+
+  test('ucięcie w środku [ukryto] usuwa niedomknięty fragment, bez śmieci na końcu', () => {
+    const gas = projekt();
+
+    const tekst = gas.markerFailureText_(new Error('ab '.repeat(63) + 'Bearer sekret'));
+
+    assert.equal(tekst, 'ab '.repeat(63) + 'Bearer');
+  });
+
+  test('całe [ukryto] mieszczące się w limicie zostaje', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('ab '.repeat(50) + 'Bearer sekret')), 'ab '.repeat(50) + 'Bearer [ukryto]');
+  });
+});
+
+describe('#275: annotateRunMarker_ - logowanie błędu zapisu', () => {
+  test('brak znacznika: loguje nazwę znacznika', () => {
+    const gas = projekt();
+    const wpisy = logger(gas);
+
+    gas.annotateRunMarker_('GSC', 'abc', new Error('x'));
+
+    assert.equal(wpisy.length, 1);
+    assert.match(wpisy[0], /^Adnotacja znacznika RUNNING_GSC_abc nie została zapisana: /);
+  });
+
+  test('błąd zapisu z wiadomością i bez: dokładny tekst', () => {
+    const gas = projekt();
+    const wpisy = logger(gas);
+    gas.$properties.RUNNING_GSC_a1 = JSON.stringify({ job: 'GSC' });
+    const rzeczywiste = gas.PropertiesService.getScriptProperties();
+    let blad = new Error('limit');
+    gas.PropertiesService.getScriptProperties = () => ({
+      getProperty: k => rzeczywiste.getProperty(k),
+      setProperty: () => { throw blad; }
+    });
+
+    gas.annotateRunMarker_('GSC', 'a1', new Error('x'));
+    blad = 'napis';
+    gas.annotateRunMarker_('GSC', 'a1', new Error('x'));
+    blad = { message: 'obiekt' };
+    gas.annotateRunMarker_('GSC', 'a1', new Error('x'));
+
+    assert.deepEqual(wpisy, [
+      'Adnotacja znacznika RUNNING_GSC_a1 nie została zapisana: limit',
+      'Adnotacja znacznika RUNNING_GSC_a1 nie została zapisana: napis',
+      'Adnotacja znacznika RUNNING_GSC_a1 nie została zapisana: obiekt'
+    ]);
+  });
+});
