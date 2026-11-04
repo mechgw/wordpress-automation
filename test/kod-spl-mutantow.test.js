@@ -241,6 +241,16 @@ describe('#286: kotwice K-L', () => {
     assert.equal(out.warning, 'K–L: zapis całej zakładki, bo kotwica w wierszu 2, a wiersz 2 należy do importowanego zakresu (2026-10-02)');
   });
 
+  test('kotwica w wierszu 2 i A2 po importowanym zakresie albo przed nim: ok', () => {
+    const gas = projekt();
+    zWzorcem(gas);
+    const po = arkusz({ formuly: [['', ''], [FK, FL]], wartosci: [['', ''], [1, 2]], a2: '2026-10-09' });
+    const przed = arkusz({ formuly: [['', ''], [FK, FL]], wartosci: [['', ''], [1, 2]], a2: '2026-09-01' });
+
+    assert.equal(gas.gscKlLayout_(po, '2026-10-02', '2026-10-03').ok, true);
+    assert.equal(gas.gscKlLayout_(przed, '2026-10-02', '2026-10-03').ok, true);
+  });
+
   test('kotwica w wierszu 2 i pusta A2: ok', () => {
     const gas = projekt();
     zWzorcem(gas);
@@ -306,6 +316,37 @@ describe('#286: importRange_', () => {
     gas.importRange_('2026-10-01', '2026-10-01', { stage: etapy() });
 
     assert.equal(gas.$fetchCalls.length, 2);
+  });
+
+  test('stronicowanie kończy się na pierwszej krótkiej stronie: API wołane raz, bez pętli bez końca', () => {
+    let wywolania = 0;
+    const ogranicz = odpowiedz => () => {
+      if (++wywolania > 6) throw new Error('stronicowanie nie kończy się');
+      return odpowiedz;
+    };
+    const gas = projekt({ fetch: ogranicz({ code: 200, json: { rows: [wiersz('2026-10-01')] } }) });
+
+    const out = plain(gas.importRange_('2026-10-01', '2026-10-01', { stage: etapy() }));
+
+    assert.equal(out.rows, 1);
+    assert.equal(wywolania, 1);
+  });
+
+  test('domyślny limit wiersza (brak w konfiguracji) to 25000: jedna krótka strona kończy import', () => {
+    let wywolania = 0;
+    const rows = [['Klucz', 'Wartość'], ['siteUrl', 'https://www.example.pl/'], ['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['status', '']];
+    const gas = loadProject({
+      sheets: { [CFG]: rows, [RAW]: { rows: [HEADER] } },
+      fetch: () => {
+        if (++wywolania > 6) throw new Error('stronicowanie nie kończy się');
+        return { code: 200, json: { rows: [wiersz('2026-10-01')] } };
+      }
+    });
+
+    gas.importRange_('2026-10-01', '2026-10-01', { stage: etapy() });
+
+    assert.equal(wywolania, 1);
+    assert.equal(JSON.parse(gas.$fetchCalls[0].params.payload).rowLimit, 25000);
   });
 
   test('odpowiedź bez wierszy: zero wierszy w wyniku i w arkuszu', () => {
