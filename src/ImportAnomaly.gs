@@ -38,17 +38,26 @@ function importAnomalySamples_(source, run, history, now) {
     )
     .sort((a, b) => a.at - b.at);
 
-  const current = importRangeKey_(run);
+  return newestPerRange_(profile, importRangeKey_(run));
+}
+
+/**
+ * Z przebiegów posortowanych rosnąco po czasie zostawia najnowszy dla każdego
+ * niepustego zakresu, pomijając zakres `current` (#180, #281); przebiegi bez
+ * zakresu liczą się każdy osobno. Wspólne dla bazy profilu i bazy źródła: ponowny
+ * import zakresu zastępuje poprzedni wynik, w obu bazach.
+ */
+function newestPerRange_(sorted, current) {
   const seen = {};
   const samples = [];
   // Od najnowszej, żeby z duplikatów zakresu została właśnie ona.
-  for (let i = profile.length - 1; i >= 0; i--) {
-    const key = profile[i].rangeKey;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const key = sorted[i].rangeKey;
     if (key) {
       if (key === current || seen[key]) continue;
       seen[key] = true;
     }
-    samples.unshift(profile[i]);
+    samples.unshift(sorted[i]);
   }
   return samples;
 }
@@ -96,7 +105,8 @@ function importAnomalyMedian_(samples, scope) {
 
 /**
  * Udane przebiegi źródła z okna retencji, tego samego typu uruchomienia (trigger
- * albo ręczny), z dowolną liczbą dni, od najstarszego (#281). Baza dla zera
+ * albo ręczny), z dowolną liczbą dni, od najstarszego, po deduplikacji po zakresie
+ * danych jak w profilu (#281). Baza dla zera
  * wierszy: przebieg uzupełniający lukę ma własny profil bez próbek, a brak danych
  * po przerwie nie przestaje być brakiem danych. Zakres bieżącego przebiegu jest
  * wykluczony, jak w profilu: ponowny import dnia, który wcześniej dał dane, nie ma
@@ -104,13 +114,10 @@ function importAnomalyMedian_(samples, scope) {
  */
 function importSourceSamples_(source, run, history, now) {
   const cutoff = importLogCutoff_(now || new Date(run.finishedAt));
-  const current = importRangeKey_(run);
-  return history
-    .filter(h =>
-      h.ok && h.source === source && h.trigger === Boolean(run.trigger) && !isNaN(h.at.getTime()) && h.at.getTime() >= cutoff &&
-      !(current && h.rangeKey === current)
-    )
+  const sorted = history
+    .filter(h => h.ok && h.source === source && h.trigger === Boolean(run.trigger) && !isNaN(h.at.getTime()) && h.at.getTime() >= cutoff)
     .sort((a, b) => a.at - b.at);
+  return newestPerRange_(sorted, importRangeKey_(run));
 }
 
 /**

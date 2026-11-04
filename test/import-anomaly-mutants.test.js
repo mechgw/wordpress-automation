@@ -95,6 +95,28 @@ describe('#281: importAnomalySamples_ i importSourceSamples_ - filtr, okno reten
   });
 });
 
+describe('#281: baza źródła dedupluje po zakresie jak baza profilu', () => {
+  const A = '2026-10-01..2026-10-01';
+  const B = '2026-10-02..2026-10-02';
+
+  test('ponowny import zakresu z zerem zastępuje wcześniejszy wynik z danymi, także w bazie źródła', () => {
+    const historia = [wpis(3 * DAY, { rows: 100, rangeKey: A, days: 2 }), wpis(2 * DAY, { rows: 0, rangeKey: A, days: 2 })];
+    const przebieg = run({ rows: 0, dataFrom: '2026-10-02', dataTo: '2026-10-02' });
+
+    assert.deepEqual(ids(gas.importSourceSamples_('GSC', przebieg, historia, now)), [0]);
+    assert.equal(gas.importAnomaly_('GSC', przebieg, historia, now), '', 'zero po zakresie, który sam ostatnio dał zero, nie alarmuje');
+  });
+
+  test('różne zakresy zostają osobno, a przebiegi bez zakresu liczą się każdy z osobna', () => {
+    const historia = [
+      wpis(5 * DAY, { rows: 1, rangeKey: A }), wpis(4 * DAY, { rows: 2, rangeKey: B }),
+      wpis(3 * DAY, { rows: 3 }), wpis(2 * DAY, { rows: 4 }), wpis(DAY, { rows: 5, rangeKey: A })
+    ];
+
+    assert.deepEqual(ids(gas.importSourceSamples_('GSC', run(), historia, now)), [2, 3, 4, 5]);
+  });
+});
+
 describe('#281: importDataClass_ i importAnomaly_ - brzegi', () => {
   test('klucz zakresu musi zaczynać się od daty', () => {
     assert.equal(gas.importDataClass_('x2026-10-05..2026-10-05'), '');
