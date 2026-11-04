@@ -106,10 +106,6 @@
       "hash": "b22274ffc0be818d221f560e2af6f11b689b3d69",
       "lines": 54
     },
-    "src::importAnomaly_": {
-      "hash": "900b40618213809d9765fceac314ed41c3c476ee",
-      "complexity": 13
-    },
     "src::importGa4Range_": {
       "hash": "0a3fcbc9b6b76d9624c3b7acc7cb5cf2a2d9b749",
       "lines": 224
@@ -354,7 +350,7 @@
       "fileLines": 929
     },
     "src/Status.gs": {
-      "fileLines": 733
+      "fileLines": 678
     },
     "src/WordPress.gs": {
       "fileLines": 1484
