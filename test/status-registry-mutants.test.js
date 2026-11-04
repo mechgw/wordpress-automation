@@ -308,13 +308,12 @@ describe('#287: odmowy blokady (pendingRuns_, recordPendingRun_, takeOverPending
     const gas = projekt();
     const at = iso(gas, 3 * MIN);
     const own = { key: 'GA4', run: { finishedAt: at, ok: true } };
-    gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: at, ok: true } });
     wpis(gas, NAZWA, at);
 
     gas.takeOverPendingRuns_(own);
 
     assert.equal(logi(gas).length, 1, 'wiersz odmowy');
-    assert.equal(rekord(gas).lastRun.ok, true);
+    assert.equal(rekord(gas).lastRun, undefined, 'rekord nie dostaje odmowy jako ostatniego przebiegu');
     assert.equal(rekord(gas).incident, undefined);
   });
 
@@ -365,6 +364,41 @@ describe('#287: odmowy blokady (pendingRuns_, recordPendingRun_, takeOverPending
     assert.equal(rekord(gas).lastRun.error, 'inny tekst', 'nowsza-lub-równa odmowa nie nadpisuje rekordu');
   });
 
+  test('niedokończone przejęcie rozpoznawane po ok=false, czasie i tekście błędu; każdy inny rekord to nie ono', () => {
+    const przypadek = przygotuj => {
+      const gas = projekt();
+      const czas = iso(gas, 3 * MIN);
+      przygotuj(gas, czas);
+      wpis(gas, NAZWA, czas);
+      gas.takeOverPendingRuns_();
+      return rekord(gas);
+    };
+
+    const dokonczone = przypadek((gas, czas) => { gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: czas, ok: false, trigger: true, error: 'odmowa', durationMs: 5 } }); });
+    assert.equal(dokonczone.lastRun.durationMs, 5, 'rekord niedokończonego przejęcia nie jest nadpisywany');
+    assert.equal(dokonczone.incident.open, true);
+
+    const udany = przypadek((gas, czas) => { gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: czas, ok: true, error: 'odmowa' } }); });
+    assert.equal(udany.lastRun.ok, true);
+    assert.equal(udany.incident, undefined);
+
+    const inny = przypadek((gas, czas) => { gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: czas, ok: false, error: 'inny tekst' } }); });
+    assert.equal(inny.lastRun.error, 'inny tekst');
+    assert.equal(inny.incident, undefined);
+  });
+
+  test('rekord starszy niż odmowa z tym samym tekstem błędu jest zastępowany odmową', () => {
+    const gas = projekt();
+    const czas = iso(gas, 3 * MIN);
+    gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: iso(gas, 60 * MIN), ok: false, error: 'odmowa', durationMs: 9 } });
+    wpis(gas, NAZWA, czas);
+
+    gas.takeOverPendingRuns_();
+
+    assert.equal(rekord(gas).lastRun.finishedAt, czas);
+    assert.equal('durationMs' in rekord(gas).lastRun, false);
+  });
+
   test('bez rekordu: odmowa zapisuje rekord i incydent z błędem', () => {
     const gas = projekt();
     wpis(gas, NAZWA, iso(gas, 3 * MIN));
@@ -390,5 +424,42 @@ describe('#287: odmowy blokady (pendingRuns_, recordPendingRun_, takeOverPending
     gas.appendImportLog_ = () => { throw 'napis'; };
     gas.takeOverPendingRuns_();
     assert.equal(wpisy[1], 'Wpis oczekujący ' + NAZWA + ' czeka na kolejne przejęcie: napis');
+  });
+});
+
+describe('#287: drobne warunki', () => {
+  test('isTriggerRun_: funkcja z polem triggerUid nie jest zdarzeniem', () => {
+    const gas = projekt();
+    const f = () => {};
+    f.triggerUid = 'x';
+
+    assert.equal(gas.isTriggerRun_(f), false);
+  });
+
+  test('isJobStale_: wiek zero nie jest nieaktualny; przyszłość i brak są', () => {
+    const gas = projekt();
+    const now = new gas.$Date('2026-10-20T10:00:00Z');
+
+    assert.equal(gas.isJobStale_('GSC', { finishedAt: now.toISOString() }, now), false);
+    assert.equal(gas.isJobStale_('GSC', { finishedAt: '2026-10-21T10:00:00Z' }, now), true);
+    assert.equal(gas.isJobStale_('GSC', null, now), true);
+  });
+
+  test('daysSince_: początek epoki liczy się jako brak (0 dni)', () => {
+    const gas = projekt();
+
+    assert.equal(gas.daysSince_('1970-01-01T00:00:00Z', new gas.$Date('2026-10-20T10:00:00Z')), 0);
+  });
+
+  test('napis "AKTYWNE - " w środku komunikatu błędu nie jest usuwany przy statusie nieaktualnym', () => {
+    const gas = projekt();
+    gas.hasImportTrigger_ = () => true;
+    const stary = new Date(Date.now() - 400 * HOUR).toISOString();
+    const rek = { lastRun: { finishedAt: stary, ok: false, error: 'AKTYWNE – tak brzmiał komunikat' }, lastOk: { finishedAt: stary, ok: true } };
+    gas.$properties.LAST_RUN_URL_INSPECTION = JSON.stringify(rek);
+    gas.$properties.LAST_IMPORT_GSC = JSON.stringify(rek);
+
+    assert.ok(gas.jobStatusText_('URL_INSPECTION', new gas.$Date()).includes(': AKTYWNE – tak brzmiał komunikat'));
+    assert.ok(gas.importStatusText_('GSC', new gas.$Date()).includes(': AKTYWNE – tak brzmiał komunikat'));
   });
 });

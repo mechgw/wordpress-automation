@@ -23,9 +23,10 @@ const LOG_HEADER = ['Czas', 'Źródło', 'Typ', 'Dni', 'Wynik', 'Wiersze', 'Czas
 function arkusz({ grid = [], formulas = [], lastRow: lastRow0 = grid.length, maxRows = 1000, maxColumns = 26, lastColumn } = {}) {
   const calls = [];
   let lastRow = lastRow0;
+  // Komórka poza wierszem to pusty napis; jawne `undefined` w wierszu zostaje `undefined`.
   const komorka = (r, c) => {
-    const v = (grid[r - 1] || [])[c - 1];
-    return v === undefined ? '' : v;
+    const wiersz = grid[r - 1];
+    return wiersz && (c - 1) in wiersz ? wiersz[c - 1] : '';
   };
   const formula = (r, c) => {
     const v = (formulas[r - 1] || [])[c - 1];
@@ -570,5 +571,66 @@ describe('#287: appendImportLog_ i importLogRangeColumnReady_', () => {
     assert.equal(gas.importLogRangeColumnReady_(zDanymi), false);
     assert.deepEqual(zDanymi.calls, []);
     assert.equal(gas.importLogRangeColumnReady_(bez), true);
+  });
+});
+
+describe('#287: rozmiary zakresów i jawne undefined w nagłówku', () => {
+  const NAGLOWEK = ['A', 'B', 'C'];
+  const zapisane = sheet => {
+    const wolane = [];
+    const oryginal = sheet.getRange;
+    sheet.getRange = (...a) => { wolane.push(a); return oryginal(...a); };
+    return wolane;
+  };
+
+  test('headerColumnsState_: kolumny z pustą etykietą są badane na zakresie o liczbie wierszy lastRow - 1', () => {
+    const gas = projekt();
+    const sheet = arkusz({ grid: [['A', '', ''], ['', 'x', ''], ['', '', ''], ['', '', '']], lastRow: 4, maxColumns: 3 });
+    const wolane = zapisane(sheet);
+
+    gas.headerColumnsState_(sheet, NAGLOWEK);
+
+    assert.deepEqual(wolane.filter(a => a[0] === 2), [[2, 2, 3, 1], [2, 3, 3, 1]]);
+  });
+
+  test('headerColumnsState_: jawne undefined i null w komórce nagłówka to pusta etykieta, nie napis', () => {
+    const gas = projekt();
+    const sheet = arkusz({ grid: [['A', undefined, null]], lastRow: 1, maxColumns: 3 });
+
+    const out = plain(gas.headerColumnsState_(sheet, NAGLOWEK));
+
+    assert.deepEqual(out.columns[1], { label: '', headerBlank: true, usedBelow: false });
+    assert.deepEqual(out.columns[2], { label: '', headerBlank: true, usedBelow: false });
+  });
+
+  test('importLogRangeColumnReady_: kolumnę pod etykietą badamy na lastRow - 1 wierszach od wiersza 2', () => {
+    const gas = projekt();
+    const sheet = arkusz({ grid: [LOG_HEADER.slice(0, 9), [], [], []], lastRow: 4, maxColumns: 10 });
+    const wolane = zapisane(sheet);
+
+    gas.importLogRangeColumnReady_(sheet);
+
+    assert.deepEqual(wolane.filter(a => a[0] === 2), [[2, 10, 3, 1]]);
+  });
+
+  test('pruneImportLog_: odczyt dat na lastRow - 1 wierszach od wiersza 2', () => {
+    const gas = projekt();
+    const sheet = arkusz({ grid: [['Czas'], [new Date()], [new Date()], [new Date()]], lastRow: 4 });
+    const wolane = zapisane(sheet);
+
+    gas.pruneImportLog_(sheet, new Date());
+
+    assert.deepEqual(wolane, [[2, 1, 3, 1]]);
+  });
+
+  test('ensureImportLogSheet_: zakładka z danymi bez nagłówka dostaje nagłówek w wierszu 1', () => {
+    const gas = projekt();
+    const sheet = arkusz({ grid: [['cudze'], ['dane']], maxColumns: 10 });
+    zRejestrem(gas, { 'IMPORT LOG': sheet });
+
+    gas.ensureImportLogSheet_();
+
+    assert.deepEqual(wywolania(sheet, 'setValues'), [['setValues', 1, 1, 1, 10, [LOG_HEADER]]]);
+    assert.deepEqual(wywolania(sheet, 'setFrozenRows'), [['setFrozenRows', 1]]);
   });
 });
