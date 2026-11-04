@@ -171,12 +171,13 @@ function gscLastDataDay_(sheet, stage, target) {
   let day = '';
   let before = '';
   let dates = 0;
+  const format = cachedFormatDate_();
   column.forEach(row => {
     // Tekst musi być datą w całości: `normalizujDate_` obcina go do 10 znaków,
     // więc „9999-12-31 notatka” udawałoby datę z przyszłości i wyłączało
     // uzupełnianie luki (PR #217).
     if (row[0] instanceof Date) dates++;
-    const date = row[0] instanceof Date ? formatujDate_(row[0]) : String(row[0]);
+    const date = row[0] instanceof Date ? format(row[0]) : String(row[0]);
     // Kształt i istnienie w kalendarzu: tekst niebędący datą nie może zostać „największą datą”.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || shiftDay_(date, 0) !== date) return;
     if (date > day) day = date;
@@ -212,13 +213,8 @@ function diagnozaDatGsc() {
   const dates = column.filter(v => v instanceof Date);
   const direct = dates.map(formatujDate_);
   stage('formatDate dla każdej daty (' + dates.length + ')');
-  const cache = {};
-  const cached = dates.map(d => {
-    const key = d.getTime();
-    if (!(key in cache)) cache[key] = formatujDate_(d);
-    return cache[key];
-  });
-  const distinct = Object.keys(cache).length;
+  const cached = dates.map(cachedFormatDate_());
+  const distinct = new Set(dates.map(d => d.getTime())).size;
   stage('formatDate z pamięcią po getTime (' + distinct + ' różnych)');
 
   const same = direct.every((v, i) => v === cached[i]);
@@ -398,8 +394,9 @@ function replaceRange_(sheet, startDate, endDate, newRows, stage) {
       .getRange(2, 1, lastRow - 1, 10)
       .getValues();
 
+    const format = cachedFormatDate_();
     keepRows = existing.filter(row => {
-      const date = normalizujDate_(row[0]);
+      const date = normalizujDate_(row[0], format);
 
       if (!date) {
         return false;
@@ -527,8 +524,9 @@ function appendGscDays_(sheet, startDate, endDate, newRows, stage) {
   const column = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().map(r => r[0]) : [];
   stage('odczyt kolumny A (' + column.length + ' wierszy)');
 
+  const format = cachedFormatDate_();
   const removed = column.map(v => {
-    const date = normalizujDate_(v);
+    const date = normalizujDate_(v, format);
     return Boolean(date) && date >= startDate && date <= endDate;
   });
   // Pętla osobno od `deleteRows` (#220): przy zerze usuwanych wierszy etap trwał
@@ -686,11 +684,15 @@ function formatujDateCzas_(date) {
   );
 }
 
-function normalizujDate_(value) {
+/**
+ * `format`: funkcja formatująca `Date` (domyślnie `formatujDate_`). Pętle po dużej
+ * kolumnie podają `cachedFormatDate_()` (#229).
+ */
+function normalizujDate_(value, format) {
   if (!value) return '';
 
   if (value instanceof Date) {
-    return formatujDate_(value);
+    return (format || formatujDate_)(value);
   }
 
   return String(value).substring(0, 10);
