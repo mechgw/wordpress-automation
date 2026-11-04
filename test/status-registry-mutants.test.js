@@ -410,6 +410,30 @@ describe('#287: odmowy blokady (pendingRuns_, recordPendingRun_, takeOverPending
     assert.equal(rekord(gas).incident.reason, 'error');
   });
 
+  test('rekord udanego przebiegu z tym samym czasem i tekstem odmowy nie dotyka komórki statusu', () => {
+    const wiersze = [['Klucz', 'Wartość'], ['propertyId', 'p'], ['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['status', '']];
+    const gas = projekt({ sheets: { 'Konfiguracja GA4': wiersze } });
+    const czas = iso(gas, 3 * MIN);
+    gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: czas, ok: true, error: 'odmowa' } });
+    wpis(gas, NAZWA, czas);
+
+    gas.takeOverPendingRuns_();
+
+    assert.equal(gas.$cell('Konfiguracja GA4', 'B9'), '', 'odmowa starsza-lub-równa przebiegowi nie odświeża statusu');
+  });
+
+  test('niedokończone przejęcie bez pola error w rekordzie i w odmowie: incydent dokończony', () => {
+    const gas = projekt();
+    const czas = iso(gas, 3 * MIN);
+    gas.$properties.LAST_IMPORT_GA4 = JSON.stringify({ lastRun: { finishedAt: czas, ok: false, trigger: true, durationMs: 5 } });
+    wpis(gas, NAZWA, czas, { error: undefined });
+
+    gas.takeOverPendingRuns_();
+
+    assert.equal(rekord(gas).lastRun.durationMs, 5);
+    assert.equal(rekord(gas).incident.open, true);
+  });
+
   test('błąd przejęcia zostawia wpis i loguje nazwę oraz wiadomość', () => {
     const gas = projekt();
     const wpisy = [];
