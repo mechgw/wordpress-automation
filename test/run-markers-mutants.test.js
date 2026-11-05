@@ -172,6 +172,33 @@ describe('#275: markerFailureText_ - redakcja i ucięcie', () => {
     assert.equal(gas.markerFailureText_(new Error('password : tajne1 koniec')), 'password=[ukryto] koniec');
   });
 
+  test('klucz w cudzysłowie (JSON): wartość krótka i długa nie zostaje w komunikacie', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('{"access_token":"abc.DEF-ghi","password":"shortPass"}')), '{"access_token"=[ukryto],"password"=[ukryto]}');
+    assert.equal(gas.markerFailureText_(new Error('cfg {"authorization": "Basic dXNlcjpwYXNz"} end')), 'cfg {"authorization"=[ukryto]} end');
+  });
+
+  test('klucz i wartość w apostrofach; wartość w cudzysłowie ze spacją', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error("{'api_key': 'tajne 1', 'x': 1}")), "{'api_key'=[ukryto], 'x': 1}");
+    assert.equal(gas.markerFailureText_(new Error('password: "ab cd" koniec')), 'password=[ukryto] koniec');
+  });
+
+  test('JSON zagnieżdżony w napisie (cudzysłowy z ukośnikiem)', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('{\\"password\\":\\"ab cd\\",\\"x\\":1}')), '{\\"password\\"=[ukryto],\\"x\\":1}');
+  });
+
+  test('zwykły tekst bez pary klucz-wartość zostaje bez zmian', () => {
+    const gas = projekt();
+
+    assert.equal(gas.markerFailureText_(new Error('słowo "token" w cudzysłowie i key bez wartości')), 'słowo "token" w cudzysłowie i key bez wartości');
+    assert.equal(gas.markerFailureText_(new Error('{"name":"anna","count":5}')), '{"name":"anna","count":5}');
+  });
+
   test('adres http (bez s) z zapytaniem też jest redagowany', () => {
     const gas = projekt();
 

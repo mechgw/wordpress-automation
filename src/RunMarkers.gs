@@ -149,7 +149,8 @@ const RUN_MARKER_FAILURE_MAX = 200;
  * i maila (#275). Wyjątki usług bywają z danymi żądania, identyfikatorami albo
  * tokenami. Tylko `message`, nigdy stos. Redakcja przed skróceniem, żeby ucięcie
  * nie zostawiło połowy sekretu; kolejność: nagłówek `Bearer`, pary `nazwa=wartość`
- * dla nazw z key/token/secret/password/authorization, adresy e-mail, zapytanie
+ * dla nazw z key/token/secret/password/authorization (także JSON: klucz i wartość
+ * w cudzysłowie albo apostrofach, również z ukośnikiem), adresy e-mail, zapytanie
  * adresu URL, każdy ciąg 24 i więcej znaków `[A-Za-z0-9_-]`.
  */
 function markerFailureText_(error) {
@@ -160,7 +161,7 @@ function markerFailureText_(error) {
     .join('')
     .replace(/\s+/g, ' ')
     .replace(/Bearer\s+[^\s;,]+/gi, 'Bearer [ukryto]')
-    .replace(/\b(\w*(?:key|token|secret|password|authorization))\s*[=:]\s*[^\s;,&]+/gi, '$1=[ukryto]')
+    .replace(/\b(\w*(?:key|token|secret|password|authorization))(\\?["']?)\s*[=:]\s*(?:\\"[^"]*?\\"|"[^"]*"|'[^']*'|[^\s;,&]+)/gi, '$1$2=[ukryto]')
     .replace(/[^\s@;,]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[ukryto]')
     .replace(/(https?:\/\/\S*?)\?\S*/gi, '$1?[ukryto]')
     .replace(/[A-Za-z0-9_-]{24,}/g, '[ukryto]')

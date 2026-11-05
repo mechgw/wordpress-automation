@@ -158,9 +158,9 @@ describe('#275: adnotacja znacznika przy wyjątku z obsługi wyniku', () => {
 
   test('8: wiadomość z tokenem, kluczem, e-mailem i adresem z zapytaniem - nic z tego w znaczniku, logu, incydencie ani mailu', () => {
     const gas = projekt();
-    const sekrety = ['abc.DEF-ghi', 'S3CR3T-VALUE', 'ya29.A0AfH6SMBx', 'sekret.osoba', 'KLUCZ-W-ZAPYTANIU', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd'];
+    const sekrety = ['abc.DEF-ghi', 'S3CR3T-VALUE', 'tok-abc.XYZ', 'sekret.osoba', 'KLUCZ-W-ZAPYTANIU', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd'];
     const napraw = psujLog(gas,
-      'Bearer abc.DEF-ghi odrzucony; api_key=S3CR3T-VALUE; access_token: ya29.A0AfH6SMBx; kontakt sekret.osoba@example.com; ' +
+      'Bearer abc.DEF-ghi odrzucony; api_key=S3CR3T-VALUE; access_token: tok-abc.XYZ; kontakt sekret.osoba@example.com; ' +
       'GET https://api.example.com/v1/zasob?key=KLUCZ-W-ZAPYTANIU&x=1 oraz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd');
     assert.throws(() => gas.recordImportRun_('GA4', true, udany));
     const tekst = wartosc(gas, znaczniki(gas)[0]).failure.message;
