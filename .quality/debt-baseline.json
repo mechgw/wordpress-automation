@@ -39,18 +39,10 @@
       "hash": "c759ce8d6e0572ae5768fc908b8b896d0acd4c86",
       "complexity": 16
     },
-    "scripts::scripts/quality/issue-audit-gate.js::fetchInput": {
-      "hash": "29347bfcf90d5c7efbad30253598468cf5ed5339",
-      "lines": 90
-    },
     "scripts::scripts/quality/issue-audit-gate.js::main": {
       "hash": "c9ecb39e45e973d8e50e8f93ceb3494367893df5",
       "lines": 50,
       "complexity": 18
-    },
-    "scripts::scripts/quality/issue-audit-gate.js::reconcile": {
-      "hash": "c9e4fa1b4b34c3b67d47011604c704720e3afb98",
-      "complexity": 14
     },
     "scripts::scripts/quality/issue-audit-gate.js::reconcileTriage": {
       "hash": "3a41e3a87acdb7c9ff42198ee2cb544e5547a61e",
@@ -330,9 +322,6 @@
   "files": {
     "scripts/quality/debt-ratchet.js": {
       "fileLines": 471
-    },
-    "scripts/quality/issue-audit-gate.js": {
-      "fileLines": 432
     },
     "src/GA4.gs": {
       "fileLines": 677

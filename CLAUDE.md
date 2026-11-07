@@ -82,16 +82,23 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
    do arkusza opisujemy więc w issue z **gotowymi wierszami**, a nie z opisem, co mniej
    więcej wpisać.
 
-   Niezależnie od podpisu prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt audytu,
-   więc te wpisy pozostają rozpoznawalne także bez podpisu.
+   Przy czytaniu historii prefiks `/audit-ok` i `/audit-changes` wskazuje werdykt audytu
+   także bez podpisu. **Bramka liczy jednak tylko komentarz z podpisem zgodnym z aplikacją,
+   przez którą powstał** (ChatGPT przez konektor, Claude Code przez `gh`) i tylko od strony
+   przeciwnej autorowi treści; brak podpisu treści daje autorstwo nieustalone i `audit:pending`
+   (#231). Podpisuj więc także komentarz z werdyktem, a komentarza z werdyktem nie edytuj:
+   edytowany nie jest werdyktem. Podpis Claude Code może mieć w nawiasie dopisek roli po
+   przecinku (`agent lokalny, koordynator`); podpis ChatGPT jest tylko w brzmieniu `_— ChatGPT_`.
 
    Etykieta `by:agent` zostaje mimo to, bo działa na listach i filtrach, których podpis
    nie obsługuje.
    **Nie zaczynaj issue oznaczonej `audit:pending` albo `audit:changes`** — specyfikacja
    czeka na audyt albo wróciła z zastrzeżeniami. Brak etykiety `audit:*` znaczy, że issue
    jest poza bramką i praca może się zacząć. Rozstrzyga komentarz zaczynający się od
-   `/audit-ok` albo `/audit-changes`; edycja treści unieważnia starsze rozstrzygnięcie.
-   Zmieniając treść issue w trakcie audytu, opisz zmianę w komentarzu.
+   `/audit-ok` albo `/audit-changes` w pierwszej niepustej linii (nie we wcięciu i bez
+   dalszych znaków nazwy, np. `/audit-ok-nie`); edycja treści unieważnia starsze
+   rozstrzygnięcie. Zmieniając treść issue w trakcie audytu, opisz zmianę w komentarzu.
+   Szczegóły reguły: README, sekcja „Audyt specyfikacji przed implementacją”.
 1. Gałąź od `main`, PR z tytułem w konwencji Conventional Commits.
 2. Wypełnij szablon PR-a: macierz testów + macierz dowodów
    ([docs/quality/test-matrix-template.md](docs/quality/test-matrix-template.md)).
@@ -136,7 +143,8 @@ skryptach przechodzą na polski przy okazji kolejnych zmian, bez masowego tłuma
 - Trzy punkty kontrolne, zawsze: testy lokalnie przed commitem, CI przed merge'em, workflow deployu
   przed `clasp push`. Nigdy nie omijaj jednego, żeby dotrzeć do następnego.
 - Same bramki też są testowane: `test/coverage-gate.test.js`, `test/apps-script-compare.test.js`,
-  `test/review-ack.test.js`, `test/pr-template.test.js`, `test/issue-audit-gate.test.js`.
+  `test/review-ack.test.js`, `test/pr-template.test.js`, `test/issue-audit-gate.test.js`
+  (z `test/issue-audit-sides.test.js` i `test/issue-audit-fetch.test.js`).
 - Standardy: [docs/quality/testing-standard.md](docs/quality/testing-standard.md).
 
 ## Rób / nie rób

@@ -4,8 +4,10 @@ name: Issue audit gate
 #
 # Issue objęta bramką i będąca w zakresie (`P0`/`P1`/`P2` albo `T2`/`T3`) ma
 # jawny stan audytu: `audit:pending`, `audit:ok` albo `audit:changes`. Recenzent
-# rozstrzyga komentarzem zaczynającym się od `/audit-ok` albo `/audit-changes`;
-# edycja treści unieważnia rozstrzygnięcie i cofa stan do `audit:pending`.
+# rozstrzyga komentarzem `/audit-ok` albo `/audit-changes`; liczy się tylko
+# komentarz strony przeciwnej autorowi treści, nieedytowany po publikacji
+# (#231). Edycja treści unieważnia rozstrzygnięcie i cofa stan do
+# `audit:pending`.
 #
 # Ten workflow NIE jest zestawem handlerów zdarzeń. Przy `cancel-in-progress:
 # false` GitHub trzyma w grupie tylko jeden run `pending` i ANULUJE go, gdy
@@ -13,7 +15,8 @@ name: Issue audit gate
 # Dlatego każdy run czyta aktualny stan issue i wylicza z niego etykietę
 # docelową (reconciler). Utrata jednego runu nie gubi semantyki, bo kolejny
 # naprawia stan. Cała logika decyzyjna i jej testy żyją w
-# scripts/quality/issue-audit-gate.js (test/issue-audit-gate.test.js).
+# scripts/quality/issue-audit-gate.js oraz modułach obok (`issue-audit-sides.js`,
+# `issue-audit-fetch.js`); testy w test/issue-audit-gate.test.js.
 #
 # Bramka jest konwencją, nie mechanicznym zamkiem: GitHub nie potrafi
 # zablokować pracy nad issue. Etykieta jest sygnałem dla agenta i dla człowieka.
@@ -26,8 +29,11 @@ name: Issue audit gate
 on:
   issues:
     types: [opened, edited, labeled, unlabeled, reopened]
+  # `edited` i `deleted` (#231): komentarz edytowany po publikacji przestaje być
+  # werdyktem, a usunięty znika ze stanu; bez tych zdarzeń zmiana czekałaby na
+  # przypadkowy kolejny przebieg.
   issue_comment:
-    types: [created]
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
@@ -45,10 +51,13 @@ jobs:
     #
     # Komentarze zawężamy do osób, które i tak mogą rozstrzygać; ktokolwiek inny
     # nie pali minut Actions. Sam komentarz-znacznik publikuje `github-actions`,
-    # który tu nie przechodzi, więc nie ma pętli.
+    # który tu nie przechodzi, więc nie ma pętli. Wyjątek: `deleted` przechodzi
+    # zawsze, bo usuwający komentarz bywa już kimś innym niż jego autor, a
+    # usunięty werdykt musi zmienić stan niezależnie od tego, kto go usunął.
     if: >-
       !github.event.issue.pull_request &&
       (github.event_name == 'issues' ||
+       github.event.action == 'deleted' ||
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -74,6 +83,8 @@ jobs:
         with:
           sparse-checkout: |
             scripts/quality/issue-audit-gate.js
+            scripts/quality/issue-audit-sides.js
+            scripts/quality/issue-audit-fetch.js
           sparse-checkout-cone-mode: false
 
       - name: Setup Node.js
@@ -100,4 +111,4 @@ jobs:
           steps.gate.outputs.previous != 'audit:pending'
         run: |
           gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
-            "Treść issue zmieniona po rozstrzygnięciu \`${{ steps.gate.outputs.previous }}\`; stan cofnięty do \`audit:pending\`. Opisz w komentarzu, co się zmieniło — sama etykieta tego nie powie."
+            "Stan audytu cofnięty z \`${{ steps.gate.outputs.previous }}\` do \`audit:pending\`: po rozstrzygnięciu zmieniła się treść issue, jej autorstwo (podpis, \`by:agent\`) albo komentarz z werdyktem (edycja lub usunięcie). Opisz w komentarzu, co się zmieniło — sama etykieta tego nie powie."
