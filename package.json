@@ -9,7 +9,9 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/*.gs --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --test-reporter=spec --test-reporter-destination=stdout \"test/**/*.test.js\"",
     "quality:gate": "node scripts/quality/coverage-gate.js",
     "quality:debt": "node scripts/quality/debt-ratchet.js",
-    "prepare": "node scripts/quality/install-hooks.js"
+    "prepare": "node scripts/quality/install-hooks.js",
+    "mutation:prepare": "node scripts/mutation/prepare-shadow.js",
+    "mutation": "stryker run"
   },
   "repository": {
     "type": "git",
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@google/clasp": "^3.4.1",
+    "@stryker-mutator/core": "^10.1.1",
     "eslint": "^10.14.0",
     "eslint-plugin-googleappsscript": "^1.0.5",
     "espree": "^11.2.0"
