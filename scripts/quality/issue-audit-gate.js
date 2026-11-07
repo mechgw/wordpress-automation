@@ -39,8 +39,9 @@
  *     [--triage-required <rodziny>] [--dry-run]
  */
 
-const { execFileSync } = require('child_process');
 const fs = require('fs');
+const { fetchInput, revisionBarrier, run: gh } = require('./issue-audit-fetch');
+const { authorSide, commentSide, leadingLine, reviewerOf } = require('./issue-audit-sides');
 
 const AUDIT_PENDING = 'audit:pending';
 const AUDIT_OK = 'audit:ok';
@@ -75,7 +76,10 @@ const DEFAULT_CONFIG = {
   // uprawnienia `write`; nazywamy to po imieniu, żeby specyfikacja nie
   // obiecywała czegoś, czego implementacja nie robi.
   commandAssociations: ['OWNER', 'MEMBER', 'COLLABORATOR'],
-  commandPattern: /^\s*\/audit-(ok|changes)\b/,
+  // Dopasowanie do PIERWSZEJ niepustej, niewciętej linii (`leadingLine`), po
+  // nazwie nie może stać litera, cyfra ani łącznik: `\b` przepuszczało
+  // `/audit-ok-nie` (#231).
+  commandPattern: /^\/audit-(ok|changes)(?![\w-])/,
   // Bramka nie obejmuje wstecz issue sprzed swojego wdrożenia. Bez tej stałej
   // reconciler wyliczyłby `audit:pending` dla całego archiwum, czyli zrobiłby
   // backfill, którego świadomie nie chcemy.
@@ -113,22 +117,34 @@ function currentAuditLabel(labels, cfg) {
   return auditLabelsPresent(labels, cfg)[0] || '';
 }
 
-/** Rodzaj komendy w treści komentarza; '' gdy komentarz nie jest komendą. */
+/**
+ * Rodzaj komendy w treści komentarza; '' gdy komentarz nie jest komendą.
+ * Komenda stoi w pierwszej niepustej linii i nie jest wcięta jak blok kodu:
+ * cytowany przykład (`    /audit-ok`, ``` `/audit-ok` ```) nie jest werdyktem.
+ */
 function parseCommand(body, cfg) {
-  const match = cfg.commandPattern.exec(String(body || ''));
+  const match = cfg.commandPattern.exec(leadingLine(body));
   return match ? match[1] : '';
 }
 
 /**
- * Najnowsza WAŻNA komenda: rozpoznana, od osoby uprawnionej i nowsza niż
+ * Najnowsza WAŻNA komenda: rozpoznana, od osoby uprawnionej, nieedytowana po
+ * publikacji, od strony przeciwnej autorowi treści (`reviewer`) i nowsza niż
  * bariera rewizji. Komenda starsza od bariery dotyczy nieaktualnej treści
- * i nie może niczego rozstrzygać.
+ * i nie może niczego rozstrzygać. Bez ustalonego recenzenta (autorstwo
+ * nieustalone) nie ma werdyktu.
+ *
+ * Stronę komentarza wyznacza podpis zgodny z aplikacją, przez którą komentarz
+ * powstał; komentarz edytowany (`lastEditedAt`) albo bez danych o edycji
+ * (`unknown`) nie jest werdyktem, bo mógł zmienić treść po publikacji (#231).
  */
-function latestDecision(comments, barrier, cfg) {
-  return (comments || [])
-    .filter(c => cfg.commandAssociations.includes(String(c.authorAssociation || '')))
+function latestDecision(comments, barrier, cfg, reviewer) {
+  if (!reviewer) return null;
+  return comments?.filter(c => cfg.commandAssociations.includes(c.authorAssociation))
     .filter(c => parseCommand(c.body, cfg))
-    .filter(c => String(c.createdAt || '') > barrier)
+    .filter(c => !c.lastEditedAt)
+    .filter(c => commentSide(c) === reviewer)
+    .filter(c => c.createdAt > barrier)
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .pop() || null;
 }
@@ -166,22 +182,6 @@ function lastScopeEntryAt(currentLabels, labelEvents, cfg) {
 }
 
 /**
- * Bariera rewizji: czas ostatniej edycji TREŚCI. Issue nigdy nieedytowana nie ma
- * wpisu w `userContentEdits` — wtedy barierą jest moment utworzenia.
- *
- * UWAGA: `userContentEdits` zwraca edycje **od najnowszej**, więc najnowszą daje
- * `first: 1`, a `last: 1` — najstarszą. Pomyłka tutaj jest cicha i groźna:
- * bariera cofa się do pierwszej edycji, przez co spóźniona komenda `/audit-ok`
- * wygląda na nowszą od treści i zostaje przyjęta dla wersji, której nikt nie
- * czytał. Sprawdzone empirycznie na #139 (first:3 → 06:13, 06:13, 06:13;
- * last:3 → 05:10, 04:55, 04:46).
- */
-function revisionBarrier(issueNode) {
-  const edits = (issueNode && issueNode.userContentEdits && issueNode.userContentEdits.nodes) || [];
-  return (edits.length && edits[0].editedAt) || (issueNode && issueNode.createdAt) || '';
-}
-
-/**
  * Czy issue jest OBJĘTA bramką. Alternatywa czterech warunków — wystarczy
  * jeden. Gdy nie zachodzi żaden, issue w zakresie zostaje poza bramką i run
  * nie zapisuje nic; nie nadaje `audit:pending`.
@@ -199,11 +199,43 @@ function isEngaged(input, barrier, decision, cfg) {
 }
 
 /**
+ * Stan docelowy z werdyktu (albo jego braku) i autorstwa treści. Przy
+ * nieustalonym autorze nikt nie jest recenzentem, więc zostaje `audit:pending`.
+ */
+function wantedState(decision, author, barrier, cfg) {
+  if (!author.side) return { label: AUDIT_PENDING, reason: 'autorstwo nieustalone: ' + author.reason };
+  if (!decision) return { label: AUDIT_PENDING, reason: 'brak ważnego rozstrzygnięcia dla rewizji ' + barrier };
+  return {
+    label: 'audit:' + parseCommand(decision.body, cfg),
+    reason: 'rozstrzygnięcie z ' + decision.createdAt + ' nowsze niż rewizja ' + barrier
+  };
+}
+
+/**
+ * Wynik przebiegu dla stanu docelowego. Zgodność samej pierwszej etykiety nie
+ * wystarcza: przy duplikacie rodziny (np. `audit:ok` obok `audit:pending`)
+ * trzeba wymusić zapis, żeby `apply` usunęło nadmiarową. Inaczej kardynalność
+ * „0 lub 1” zostałaby złamana na stałe, bo kolejne przebiegi widziałyby stan
+ * jako zgodny.
+ */
+function settle(target, present, current) {
+  if (target.label === current && present.length === 1) {
+    return { action: 'none', label: current, reason: target.reason + ' (bez zmiany)' };
+  }
+  if (present.length > 1) {
+    return { action: 'set', label: target.label, reason: target.reason + ' (usuwam duplikat rodziny audit:*)' };
+  }
+  return { action: 'set', label: target.label, reason: target.reason };
+}
+
+/**
  * @param {object} input
  * @param {string}   input.state       'open' | 'closed'
  * @param {string[]} input.labels      aktualne etykiety issue
  * @param {string}   input.barrier     ISO: ostatnia edycja treści albo createdAt
- * @param {Array}    input.comments    [{ body, authorAssociation, createdAt }]
+ * @param {string}   input.body        treść issue (Markdown); jej podpis wskazuje autora
+ * @param {string}   input.app         aplikacja, przez którą utworzono issue ('' = gh)
+ * @param {Array}    input.comments    [{ body, authorAssociation, createdAt, app, lastEditedAt }]
  * @param {Array}    [input.labelEvents] [{ type: 'LABELED'|'UNLABELED', label, createdAt }]
  * @param {object}   [config]
  * @returns {{ action: 'none'|'set'|'clear', label: string, reason: string }}
@@ -226,27 +258,13 @@ function reconcile(input, config = {}) {
       : { action: 'none', label: '', reason: 'issue poza zakresem bramki' };
   }
 
-  const decision = latestDecision(input.comments, barrier, cfg);
+  const author = authorSide(input.body, input.labels, input.app);
+  const decision = latestDecision(input.comments, barrier, cfg, reviewerOf(author.side));
   if (!isEngaged(input, barrier, decision, cfg)) {
     return { action: 'none', label: current, reason: 'issue nieobjęta bramką (brak backfillu)' };
   }
 
-  const desired = decision ? 'audit:' + parseCommand(decision.body, cfg) : AUDIT_PENDING;
-  const reason = decision
-    ? 'rozstrzygnięcie z ' + decision.createdAt + ' nowsze niż rewizja ' + barrier
-    : 'brak ważnego rozstrzygnięcia dla rewizji ' + barrier;
-
-  // Zgodność samej pierwszej etykiety nie wystarcza: przy duplikacie rodziny
-  // (np. `audit:ok` obok `audit:pending`) trzeba wymusić zapis, żeby `apply`
-  // usunęło nadmiarową. Inaczej kardynalność „0 lub 1” zostałaby złamana
-  // na stałe, bo kolejne przebiegi widziałyby stan jako zgodny.
-  if (desired === current && present.length === 1) {
-    return { action: 'none', label: current, reason: reason + ' (bez zmiany)' };
-  }
-  if (present.length > 1) {
-    return { action: 'set', label: desired, reason: reason + ' (usuwam duplikat rodziny audit:*)' };
-  }
-  return { action: 'set', label: desired, reason: reason };
+  return settle(wantedState(decision, author, barrier, cfg), present, current);
 }
 
 /** Etykiety issue należące do rodziny triage'u. */
@@ -473,121 +491,6 @@ function reconcileIssue(input, config = {}, now = new Date().toISOString()) {
     .concat(triage.remove.map(label => ({ type: 'UNLABELED', label: label, createdAt: stamp })));
   const audit = reconcile(Object.assign({}, input, { labels: labels, labelEvents: labelEvents }), config);
   return { triage: triage, audit: audit, labels: labels };
-}
-
-function gh(args) {
-  return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-}
-
-/**
- * Stan autorytatywny w chwili wykonania. `userContentEdits` daje czas ostatniej
- * edycji TREŚCI — w odróżnieniu od `updatedAt`, które zmienia każda etykieta
- * i każdy komentarz. Paginacja komentarzy jest obowiązkowa: najnowsza komenda
- * bywa daleko poza pierwszą stroną.
- */
-function fetchInput(repo, issue) {
-  const [owner, name] = repo.split('/');
-  // Obie kolekcje stronicujemy do końca, każdą osobno: najnowsza komenda
-  // potrafi być daleko poza pierwszą stroną, a historia etykiet decyduje
-  // o objęciu bramką. Wspólna pętla dla dwóch niezależnych kursorów duplikuje
-  // wyniki tej kolekcji, która skończyła się wcześniej.
-  const issueQuery = `
-    query($owner:String!, $name:String!, $number:Int!) {
-      repository(owner:$owner, name:$name) {
-        issue(number:$number) {
-          state
-          createdAt
-          bodyHTML
-          labels(first:100) { nodes { name } }
-          userContentEdits(first:1) { nodes { editedAt } }
-        }
-      }
-    }`;
-
-  const commentsQuery = `
-    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
-      repository(owner:$owner, name:$name) {
-        issue(number:$number) {
-          comments(first:100, after:$cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { body authorAssociation createdAt }
-          }
-        }
-      }
-    }`;
-
-  const timelineQuery = `
-    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
-      repository(owner:$owner, name:$name) {
-        issue(number:$number) {
-          timelineItems(first:100, after:$cursor, itemTypes:[LABELED_EVENT, UNLABELED_EVENT]) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              __typename
-              ... on LabeledEvent { createdAt label { name } }
-              ... on UnlabeledEvent { createdAt label { name } }
-            }
-          }
-        }
-      }
-    }`;
-
-  const askRepository = (query, cursor, withIssue) => {
-    const args = ['api', 'graphql', '-f', 'query=' + query, '-F', 'owner=' + owner, '-F', 'name=' + name];
-    if (withIssue) args.push('-F', 'number=' + issue);
-    if (cursor) args.push('-F', 'cursor=' + cursor);
-    return JSON.parse(gh(args)).data.repository;
-  };
-
-  const ask = (query, cursor) => {
-    const node = askRepository(query, cursor, true).issue;
-    if (!node) throw new Error('Nie znaleziono issue #' + issue + ' w ' + repo);
-    return node;
-  };
-
-  const collect = (query, field, source) => {
-    const all = [];
-    let cursor = null;
-    for (;;) {
-      const page = (source || ask)(query, cursor)[field];
-      all.push(...page.nodes);
-      if (!page.pageInfo.hasNextPage) return all;
-      cursor = page.pageInfo.endCursor;
-    }
-  };
-
-  // Etykiety istniejące w repozytorium (#211): z tabeli „Triage” nakładamy tylko
-  // takie, a `gh issue edit --add-label` na nieznanej kończy się błędem.
-  const repoLabelsQuery = `
-    query($owner:String!, $name:String!, $cursor:String) {
-      repository(owner:$owner, name:$name) {
-        labels(first:100, after:$cursor) {
-          pageInfo { hasNextPage endCursor }
-          nodes { name }
-        }
-      }
-    }`;
-
-  const issueNode = ask(issueQuery, null);
-  const comments = collect(commentsQuery, 'comments');
-  const labelEvents = collect(timelineQuery, 'timelineItems').map(node => ({
-    type: node.__typename === 'LabeledEvent' ? 'LABELED' : 'UNLABELED',
-    label: node.label && node.label.name,
-    createdAt: node.createdAt
-  }));
-  const repoLabels = collect(repoLabelsQuery, 'labels', (query, cursor) => askRepository(query, cursor, false))
-    .map(l => l.name);
-
-  return {
-    state: String(issueNode.state || '').toLowerCase(),
-    labels: issueNode.labels.nodes.map(l => l.name),
-    createdAt: String(issueNode.createdAt || ''),
-    bodyHtml: String(issueNode.bodyHTML || ''),
-    barrier: revisionBarrier(issueNode),
-    comments: comments,
-    labelEvents: labelEvents,
-    repoLabels: repoLabels
-  };
 }
 
 /**
