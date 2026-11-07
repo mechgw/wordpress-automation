@@ -11,6 +11,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { safeEnv } = require('./safe-env.js');
+const { assertIsolatedSync } = require('./isolation-probe.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const OUT = path.join(ROOT, 'reports', 'mutation');
@@ -20,6 +22,7 @@ if (!/^[A-Za-z0-9]+\.gs$/.test(name || '')) {
   console.error('Podaj nazwę pliku z src/, np. WordPress.gs');
   process.exit(2);
 }
+assertIsolatedSync(); // fail-closed: bez potwierdzonej izolacji żaden mutant nie wystartuje
 const concurrency = arg('concurrency') || '4';
 const limit = Number(arg('limit') || 0);
 const stem = name.replace(/\.gs$/, '');
@@ -31,10 +34,10 @@ function run(tag, overrides, env) {
   const base = JSON.parse(fs.readFileSync(path.join(ROOT, 'stryker.config.json'), 'utf8'));
   const cfg = path.join(OUT, `cfg-${tag}.json`);
   fs.writeFileSync(cfg, JSON.stringify({ ...base, ...overrides }));
-  return spawnSync(process.execPath, [...stryker, cfg], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, ...env } });
+  return spawnSync(process.execPath, [...stryker, cfg], { cwd: ROOT, encoding: 'utf8', env: safeEnv(process.env, env) });
 }
 
-spawnSync(process.execPath, [path.join(__dirname, 'prepare-shadow.js'), name], { cwd: ROOT, stdio: 'ignore' });
+spawnSync(process.execPath, [path.join(__dirname, 'prepare-shadow.js'), name], { cwd: ROOT, stdio: 'ignore', env: safeEnv(process.env) });
 const shadow = `.stryker-shadow/${stem}.js`;
 
 // 2. indeks

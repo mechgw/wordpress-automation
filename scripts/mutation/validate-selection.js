@@ -12,12 +12,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { safeEnv } = require('./safe-env.js');
+const { assertIsolatedSync } = require('./isolation-probe.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const OUT = path.join(ROOT, 'reports', 'mutation');
 const name = process.argv[2];
 const arg = (k, d) => Number((process.argv.find(a => a.startsWith(`--${k}=`)) || `=${d}`).split('=')[1]);
 const stem = name.replace(/\.gs$/, '');
+assertIsolatedSync(); // fail-closed: bez potwierdzonej izolacji żaden mutant nie wystartuje
 const result = JSON.parse(fs.readFileSync(path.join(OUT, `result-${stem}.json`), 'utf8'));
 const sel = JSON.parse(fs.readFileSync(path.join(OUT, `selection-${stem}.json`), 'utf8'));
 const mutants = Object.values(result.files)[0].mutants;
@@ -49,9 +52,9 @@ fs.writeFileSync(cfg, JSON.stringify({
   reporters: ['json'], jsonReporter: { fileName: valReport }, concurrency: 4, timeoutMS: 600000
 }));
 fs.rmSync(path.join(ROOT, valReport), { force: true });
-spawnSync(process.execPath, [path.join(__dirname, 'prepare-shadow.js'), name], { cwd: ROOT, stdio: 'ignore' });
+spawnSync(process.execPath, [path.join(__dirname, 'prepare-shadow.js'), name], { cwd: ROOT, stdio: 'ignore', env: safeEnv(process.env) });
 const run = spawnSync(process.execPath, ['node_modules/@stryker-mutator/core/bin/stryker.js', 'run', cfg], {
-  cwd: ROOT, encoding: 'utf8', env: { ...process.env, MUTATION_SELECTION: valFile }
+  cwd: ROOT, encoding: 'utf8', env: safeEnv(process.env, { MUTATION_SELECTION: valFile })
 });
 if (!fs.existsSync(path.join(ROOT, valReport))) {
   console.error((run.stdout || '').split(/\r?\n/).filter(l => /✖|ERROR|failed/.test(l)).slice(0, 15).join(' | '));

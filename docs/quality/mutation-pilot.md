@@ -1,6 +1,10 @@
 # Pilot testów mutacyjnych dla `src/*.gs`
 
-Status: **pilot na osobnej gałęzi, bez bramki i bez CI** (Refs #234). Zmiany `package.json`,
+Status: **`no-go-izolacja` dla dalszego wykonywania w tym środowisku** (audyt #238 z 2026-11-02 i 2026-11-05; Refs #234).
+Przebieg z 2026-11-02 odbył się bez izolacji systemowej wymaganej w #234, więc jego liczby są **wyłącznie
+diagnostyką techniczną** i nie potwierdzają spełnienia kryterium izolacji. Dalsze przebiegi tylko w
+zweryfikowanej izolacji (odcięta sieć, bez sekretów, bez `GIT_*`), czyli w CI na Linuksie (#253), po
+sondach odmowy; narzędzia same odmawiają startu bez nich (sekcja „Izolacja”). Pilot na osobnej gałęzi, bez bramki i bez CI. Zmiany `package.json`,
 `package-lock.json` i konfiguracji nie są przeznaczone do scalenia do `main`. Nic tu nie jest
 wymogiem dla PR-ów. Pełne listy linii: [mutation-pilot-listy.md](mutation-pilot-listy.md).
 
@@ -8,9 +12,9 @@ Test mutacyjny psuje kod na próbę (np. zamienia `||` na `&&`, `>=` na `>`, usu
 czy jakikolwiek test to zauważy. Mutant, który przeżył, to miejsce, w którym kod można popsuć,
 a testy zostaną zielone. Pokrycie linii tego nie pokazuje: linia może się wykonać i nic nie sprawdzać.
 
-## Wynik w skrócie (2026-11-02, StrykerJS 10.1.1, Node 24, Windows)
+## Wynik w skrócie: diagnostyka, nie wynik zgodny z #234 (2026-11-02, StrykerJS 10.1.1, Node 24, Windows)
 
-- **Działa na całym `src/*.gs`**: 29 plików, 15 298 mutantów, wszystkie mutatory Strykera włączone,
+- **Technicznie most działa na całym `src/*.gs`** (to nie jest stwierdzenie zgodności z #234): 29 plików, 15 298 mutantów, wszystkie mutatory Strykera włączone,
   bez wykluczeń i bez pomijania mutantów statycznych.
 - **Zabite z asercją: 10 139 (66,3 %)**. Zabite bez asercji (test padł na wyjątku, nie na porównaniu):
   1 282. Ocalałe: 3 740. Bez pokrycia (żaden test nie wykonuje linii): 89. Przekroczenia czasu: 48.
@@ -65,7 +69,7 @@ npm run test:coverage                            # LCOV potrzebny dla report.js
 
 Jedna funkcja: `npx stryker run --mutate ".stryker-shadow/WordPress.js:1563-1627" --commandRunner.command "node scripts/mutation/run-tests.js test/wordpress-commands.test.js"`
 po `npm run mutation:prepare -- WordPress.gs`. `classify.js` dzieli zabite na `killed-assert` i `killed-other`.
-`run-tests.js` i `run-for-mutant.js` usuwają z otoczenia zmienne wyglądające na poświadczenia.
+`run-file.js` i `validate-selection.js` zaczynają od sond izolacji i bez ich przejścia nie startują; cały łańcuch procesów dostaje minimalne środowisko (`safe-env.js`).
 
 ## Wyniki per plik
 
@@ -169,15 +173,39 @@ Rozjazd z mutacjami: bramka mierzy, czy linia się wykonała, mutacje mierzą, c
 Pliki w 100 % pokryte, ale z wynikiem poniżej 60 %: `ForminatorHistory.gs` 57,2 %, `GlobalFooterMigration.gs`
 57,4 %, `OrderAnalytics.gs` 58,9 % (próg 100 %), `Payloads.gs` 59,8 %, `SitemapUrls.gs` 59,9 %.
 
-## Izolacja: warunek niespełniony w pełni
+## Izolacja: `no-go-izolacja`
 
-- Mutowany kod działa w `vm` bez `process`, `require`, `fetch` ani `XMLHttpRequest`; `UrlFetchApp`,
-  `SpreadsheetApp` i `ScriptApp` to atrapy z `gas.js`.
-- Sieć nie jest odcięta na poziomie systemu; sondy odmowy połączenia i zapisu poza katalogiem nie
-  zostały wykonane. W głównych przebiegach zmienne środowiskowe z poświadczeniami są usuwane przed
-  uruchomieniem testów, ale pierwsze przebiegi próbne (do 5 przebiegów na `replacePageContentText_`)
-  poszły bez tego.
-- Do trwałego użycia: kontener albo WSL z odciętą siecią i bez poświadczeń.
+Obowiązująca treść #234 wymaga przed uruchomieniem mutantów odcięcia sieci i zasobów zewnętrznych,
+braku poświadczeń oraz sond odmowy; przy nieskutecznej izolacji wynikiem jest `no-go-izolacja` i brak
+biegu. Przebieg z 2026-11-02 tego nie spełnił (uruchomiono go przed sprawdzeniem tego wymogu):
+
+- sieć nie była odcięta na poziomie systemu, sond odmowy połączenia i zapisu poza katalogiem nie wykonano,
+- pierwsze przebiegi próbne i proces Strykera dziedziczyły pełne środowisko hosta, w tym poświadczenia
+  i `GIT_*` (czyszczenie dotyczyło dopiero procesu testów); incydent z `GIT_DIR` i prawdziwym
+  `.git/config` pokazał, że granica procesu nie wystarczała,
+- osłona w postaci `vm` bez `process`, `require` i `fetch` oraz atrap usług Google nie jest izolacją
+  systemową (kod hosta, Stryker i testy działały z uprawnieniami użytkownika).
+
+Skutki:
+
+- liczby z tego dokumentu zachowano jako diagnostykę techniczną; nie są dowodem spełnienia AC izolacji
+  i nie uzasadniają integracji z CI ani Ready/merge tego PR-a,
+- **dalsze przebiegi w tym środowisku są wstrzymane**; nie uruchomiono ich po audycie,
+- narzędzia wymuszają to mechanicznie: `run-file.js` i `validate-selection.js` zaczynają od
+  `isolation-probe.js` (sieć: połączenia z publicznymi adresami muszą się nie udać; zapis poza katalogiem
+  przebiegu i odczyt konfiguracji użytkownika muszą się nie udać; brak poświadczeń, `GIT_*` i `.clasp*`)
+  i przy jakiejkolwiek porażce kończą się kodem 3 bez startu Strykera, bez flagi to wyłączającej.
+  Na maszynie roboczej, na której zrobiono pilot, sonda daje: sieć osiągalna (1.1.1.1:443, 8.8.8.8:53),
+  zapis w katalogu nadrzędnym możliwy, odczyt `.gitconfig` możliwy, 43 zmienne z poświadczeniami lub
+  `GIT_*` w otoczeniu; `run-file.js` kończy się kodem 3 i nie tworzy `.stryker-tmp`,
+- całe drzewo procesów dostaje minimalne środowisko z allowlisty (`safe-env.js`: `PATH`, `SystemRoot`,
+  `TEMP` itp. i dwie zmienne pilota; wszystko inne, w tym każde `GIT_*`, jest odrzucane; test:
+  `node --test scripts/mutation/safe-env.test.js`). Dotyczy to Strykera, loadera i testów; wcześniej filtr
+  po wzorcu działał tylko w procesie testów,
+- kolejna próba: zweryfikowane środowisko z odciętą siecią (kontener z `--network none` albo
+  `unshare -n`), katalogiem tylko do zapisu w kopii i bez sekretów, na Linuksie w CI zgodnie z #253;
+  sonda musi tam przejść, zanim ruszy pierwszy mutant. Naprawa dziedziczenia `GIT_*` w testach
+  z `git init` jest zgłoszona osobno (#292).
 
 ## Koszt i wnioski
 

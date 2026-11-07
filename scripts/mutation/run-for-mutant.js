@@ -14,7 +14,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { scrubbedEnv } = require('./run-tests.js');
+const { safeEnv } = require('./safe-env.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const selection = JSON.parse(fs.readFileSync(process.env.MUTATION_SELECTION, 'utf8'));
@@ -32,7 +32,7 @@ for (const file of files) {
   const result = spawnSync(
     process.execPath,
     ['--require', path.join(__dirname, 'vm-preload.js'), '--test', file],
-    { cwd: ROOT, stdio: 'inherit', env: scrubbedEnv(process.env) }
+    { cwd: ROOT, stdio: 'inherit', env: safeEnv(process.env) }
   );
   if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);
 }

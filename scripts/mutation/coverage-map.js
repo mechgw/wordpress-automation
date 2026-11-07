@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { parseLcov } = require('./lcov.js');
+const { safeEnv } = require('./safe-env.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const OUT = path.join(ROOT, 'reports', 'mutation');
@@ -20,7 +21,7 @@ function coverageOf(testFile, tag) {
   const r = spawnSync(process.execPath, [
     '--test', '--experimental-test-coverage', '--test-coverage-include=src/*.gs',
     '--test-reporter=lcov', `--test-reporter-destination=${lcov}`, testFile
-  ], { cwd: ROOT, encoding: 'utf8' });
+  ], { cwd: ROOT, encoding: 'utf8', env: safeEnv(process.env) });
   if (!fs.existsSync(lcov)) throw new Error(`Brak LCOV dla ${testFile}: ${r.stderr}`);
   return { exit: r.status, cov: parseLcov(lcov) };
 }
