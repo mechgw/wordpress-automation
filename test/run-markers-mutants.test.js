@@ -221,6 +221,51 @@ describe('#275: markerFailureText_ - redakcja i ucięcie', () => {
   });
 });
 
+describe('#275: markerFailureText_ - wartość w cudzysłowie z ukośnikiem (Codex P2, PR #291)', () => {
+  const redact = tekst => projekt().markerFailureText_(new Error(tekst));
+
+  test('JSON z cudzysłowem w wartości: cała wartość zredagowana, nic nie zostaje po cudzysłowie', () => {
+    assert.equal(redact(JSON.stringify({ password: 'prefix"private-tail' })), '{"password"=[ukryto]}');
+    assert.equal(redact(JSON.stringify({ token: 'a"b"c"d-sekret' })), '{"token"=[ukryto]}');
+  });
+
+  test('wiele cudzysłowów, ukośnik na końcu wartości i ukośnik w środku', () => {
+    assert.equal(redact(JSON.stringify({ secret: '"x"y"z"', next: 1 })), '{"secret"=[ukryto],"next":1}');
+    assert.equal(redact(JSON.stringify({ password: 'koniec\\' })), '{"password"=[ukryto]}');
+    assert.equal(redact(JSON.stringify({ password: 'sr\\odek"ogon' })), '{"password"=[ukryto]}');
+    assert.equal(redact(JSON.stringify({ password: '\\"\\\\"ogon', ok: 1 })), '{"password"=[ukryto],"ok":1}');
+  });
+
+  test('klucz z = zamiast :, wartość w cudzysłowie albo apostrofach z ucieczką', () => {
+    assert.equal(redact('password="pre\\"fix-ogon" koniec'), 'password=[ukryto] koniec');
+    assert.equal(redact("api_key = 'it\\'s-tajne-ogon' koniec"), 'api_key=[ukryto] koniec');
+    assert.equal(redact("{'password': 'a\\'b-ogon'}"), "{'password'=[ukryto]}");
+  });
+
+  test('JSON zagnieżdżony w napisie: cudzysłów w wartości też jest ucieczką', () => {
+    const wewnetrzny = JSON.stringify(JSON.stringify({ password: 'prefix"private-tail', x: 1 }));
+    assert.equal(redact(wewnetrzny), '"{\\"password\\"=[ukryto],\\"x\\":1}"');
+    assert.equal(redact('{\\"password\\":\\"koniec\\\\\\"ogon\\"}'), '{\\"password\\"=[ukryto]}');
+    assert.equal(redact('{\\"password\\":\\"ab cd\\\\ef gh\\"}'), '{\\"password\\"=[ukryto]}', 'seria ukośników w środku wartości ze spacją');
+  });
+
+  test('następne pole po zredagowanym zostaje, a cudzysłów w innym polu nie jest ruszany', () => {
+    assert.equal(redact(JSON.stringify({ password: 'a"b', note: 'wartość "w cudzysłowie"' })),
+      '{"password"=[ukryto],"note":"wartość \\"w cudzysłowie\\""}');
+  });
+
+  test('niedomknięty cudzysłów: redagowane do separatora, nic nie zostaje', () => {
+    assert.equal(redact('password="niedomkniete-ogon koniec'), 'password=[ukryto] koniec');
+  });
+
+  test('długi ciąg ukośników nie zawiesza redakcji (brak wykładniczego nawrotu)', () => {
+    const start = Date.now();
+    redact('password:\\"' + '\\'.repeat(5000) + 'x');
+    redact('password:"' + '\\'.repeat(5001));
+    assert.ok(Date.now() - start < 1000, 'redakcja trwała ' + (Date.now() - start) + ' ms');
+  });
+});
+
 describe('#275: annotateRunMarker_ - logowanie błędu zapisu', () => {
   test('brak znacznika: loguje nazwę znacznika', () => {
     const gas = projekt();

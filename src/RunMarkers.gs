@@ -152,6 +152,14 @@ const RUN_MARKER_FAILURE_MAX = 200;
  * dla nazw z key/token/secret/password/authorization (także JSON: klucz i wartość
  * w cudzysłowie albo apostrofach, również z ukośnikiem), adresy e-mail, zapytanie
  * adresu URL, każdy ciąg 24 i więcej znaków `[A-Za-z0-9_-]`.
+ *
+ * Wartość w cudzysłowie czytamy ze świadomością ucieczek: `\"` i `\\` wewnątrz
+ * wartości nie kończą jej (JSON z `"` w haśle: `"prefix\"ogon"`), więc wartość
+ * znika w całości. W JSON-ie zagnieżdżonym w napisie (cudzysłowy jako `\"`)
+ * ogranicznikiem jest dokładnie jeden ukośnik przed cudzysłowem, a seria dwóch
+ * i więcej ukośników przed cudzysłowem należy do wartości. Alternatywy wzorca
+ * nie nakładają się, więc długi ciąg ukośników nie wywołuje wykładniczego
+ * nawrotu. Wartość bez domknięcia redagujemy do separatora (`;`, `,`, `&`, spacja).
  */
 function markerFailureText_(error) {
   const raw = error && error.message !== undefined ? error.message : error;
@@ -161,7 +169,7 @@ function markerFailureText_(error) {
     .join('')
     .replace(/\s+/g, ' ')
     .replace(/Bearer\s+[^\s;,]+/gi, 'Bearer [ukryto]')
-    .replace(/\b(\w*(?:key|token|secret|password|authorization))(\\?["']?)\s*[=:]\s*(?:\\"[^"]*?\\"|"[^"]*"|'[^']*'|[^\s;,&]+)/gi, '$1$2=[ukryto]')
+    .replace(/\b(\w*(?:key|token|secret|password|authorization))(\\?["']?)\s*[=:]\s*(?:\\"(?:[^\\]|\\+(?![\\"])|\\{2,}")*\\"|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s;,&]+)/gi, '$1$2=[ukryto]')
     .replace(/[^\s@;,]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[ukryto]')
     .replace(/(https?:\/\/\S*?)\?\S*/gi, '$1?[ukryto]')
     .replace(/[A-Za-z0-9_-]{24,}/g, '[ukryto]')
