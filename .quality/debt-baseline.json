@@ -182,15 +182,6 @@
       "lines": 59,
       "complexity": 20
     },
-    "src::recordImportRunLocked_": {
-      "hash": "3560aca1d079b07e6d6d590f5cb71eb6a1572285",
-      "lines": 59,
-      "complexity": 14
-    },
-    "src::recordJobRunLocked_": {
-      "hash": "0b91ea4a9deedde667afa782a6675d566d8d97cc",
-      "lines": 47
-    },
     "src::refreshRecrawlQueue_": {
       "hash": "612ca70edfaf55c42a88c71ba07a0d76069e2a39",
       "lines": 76
@@ -350,7 +341,7 @@
       "fileLines": 929
     },
     "src/Status.gs": {
-      "fileLines": 678
+      "fileLines": 624
     },
     "src/WordPress.gs": {
       "fileLines": 1484
